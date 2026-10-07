@@ -31,7 +31,7 @@ jobs:
         run: npm run build
 
       - name: Build exe Application
-        run: npm run desktop:pack
+        run: npm run desktop:build
       - name: Locate Output Executables
         run: Get-ChildItem -Path . -Filter *.exe -Recurse | Select-Object FullName
       - name: Determine Tag Name for Release
@@ -54,6 +54,6 @@ jobs:
           fail_on_unmatched_files: true
           # 請根據你的 electron-builder 輸出路徑調整（通常為 dist/ 或 release/）
           files: |
-            electron/*.exe
-            electron/*.blockmap
-            electron/latest.yml
+            dist-electron/*.exe
+            dist-electron/*.blockmap
+            dist-electron/latest.yml
