@@ -55,4 +55,3 @@ jobs:
           # 請根據你的 electron-builder 輸出路徑調整（通常為 dist/ 或 release/）
           files: |
             dist-electron/*.exe
-            dist-electron/latest.yml
