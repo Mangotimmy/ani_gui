@@ -316,7 +316,7 @@ function isNewerVersion(latest, current) {
  */
 export async function checkAppUpdate() {
   const currentVersion = APP_VERSION;
-  const repo = process.env.ANIFLIX_GITHUB_REPO || 'Atszl/aniflix';
+  const repo = process.env.ANIFLIX_GITHUB_REPO || 'Mangotimmy/ani_gui';
   
   try {
     const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {

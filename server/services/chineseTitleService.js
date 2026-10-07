@@ -195,7 +195,7 @@ async function resolveInBackground(anime) {
   try {
     const url = `https://api.bgm.tv/search/subject/${encodeURIComponent(searchTarget)}?type=2&responseGroup=small`;
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'AniFlix/2.0 (contact: github.com/Atszl/aniflix)' }
+      headers: { 'User-Agent': 'AniFlix/2.0 (contact: https://github.com/Mangotimmy/ani_gui)' }
     });
     if (res.ok) {
       const data = await res.json();
