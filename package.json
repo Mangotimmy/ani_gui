@@ -5,6 +5,10 @@
   "description": "Netflix-style GUI and Batch Downloader for ani-cli",
   "author": "AniFlix Team",
   "main": "electron/main.cjs",
+  "overrides": {
+    "tar": ">=7.5.21",
+    "sprintf-js": "^1.1.3"
+  },
   "scripts": {
     "dev:server": "node server/index.js",
     "dev:client": "vite",
@@ -68,7 +72,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
+    "@vitejs/plugin-react": "^6.1.2",
     "autoprefixer": "^10.4.19",
     "concurrently": "^8.2.2",
     "electron": "^44.7.0",
