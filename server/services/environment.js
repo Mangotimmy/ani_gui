@@ -293,7 +293,7 @@ Write-Host ">>> All plugins updated!"
   });
 }
 
-export const APP_VERSION = '2.0.0';
+export const APP_VERSION = '2.0.4';
 
 function parseVersion(vStr) {
   if (!vStr) return [0, 0, 0];
