@@ -27,6 +27,9 @@ jobs:
       - name: Build Web Application
         run: npm run build
 
+      - name: Build exe Application
+        run: npm run desktop:pack 
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
