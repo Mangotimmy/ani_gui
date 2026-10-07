@@ -321,7 +321,7 @@ export async function checkAppUpdate() {
   try {
     const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
       headers: { 
-        'User-Agent': 'AniFlix-Desktop/2.0.0',
+        'User-Agent': 'AniFlix-Desktop/2.0.4',
         'Accept': 'application/vnd.github.v3+json'
       }
     });

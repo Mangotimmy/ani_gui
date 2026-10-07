@@ -76,7 +76,7 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
-            echo "TAG_NAME=v2.0.0-build-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+            echo "TAG_NAME=v2.0.4-build-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
           fi
 
       - name: Publish GitHub Release
