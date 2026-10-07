@@ -17,10 +17,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Use Node.js 20.x
+      - name: Use Node.js 22.x
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
+          node-version: 22.x
           cache: 'npm'
 
       - name: Install Dependencies
@@ -31,7 +31,8 @@ jobs:
 
       - name: Build exe Application
         run: npm run desktop:pack
-
+      - name: Locate Output Executables
+        run: Get-ChildItem -Path . -Filter *.exe -Recurse | Select-Object FullName
       - name: Determine Tag Name for Release
         id: get_tag
         shell: bash
