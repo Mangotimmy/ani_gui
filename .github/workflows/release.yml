@@ -43,12 +43,14 @@ jobs:
         uses: actions/download-artifact@v8.0.2  
         with:
            path: downloaded_artifacts
-      - name: Create Release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.get_tag.outputs.TAG_NAME }}
           generate_release_notes: true
           draft: false
           prerelease: false
+          prerelease: ${{ contains(steps.get_tag.outputs.TAG_NAME, 'build') || contains(steps.get_tag.outputs.TAG_NAME, 'beta') || contains(steps.get_tag.outputs.TAG_NAME, 'rc') }}
           
       
        
