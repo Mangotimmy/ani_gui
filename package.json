@@ -26,8 +26,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "你的GitHub帳號或組織名",
-      "repo": "你的Repository名稱",
+      "owner": "Mangotimmy",
+      "repo": "ani_gui",
       "releaseType": "release"
     },
     "files": [
