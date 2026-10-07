@@ -1,9 +1,9 @@
 {
   "name": "aniflix",
-  "version": "2.0.2",
+  "version": "2.0.4",
   "type": "module",
   "description": "Netflix-style GUI and Batch Downloader for ani-cli",
-  "author": "AniFlix Team",
+  "author": "AniFlix Team<aniflix@gmail.com>",
   "main": "electron/main.cjs",
   "overrides": {
     "tar": ">=7.5.21",
