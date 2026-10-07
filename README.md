@@ -9,10 +9,10 @@
 [![Multi-Platform](https://img.shields.io/badge/Platforms-Web%20|%20iOS%20|%20iPadOS%20|%20Android%20|%20Windows%20|%20NAS-blueviolet?style=for-the-badge)](https://github.com/Atszl/aniflix)
 
 <p align="center">
-  <b>A Cinematic Netflix-Style Web & Desktop Anime Streaming Hub, Batch Downloader & NAS Media Server</b><br>
-  Netflix 風格影院級動漫串流平台 • 批次下載器 • Synology NAS / Docker 私有雲伺服器
+  <b>A Cinematic streaming platform Web & Desktop Anime Streaming Hub, Batch Downloader & NAS Media Server</b><br>
+  streaming platform 風格影院級動漫串流平台 • 批次下載器 • Synology NAS / Docker 私有雲伺服器
 </p>
-
+platform 
 [English](#-english) | [繁體中文](#-繁體中文) | [Docker NAS Deployment](#-docker--nas-deployment) | [API & Tech Specs](#-technical-architecture)
 
 </div>
@@ -21,7 +21,7 @@
 
 ## 🌟 Highlights & Features / 核心特色
 
-### 📺 1. Netflix-Style Streaming Experience
+### 📺 1. straming platform-Style Streaming Experience
 - **Cinematic Hero Spotlight**: High-definition backdrop art, ratings, synopsis, and instant play controls.
 - **Dynamic Year & Seasonal Catalog**: Real-time browsing for **2026, 2027, 2028+** and historical archives down to 1970.
 - **9 Auto-Filtered Carousels**: *Trending Now*, *This Season*, *Top Rated*, *Recommendations*, *Favorites*, *Continue Watching*, *Action*, *Fantasy*, and *Upcoming*.
