@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  aniflix:
+    image: ghcr.io/atszl/aniflix:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aniflix
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - TZ=Asia/Taipei
+      - ANIFLIX_DATA_DIR=/data
+      - ANIFLIX_DOWNLOADS_DIR=/downloads
+    volumes:
+      - ./data:/data
+      - ./downloads:/downloads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/trending"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1024M

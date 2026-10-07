@@ -1,0 +1,58 @@
+{
+  "name": "aniflix",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Netflix-style GUI and Batch Downloader for ani-cli",
+  "author": "AniFlix Team",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev:server": "node server/index.js",
+    "dev:client": "vite",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "desktop:start": "electron electron/main.cjs",
+    "desktop:pack": "npm run build && electron-builder --win dir",
+    "desktop:build": "npm run build && electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.aniflix.desktop",
+    "productName": "AniFlix",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "server/**/*",
+      "electron/**/*",
+      "build/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "dir",
+        "portable"
+      ]
+    }
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "hls.js": "^1.5.14",
+    "lucide-react": "^0.395.0",
+    "opencc-js": "^1.4.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "electron": "^28.3.3",
+    "electron-builder": "^26.15.3",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.3.1"
+  }
+}
