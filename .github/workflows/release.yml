@@ -51,6 +51,7 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+          fail_on_unmatched_files: true
           # 請根據你的 electron-builder 輸出路徑調整（通常為 dist/ 或 release/）
           files: |
             electron/*.exe
