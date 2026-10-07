@@ -48,8 +48,6 @@ jobs:
         run: npm run desktop:build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build Application
-        run: npm run desktop:build
 
       - name: Upload Platform Artifacts
         uses: actions/upload-artifact@v4
