@@ -1,8 +1,7 @@
-name: Release Builder
+name: Cross-Platform Release Builder
 
 on:
   push:
-    branches: [ main, master ]
     tags:
       - 'v*'
   workflow_dispatch:
@@ -11,8 +10,19 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: windows-latest
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+          - os: macos-latest
+            platform: mac
+          - os: ubuntu-latest
+            platform: linux
 
     steps:
       - name: Checkout Repository
@@ -24,19 +34,44 @@ jobs:
           node-version: 22.x
           cache: 'npm'
 
+      - name: Install Linux Build Tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools
+
       - name: Install Dependencies
         run: npm ci
 
-      - name: Build Web Application
-        run: npm run build
-
-      - name: Build exe Application
+      - name: Build Application
         run: npm run desktop:build
-      - name: Locate Output Executables
-        run: Get-ChildItem -Path . -Filter *.exe -Recurse | Select-Object FullName
+
+      - name: Upload Platform Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.platform }}
+          path: |
+            dist-electron/*.exe
+            dist-electron/*.dmg
+            dist-electron/*.zip
+            dist-electron/*.AppImage
+            dist-electron/*.deb
+          if-no-files-found: warn
+
+  publish:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-assets
+          pattern: release-assets-*
+          merge-multiple: true
+
       - name: Determine Tag Name for Release
         id: get_tag
-        shell: bash
         run: |
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_OUTPUT
@@ -52,6 +87,4 @@ jobs:
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
-          # 請根據你的 electron-builder 輸出路徑調整（通常為 dist/ 或 release/）
-          files: |
-            dist-electron/*.exe
+          files: all-assets/*

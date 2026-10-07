@@ -12,8 +12,7 @@
     "start": "node server/index.js",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "desktop:start": "electron electron/main.cjs",
-    "desktop:pack": "npm run build && electron-builder --win dir",
-    "desktop:build": "npm run build && electron-builder --win portable"
+    "desktop:build": "npm run build && electron-builder"
   },
   "build": {
     "appId": "com.aniflix.desktop",
@@ -31,8 +30,24 @@
     "win": {
       "icon": "build/icon.ico",
       "target": [
-        "dir",
+        "nsis",
         "portable"
+      ]
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.video",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Video",
+      "target": [
+        "AppImage",
+        "deb"
       ]
     }
   },
