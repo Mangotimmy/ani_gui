@@ -43,6 +43,15 @@ jobs:
         uses: actions/download-artifact@v8.0.2  
         with:
            path: downloaded_artifacts
+      - name: Determine Tag Name for Release
+        id: get_tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+          # Fallback for manual workflow_dispatch runs
+             echo "TAG_NAME=v1.3.0-build-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+          fi
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
