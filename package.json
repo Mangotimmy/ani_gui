@@ -20,6 +20,12 @@
     "directories": {
       "output": "dist-electron"
     },
+    "publish": {
+      "provider": "github",
+      "owner": "你的GitHub帳號或組織名",
+      "repo": "你的Repository名稱",
+      "releaseType": "release"
+    },
     "files": [
       "dist/**/*",
       "server/**/*",
@@ -53,6 +59,7 @@
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "electron-updater": "^6.8.9",
     "express": "^4.19.2",
     "hls.js": "^1.5.14",
     "lucide-react": "^0.395.0",
