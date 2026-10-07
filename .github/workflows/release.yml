@@ -24,6 +24,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 關鍵：拉取完整 Git 歷史與 Tags，避免 Windows 誤判
 
       - name: Use Node.js 22.x
         uses: actions/setup-node@v4
@@ -40,8 +42,8 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      # 由 electron-builder 原生完成多平台構建與 Release 發布
+      # 關鍵：傳入 --publish always 強制執行上傳
       - name: Build & Publish Application
-        run: npm run desktop:build
+        run: npm run desktop:build -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
