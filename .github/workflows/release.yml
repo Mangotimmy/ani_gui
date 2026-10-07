@@ -50,7 +50,7 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-          prerelease: ${{ contains(steps.get_tag.outputs.TAG_NAME, 'build') || contains(steps.get_tag.outputs.TAG_NAME, 'beta') || contains(steps.get_tag.outputs.TAG_NAME, 'rc') }}
+      
           
       
        
