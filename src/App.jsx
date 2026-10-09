@@ -9,7 +9,9 @@ import VideoPlayer from './components/VideoPlayer';
 import DownloadManager from './components/DownloadManager';
 import SettingsModal from './components/SettingsModal';
 import SetupWizardModal from './components/SetupWizardModal';
+import DownloadedFilesModal from './components/DownloadedFilesModal';
 import AnimeCard from './components/AnimeCard';
+import { getPlatformInfo } from './utils/platform';
 import { 
   Flame, Star, Trophy, Swords, Sparkles, Loader2, 
   Search, Heart, Calendar, History, Trash2, Clock, Play,
@@ -141,6 +143,7 @@ export default function App() {
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSetupWizardOpen, setIsSetupWizardOpen] = useState(false);
+  const [isDownloadedFilesOpen, setIsDownloadedFilesOpen] = useState(false);
 
   // Downloader Real-Time State (SSE)
   const [downloadTasks, setDownloadTasks] = useState([]);
@@ -513,10 +516,45 @@ export default function App() {
   };
 
   const handleOpenFolder = async (folderPath) => {
-    await fetch('/api/downloads/open-folder', { 
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(folderPath ? { folderPath } : {})
+    const platform = getPlatformInfo();
+    const cleanPath = typeof folderPath === 'string' && folderPath.trim() ? folderPath.trim() : null;
+
+    // On mobile devices (iOS / Android) or remote web browser, launch the in-app DownloadedFilesModal
+    if (platform.isMobile || !platform.isLocalhost) {
+      setIsDownloadedFilesOpen(true);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/downloads/open-folder', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cleanPath ? { folderPath: cleanPath } : {})
+      });
+      const data = await res.json();
+      if (data.mode === 'web') {
+        setIsDownloadedFilesOpen(true);
+      }
+    } catch {
+      setIsDownloadedFilesOpen(true);
+    }
+  };
+
+  const handlePlayDownloadedFile = (fileInfo) => {
+    setActivePlayer({
+      anime: {
+        id: `local_${Date.now()}`,
+        title: {
+          english: fileInfo.title,
+          romaji: fileInfo.title,
+          native: fileInfo.title
+        },
+        episodes: 1,
+        isLocal: true
+      },
+      episode: 1,
+      audioMode: 'sub',
+      directStreamUrl: fileInfo.streamUrl
     });
   };
 
@@ -1148,6 +1186,7 @@ export default function App() {
           anime={activePlayer.anime}
           episode={activePlayer.episode}
           audioMode={activePlayer.audioMode}
+          directStreamUrl={activePlayer.directStreamUrl}
           totalEpisodes={activePlayer.anime?.episodes}
           onClose={() => setActivePlayer(null)}
           onSelectEpisode={(ep) => setActivePlayer(prev => ({ ...prev, episode: ep }))}
@@ -1170,6 +1209,7 @@ export default function App() {
         onCancelTask={handleCancelTask}
         onClearCompleted={handleClearCompleted}
         onOpenFolder={handleOpenFolder}
+        onOpenDownloadedFiles={() => setIsDownloadedFilesOpen(true)}
       />
 
       {/* Settings & Plugins Modal */}
@@ -1179,11 +1219,21 @@ export default function App() {
         currentDir={downloadDir}
         onSaveSettings={handleSaveSettings}
         onOpenFolder={handleOpenFolder}
+        onOpenDownloadedFiles={() => setIsDownloadedFilesOpen(true)}
         hideR18={hideR18}
         onToggleHideR18={handleToggleHideR18}
         currentLang={currentLang}
         gpuSettings={gpuSettings}
         onUpdateGpuSettings={handleSaveSettings}
+      />
+
+      {/* Downloaded Anime Files Browser Modal (Mobile & Web) */}
+      <DownloadedFilesModal
+        isOpen={isDownloadedFilesOpen}
+        onClose={() => setIsDownloadedFilesOpen(false)}
+        onPlayFile={handlePlayDownloadedFile}
+        currentLang={currentLang}
+        t={t}
       />
 
       {/* First-Run Environment Setup Wizard */}

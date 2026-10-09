@@ -25,7 +25,8 @@ import {
   getEnvironmentStatus, 
   installAllPlugins, 
   updateAllPlugins, 
-  checkAppUpdate 
+  checkAppUpdate,
+  isContainerEnvironment 
 } from './services/environment.js';
 import { computeRecommendations } from './services/recommendation.js';
 import { findLocalSubtitles, assToVtt, srtToVtt } from './services/localSubtitleService.js';
@@ -412,10 +413,170 @@ app.post('/api/downloads/clear', (req, res) => {
 });
 
 app.post('/api/downloads/open-folder', (req, res) => {
-  const { folderPath } = req.body || {};
-  const target = folderPath || downloadManager.downloadDir;
-  const result = openFolder(target);
-  res.json(result);
+  let { folderPath } = req.body || {};
+  if (typeof folderPath !== 'string' || !folderPath.trim()) {
+    folderPath = downloadManager.downloadDir;
+  }
+  const result = openFolder(folderPath);
+  res.json({
+    ...result,
+    folderPath,
+    isContainer: isContainerEnvironment()
+  });
+});
+
+// List all downloaded media files for In-App Mobile / Web Downloads Explorer
+app.get('/api/downloads/files', (req, res) => {
+  try {
+    const baseDir = downloadManager.downloadDir;
+    if (!fs.existsSync(baseDir)) {
+      return res.json({ success: true, baseDir, files: [] });
+    }
+
+    const files = [];
+    const scanDir = (dir, relPrefix = '') => {
+      const items = fs.readdirSync(dir, { withFileTypes: true });
+      for (const item of items) {
+        const fullPath = path.join(dir, item.name);
+        const relPath = relPrefix ? `${relPrefix}/${item.name}` : item.name;
+
+        if (item.isDirectory()) {
+          scanDir(fullPath, relPath);
+        } else if (item.isFile() && /\.(mp4|mkv|webm|avi|mov)$/i.test(item.name)) {
+          const stats = fs.statSync(fullPath);
+          const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
+          const sizeGB = (stats.size / (1024 * 1024 * 1024)).toFixed(2);
+          const sizeFormatted = stats.size > 1024 * 1024 * 1024 ? `${sizeGB} GB` : `${sizeMB} MB`;
+
+          files.push({
+            name: item.name,
+            folder: relPrefix || 'Downloads',
+            relativePath: relPath,
+            sizeBytes: stats.size,
+            sizeFormatted,
+            modifiedAt: stats.mtimeMs,
+            streamUrl: `/api/downloads/stream?path=${encodeURIComponent(relPath)}`,
+            downloadUrl: `/api/downloads/file?path=${encodeURIComponent(relPath)}`
+          });
+        }
+      }
+    };
+
+    scanDir(baseDir);
+    // Sort newest modified first
+    files.sort((a, b) => b.modifiedAt - a.modifiedAt);
+    res.json({ success: true, baseDir, files, count: files.length });
+  } catch (err) {
+    console.error('Failed to list downloaded files:', err);
+    res.status(500).json({ success: false, error: err.message, files: [] });
+  }
+});
+
+// Stream downloaded video with HTTP 206 Range support (required for iOS Safari and mobile Chrome)
+app.get('/api/downloads/stream', (req, res) => {
+  try {
+    const relPath = req.query.path;
+    if (!relPath || typeof relPath !== 'string') {
+      return res.status(400).send('Missing path parameter');
+    }
+
+    const safeRel = path.normalize(relPath).replace(/^(\.\.[\/\\])+/, '');
+    const fullPath = path.join(downloadManager.downloadDir, safeRel);
+
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).send('Video file not found');
+    }
+
+    const stat = fs.statSync(fullPath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    const ext = path.extname(fullPath).toLowerCase();
+    const contentType = ext === '.mp4' ? 'video/mp4' : ext === '.mkv' ? 'video/x-matroska' : ext === '.webm' ? 'video/webm' : 'video/mp4';
+
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+      if (start >= fileSize || end >= fileSize) {
+        res.status(416).set('Content-Range', `bytes */${fileSize}`).end();
+        return;
+      }
+
+      const chunkSize = (end - start) + 1;
+      const fileStream = fs.createReadStream(fullPath, { start, end });
+
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': contentType,
+      });
+      fileStream.pipe(res);
+    } else {
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+      });
+      fs.createReadStream(fullPath).pipe(res);
+    }
+  } catch (err) {
+    console.error('Error streaming download:', err);
+    res.status(500).send('Stream error');
+  }
+});
+
+// Direct file download or deletion
+app.get('/api/downloads/file', (req, res) => {
+  try {
+    const relPath = req.query.path;
+    if (!relPath) return res.status(400).send('Missing path parameter');
+    const safeRel = path.normalize(relPath).replace(/^(\.\.[\/\\])+/, '');
+    const fullPath = path.join(downloadManager.downloadDir, safeRel);
+    if (!fs.existsSync(fullPath)) return res.status(404).send('File not found');
+    res.download(fullPath);
+  } catch (err) {
+    res.status(500).send('Download error');
+  }
+});
+
+app.delete('/api/downloads/file', (req, res) => {
+  try {
+    const relPath = req.query.path;
+    if (!relPath) return res.status(400).json({ success: false, error: 'Missing path' });
+    const safeRel = path.normalize(relPath).replace(/^(\.\.[\/\\])+/, '');
+    const fullPath = path.join(downloadManager.downloadDir, safeRel);
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath);
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ success: false, error: 'File not found' });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// System Information Route
+app.get('/api/system/info', (req, res) => {
+  try {
+    const isContainer = isContainerEnvironment();
+    res.json({
+      success: true,
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.version,
+      uptime: Math.floor(process.uptime()),
+      memory: process.memoryUsage(),
+      downloadDir: downloadManager.downloadDir,
+      isContainer,
+      containerType: isContainer ? (fs.existsSync('/etc/alpine-release') ? 'Linux Alpine' : 'Linux Container') : null
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.get('/api/settings', (req, res) => {

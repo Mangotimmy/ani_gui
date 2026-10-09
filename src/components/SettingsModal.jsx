@@ -232,6 +232,7 @@ export default function SettingsModal({
   currentDir, 
   onSaveSettings, 
   onOpenFolder,
+  onOpenDownloadedFiles,
   hideR18 = true,
   onToggleHideR18,
   currentLang = 'zh-TW',
@@ -458,14 +459,14 @@ export default function SettingsModal({
       onClick={onClose}
     >
       <div 
-        className="w-full max-w-2xl bg-[#181818] rounded-2xl border border-zinc-800 shadow-2xl p-6 text-zinc-100 animate-in fade-in zoom-in-95 cursor-default"
+        className="w-full max-w-2xl bg-[#181818] rounded-3xl border border-zinc-800 shadow-2xl p-4 sm:p-6 text-zinc-100 animate-in fade-in zoom-in-95 cursor-default max-h-[92vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
+        <div className="flex items-center justify-between pb-3 sm:pb-4 border-b border-zinc-800 shrink-0">
           <div className="flex items-center gap-2.5">
             <Settings className="w-5 h-5 text-[#E50914]" />
-            <h3 className="text-lg font-bold text-white">{txt.title}</h3>
+            <h3 className="text-base sm:text-lg font-bold text-white">{txt.title}</h3>
           </div>
           <button 
             onClick={onClose} 
@@ -475,11 +476,11 @@ export default function SettingsModal({
           </button>
         </div>
 
-        {/* Tab Selection */}
-        <div className="flex items-center gap-2 mt-4 border-b border-zinc-800 pb-3">
+        {/* Tab Selection (Horizontally scrollable on mobile) */}
+        <div className="flex items-center gap-1.5 sm:gap-2 mt-3 sm:mt-4 border-b border-zinc-800 pb-3 overflow-x-auto no-scrollbar scroll-smooth flex-nowrap shrink-0">
           <button
             onClick={() => setActiveTab('content')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 whitespace-nowrap ${
               activeTab === 'content'
                 ? 'bg-[#E50914] text-white shadow-md shadow-red-600/30'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -491,7 +492,7 @@ export default function SettingsModal({
 
           <button
             onClick={() => setActiveTab('gpu')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 whitespace-nowrap ${
               activeTab === 'gpu'
                 ? 'bg-[#E50914] text-white shadow-md shadow-red-600/30'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -503,7 +504,7 @@ export default function SettingsModal({
 
           <button
             onClick={() => setActiveTab('plugins')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 whitespace-nowrap ${
               activeTab === 'plugins'
                 ? 'bg-[#E50914] text-white shadow-md shadow-red-600/30'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -515,7 +516,7 @@ export default function SettingsModal({
 
           <button
             onClick={() => setActiveTab('downloads')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 whitespace-nowrap ${
               activeTab === 'downloads'
                 ? 'bg-[#E50914] text-white shadow-md shadow-red-600/30'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -527,7 +528,7 @@ export default function SettingsModal({
 
           <button
             onClick={() => setActiveTab('backup')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 whitespace-nowrap ${
               activeTab === 'backup'
                 ? 'bg-[#E50914] text-white shadow-md shadow-red-600/30'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -537,6 +538,9 @@ export default function SettingsModal({
             <span>{txt.tabBackup}</span>
           </button>
         </div>
+
+        {/* Scrollable Tab Body Area */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 mt-2">
 
         {/* Tab 0: Content & Safety Preferences */}
         {activeTab === 'content' && (
@@ -855,6 +859,21 @@ export default function SettingsModal({
               </div>
             </div>
 
+            {/* Docker Container Status Banner */}
+            {envStatus?.isContainer && (
+              <div className="bg-sky-950/40 border border-sky-600/50 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold text-base shrink-0">
+                    🐳
+                  </div>
+                  <div>
+                    <span className="font-bold text-sky-300 block">Docker 容器環境化運行 ({envStatus.containerType || 'Linux Alpine / Synology NAS'})</span>
+                    <p className="text-[11px] text-zinc-300 mt-0.5">影音解碼組件 (ffmpeg, yt-dlp, aria2) 均已由 Docker 容器內置就緒，無需另行安裝。</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Plugin Cards Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {envStatus?.tools && Object.values(envStatus.tools).map((tool) => (
@@ -987,22 +1006,38 @@ export default function SettingsModal({
               <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
                 {txt.saveDir}
               </label>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   type="text"
                   value={downloadDir}
                   onChange={(e) => setDownloadDir(e.target.value)}
-                  placeholder="C:\Users\...\Downloads\Anime"
-                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-[#E50914]"
+                  placeholder="C:\Users\...\Downloads\Anime 或 /downloads"
+                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-[#E50914] shadow-inner"
                 />
                 <button
                   type="button"
-                  onClick={onOpenFolder}
-                  className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-semibold text-zinc-200 border border-zinc-700 flex items-center gap-1.5"
+                  onClick={() => onOpenFolder && onOpenFolder(downloadDir)}
+                  className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-xl text-xs font-semibold text-zinc-200 border border-zinc-700 flex items-center justify-center gap-2 shrink-0 transition-colors"
                   title={txt.openFolder}
                 >
                   <Folder className="w-4 h-4 text-amber-400" />
                   <span>{txt.openFolder}</span>
+                </button>
+              </div>
+
+              {/* In-App Mobile & Web Download File Manager Helper */}
+              <div className="mt-3.5 p-3.5 bg-zinc-900/60 border border-zinc-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                <div className="text-zinc-400">
+                  <span className="text-zinc-200 font-bold block mb-0.5">行動裝置 / 網頁下載檔案管理</span>
+                  <span className="text-[11px] text-zinc-400">在 iOS / Android 或 Docker 網頁環境免接傳輸線，直接瀏覽、串流播放或保存已下載檔案。</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onOpenDownloadedFiles && onOpenDownloadedFiles()}
+                  className="px-3.5 py-2 bg-[#E50914]/20 hover:bg-[#E50914] text-[#E50914] hover:text-white border border-red-500/40 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center justify-center gap-1.5 shadow-sm"
+                >
+                  <Folder className="w-3.5 h-3.5" />
+                  <span>瀏覽已下載影片</span>
                 </button>
               </div>
             </div>
@@ -1115,6 +1150,7 @@ export default function SettingsModal({
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* Terminal Live Output Modal */}

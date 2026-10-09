@@ -3,9 +3,7 @@ name: Cross-Platform Release Builder
 on:
   push:
     branches: [ main, master ]
-    tags:
-      - 'v*'
-  workflow_dispatch:
+    tags: [ 'v*' ]
 
 permissions:
   contents: write
