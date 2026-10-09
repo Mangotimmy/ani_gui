@@ -293,7 +293,7 @@ Write-Host ">>> All plugins updated!"
   });
 }
 
-export const APP_VERSION = '2.0.0';
+export const APP_VERSION = '2.0.4';
 
 function parseVersion(vStr) {
   if (!vStr) return [0, 0, 0];
@@ -316,12 +316,12 @@ function isNewerVersion(latest, current) {
  */
 export async function checkAppUpdate() {
   const currentVersion = APP_VERSION;
-  const repo = process.env.ANIFLIX_GITHUB_REPO || 'Atszl/aniflix';
+  const repo = process.env.ANIFLIX_GITHUB_REPO || 'Mangotimmy/ani_gui';
   
   try {
     const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
       headers: { 
-        'User-Agent': 'AniFlix-Desktop/2.0.0',
+        'User-Agent': 'AniFlix-Desktop/2.0.4',
         'Accept': 'application/vnd.github.v3+json'
       }
     });

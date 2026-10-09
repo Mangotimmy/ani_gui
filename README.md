@@ -65,7 +65,7 @@ version: '3.8'
 
 services:
   aniflix:
-    image: ghcr.io/atszl/aniflix:latest
+    image: ghcr.io/Mangotimmy/ani_gui:latest
     container_name: aniflix
     restart: unless-stopped
     ports:

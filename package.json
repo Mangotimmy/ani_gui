@@ -1,10 +1,14 @@
 {
   "name": "aniflix",
-  "version": "2.0.0",
+  "version": "2.0.6",
   "type": "module",
   "description": "Netflix-style GUI and Batch Downloader for ani-cli",
-  "author": "AniFlix Team",
+  "author": "AniFlix Team<aniflix@gmail.com>",
   "main": "electron/main.cjs",
+  "overrides": {
+    "tar": ">=7.5.21",
+    "sprintf-js": "^1.1.3"
+  },
   "scripts": {
     "dev:server": "node server/index.js",
     "dev:client": "vite",
@@ -12,14 +16,19 @@
     "start": "node server/index.js",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "desktop:start": "electron electron/main.cjs",
-    "desktop:pack": "npm run build && electron-builder --win dir",
-    "desktop:build": "npm run build && electron-builder --win portable"
+    "desktop:build": "npm run build && electron-builder --publish always"
   },
   "build": {
     "appId": "com.aniflix.desktop",
     "productName": "AniFlix",
     "directories": {
       "output": "dist-electron"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Mangotimmy",
+      "repo": "ani_gui",
+      "releaseType": "release"
     },
     "files": [
       "dist/**/*",
@@ -31,13 +40,30 @@
     "win": {
       "icon": "build/icon.ico",
       "target": [
-        "dir",
+        "nsis",
         "portable"
+      ]
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.video",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Video",
+      "target": [
+        "AppImage",
+        "deb"
       ]
     }
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "electron-updater": "^6.8.9",
     "express": "^4.19.2",
     "hls.js": "^1.5.14",
     "lucide-react": "^0.395.0",
@@ -52,7 +78,7 @@
     "electron": "^28.3.3",
     "electron-builder": "^26.15.3",
     "postcss": "^8.4.38",
-    "tailwindcss": "^3.4.4",
-    "vite": "^5.3.1"
+    "tailwindcss": "~3.4.17",
+    "vite": "~5.4.14"
   }
 }
