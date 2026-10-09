@@ -58,18 +58,50 @@ export function launchMpv({ streamUrl, title, subtitleUrl, referer, profile = 'i
 
 export function openFolder(folderPath) {
   try {
-    if (!fs.existsSync(folderPath)) {
-      fs.mkdirSync(folderPath, { recursive: true });
+    const target = typeof folderPath === 'string' && folderPath.trim() 
+      ? folderPath.trim() 
+      : null;
+
+    if (!target) {
+      return { success: false, error: 'Invalid folder path provided' };
     }
-    const child = spawn('explorer.exe', [folderPath], {
+
+    if (!fs.existsSync(target)) {
+      fs.mkdirSync(target, { recursive: true });
+    }
+
+    // Check platform / headless environment
+    const platform = process.platform;
+    const isHeadless = Boolean(process.env.DOCKER_CONTAINER || process.env.ANIFLIX_CONTAINER || fs.existsSync('/.dockerenv'));
+
+    if (isHeadless) {
+      // In Docker or headless container, desktop file managers don't exist
+      return { success: true, mode: 'web', message: 'Running in container, fallback to web downloads view' };
+    }
+
+    let command = '';
+    let args = [];
+
+    if (platform === 'win32') {
+      command = 'explorer.exe';
+      args = [target];
+    } else if (platform === 'darwin') {
+      command = 'open';
+      args = [target];
+    } else {
+      command = 'xdg-open';
+      args = [target];
+    }
+
+    const child = spawn(command, args, {
       detached: true,
       stdio: 'ignore'
     });
     child.unref();
-    return { success: true };
+    return { success: true, mode: 'desktop' };
   } catch (err) {
-    console.error('Failed to open explorer:', err);
-    return { success: false, error: err.message };
+    console.error('Failed to open folder:', err);
+    return { success: false, error: err.message, mode: 'web' };
   }
 }
 

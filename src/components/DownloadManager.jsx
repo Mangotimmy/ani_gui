@@ -11,7 +11,8 @@ export default function DownloadManager({
   downloadDir,
   onCancelTask, 
   onClearCompleted,
-  onOpenFolder 
+  onOpenFolder,
+  onOpenDownloadedFiles
 }) {
   if (!isOpen) return null;
 
@@ -45,9 +46,9 @@ export default function DownloadManager({
 
           <div className="flex items-center gap-1.5">
             <button
-              onClick={onOpenFolder}
-              className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors"
-              title="Open Anime Downloads Folder in Explorer"
+              onClick={() => onOpenFolder ? onOpenFolder(downloadDir) : onOpenDownloadedFiles?.()}
+              className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-amber-400 hover:text-amber-300 transition-colors"
+              title="瀏覽已下載影片 / Open Downloads Folder"
             >
               <Folder className="w-4 h-4" />
             </button>

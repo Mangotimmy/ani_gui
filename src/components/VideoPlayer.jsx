@@ -4,7 +4,8 @@ import {
   X, Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, 
   Maximize, Minimize, SkipBack, SkipForward, MonitorPlay, 
   Settings, Loader2, Copy, Check, Link2, ExternalLink, SlidersHorizontal,
-  Subtitles, Upload, FileUp, Tv, Smartphone, Zap, Sparkles
+  Subtitles, Upload, FileUp, Tv, Smartphone, Zap, Sparkles,
+  MoreVertical, Film
 } from 'lucide-react';
 import { getPlatformInfo, getExternalPlayerLinks } from '../utils/platform.js';
 
@@ -94,6 +95,7 @@ export default function VideoPlayer({
   anime, 
   episode = 1, 
   audioMode = 'sub',
+  directStreamUrl = '',
   onClose, 
   onNextEpisode, 
   onPrevEpisode,
@@ -164,6 +166,22 @@ export default function VideoPlayer({
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [debugStats, setDebugStats] = useState({});
   const debugIntervalRef = useRef(null);
+
+  // Touch screen gestures & Double-Tap ripple state
+  const [seekRipple, setSeekRipple] = useState(null); // { type, text, side }
+  const lastTapTimeRef = useRef(0);
+  const singleTapTimerRef = useRef(null);
+  const longPressTimerRef = useRef(null);
+
+  // Interactive scrubber with thumbnail preview & buffer tracking
+  const seekbarRef = useRef(null);
+  const previewVideoRef = useRef(null);
+  const [hoverTime, setHoverTime] = useState(null);
+  const [hoverPercent, setHoverPercent] = useState(0);
+  const [hoverPixelX, setHoverPixelX] = useState(0);
+  const [isHoveringSeekbar, setIsHoveringSeekbar] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [bufferedEnd, setBufferedEnd] = useState(0);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -279,6 +297,12 @@ export default function VideoPlayer({
     setCurrentQualityIndex(-1);
 
     async function loadStream() {
+      if (directStreamUrl) {
+        setStreamUrl(directStreamUrl);
+        setRawStreamUrl(directStreamUrl);
+        setIsBuffering(false);
+        return;
+      }
       try {
         const candidateTitles = [
           anime?.title?.romaji,
@@ -441,7 +465,7 @@ export default function VideoPlayer({
 
     loadStream();
     return () => { isCancelled = true; };
-  }, [anime, episode, audioMode, displayTitle, rawTitle, currentLang]);
+  }, [anime, episode, audioMode, displayTitle, rawTitle, currentLang, directStreamUrl]);
 
   // Load live uploaded episodes list
   useEffect(() => {
@@ -543,6 +567,19 @@ export default function VideoPlayer({
     const cur = video.currentTime;
     setCurrentTime(cur);
     setDuration(video.duration || 0);
+
+    // Track buffered range for seekbar
+    if (video.buffered && video.buffered.length > 0) {
+      try {
+        for (let i = 0; i < video.buffered.length; i++) {
+          if (video.buffered.start(i) <= cur && video.buffered.end(i) >= cur) {
+            setBufferedEnd(video.buffered.end(i));
+            break;
+          }
+        }
+      } catch {}
+    }
+
     if (cur > 5) {
       try {
         localStorage.setItem(progressKey, JSON.stringify({
@@ -838,23 +875,200 @@ export default function VideoPlayer({
     }
   };
 
-  const formatTime = (secs) => {
-    if (isNaN(secs)) return '00:00';
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+  // Touch Gestures: Single Tap (Controls), Double Tap (Seek Left/Right, Play/Pause), Long Press (Menu)
+  const handleTouchStart = (e) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const touchX = touch.clientX;
+    const touchY = touch.clientY;
+
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      setContextMenuPos({ x: touchX, y: touchY });
+      setShowContextMenu(true);
+    }, 550);
   };
+
+  const handleTouchMove = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleTouchEnd = (e) => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+
+    const now = Date.now();
+    const timeDiff = now - lastTapTimeRef.current;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const touch = e.changedTouches?.[0];
+    if (!touch) return;
+    const x = touch.clientX - rect.left;
+    const widthRatio = x / rect.width;
+
+    if (timeDiff < 300) {
+      // Double tap! Cancel single tap controls toggle
+      if (singleTapTimerRef.current) {
+        clearTimeout(singleTapTimerRef.current);
+        singleTapTimerRef.current = null;
+      }
+
+      if (widthRatio < 0.35) {
+        // Double tap left: Seek backward 10s
+        if (videoRef.current) {
+          videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+          setSeekRipple({ type: 'rewind', text: '-10s', side: 'left' });
+          setTimeout(() => setSeekRipple(null), 700);
+        }
+      } else if (widthRatio > 0.65) {
+        // Double tap right: Seek forward 10s
+        if (videoRef.current) {
+          videoRef.current.currentTime = Math.min(videoRef.current.duration || 1000, videoRef.current.currentTime + 10);
+          setSeekRipple({ type: 'forward', text: '+10s', side: 'right' });
+          setTimeout(() => setSeekRipple(null), 700);
+        }
+      } else {
+        // Double tap center: Toggle play/pause
+        togglePlay();
+        setSeekRipple({ type: isPlaying ? 'pause' : 'play', text: isPlaying ? '暫停' : '播放', side: 'center' });
+        setTimeout(() => setSeekRipple(null), 700);
+      }
+      lastTapTimeRef.current = 0;
+    } else {
+      // Single tap: toggle controls after 260ms delay
+      lastTapTimeRef.current = now;
+      if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current);
+      singleTapTimerRef.current = setTimeout(() => {
+        setShowControls(prev => !prev);
+        singleTapTimerRef.current = null;
+      }, 260);
+    }
+  };
+
+  // Interactive Scrubber & Thumbnail Preview handlers
+  const updateScrubberHover = (clientX) => {
+    if (!seekbarRef.current || !duration) return;
+    const rect = seekbarRef.current.getBoundingClientRect();
+    const clampedX = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    const percent = (clampedX / rect.width) * 100;
+    const targetTime = (clampedX / rect.width) * duration;
+
+    setHoverPercent(percent);
+    setHoverPixelX(clampedX);
+    setHoverTime(targetTime);
+
+    if (previewVideoRef.current && isFinite(targetTime)) {
+      try {
+        previewVideoRef.current.currentTime = targetTime;
+      } catch {}
+    }
+  };
+
+  const handleSeekbarMouseMove = (e) => {
+    setIsHoveringSeekbar(true);
+    updateScrubberHover(e.clientX);
+  };
+
+  const handleSeekbarMouseLeave = () => {
+    if (!isScrubbing) {
+      setIsHoveringSeekbar(false);
+      setHoverTime(null);
+    }
+  };
+
+  const handleSeekbarMouseDown = (e) => {
+    setIsScrubbing(true);
+    setIsHoveringSeekbar(true);
+    updateScrubberHover(e.clientX);
+    const rect = seekbarRef.current?.getBoundingClientRect();
+    if (rect && duration) {
+      const clampedX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      const targetTime = (clampedX / rect.width) * duration;
+      if (videoRef.current) {
+        videoRef.current.currentTime = targetTime;
+        setCurrentTime(targetTime);
+      }
+    }
+  };
+
+  const handleSeekbarTouchStart = (e) => {
+    e.stopPropagation();
+    setIsScrubbing(true);
+    setIsHoveringSeekbar(true);
+    if (e.touches[0]) {
+      updateScrubberHover(e.touches[0].clientX);
+    }
+  };
+
+  const handleSeekbarTouchMove = (e) => {
+    e.stopPropagation();
+    if (e.touches[0]) {
+      updateScrubberHover(e.touches[0].clientX);
+      const rect = seekbarRef.current?.getBoundingClientRect();
+      if (rect && duration) {
+        const clampedX = Math.max(0, Math.min(e.touches[0].clientX - rect.left, rect.width));
+        const targetTime = (clampedX / rect.width) * duration;
+        if (videoRef.current) {
+          videoRef.current.currentTime = targetTime;
+          setCurrentTime(targetTime);
+        }
+      }
+    }
+  };
+
+  const handleSeekbarTouchEnd = (e) => {
+    e.stopPropagation();
+    setIsScrubbing(false);
+    setIsHoveringSeekbar(false);
+    setHoverTime(null);
+  };
+
+  useEffect(() => {
+    if (!isScrubbing) return;
+    const onMove = (e) => {
+      updateScrubberHover(e.clientX);
+      if (seekbarRef.current && duration) {
+        const rect = seekbarRef.current.getBoundingClientRect();
+        const clampedX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+        const targetTime = (clampedX / rect.width) * duration;
+        if (videoRef.current) {
+          videoRef.current.currentTime = targetTime;
+          setCurrentTime(targetTime);
+        }
+      }
+    };
+    const onUp = () => {
+      setIsScrubbing(false);
+      setIsHoveringSeekbar(false);
+      setHoverTime(null);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [isScrubbing, duration]);
 
   return (
     <div 
       ref={containerRef}
       onMouseMove={handleMouseMove}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       onContextMenu={(e) => {
         e.preventDefault();
         setContextMenuPos({ x: e.clientX, y: e.clientY });
         setShowContextMenu(true);
       }}
-      className="fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden"
+      className="fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden touch-manipulation"
     >
       {/* Video Element */}
       <video
@@ -883,6 +1097,26 @@ export default function VideoPlayer({
           />
         ))}
       </video>
+
+      {/* Touch Double-Tap Seek Ripple Overlay */}
+      {seekRipple && (
+        <div className={`absolute z-40 pointer-events-none flex items-center justify-center animate-in fade-in zoom-in-75 duration-200 ${
+          seekRipple.side === 'left' 
+            ? 'left-10 top-1/2 -translate-y-1/2' 
+            : seekRipple.side === 'right' 
+            ? 'right-10 top-1/2 -translate-y-1/2' 
+            : 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2'
+        }`}>
+          <div className="bg-black/85 border border-white/20 px-6 py-4 rounded-3xl backdrop-blur-xl flex flex-col items-center gap-1 shadow-2xl">
+            <span className="text-3xl font-black text-white">
+              {seekRipple.type === 'rewind' ? '⏪' : seekRipple.type === 'forward' ? '⏩' : seekRipple.type === 'pause' ? '⏸' : '▶️'}
+            </span>
+            <span className="text-xs font-mono font-bold text-red-400 tracking-wider">
+              {seekRipple.text}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ─── Right-Click Context Menu ─────────────────────────── */}
       {showContextMenu && (
@@ -1467,6 +1701,20 @@ export default function VideoPlayer({
               )}
             </div>
 
+            {/* Mobile / Touch Options Menu button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                setContextMenuPos({ x: rect.left, y: rect.bottom + 8 });
+                setShowContextMenu(prev => !prev);
+              }}
+              className="p-2 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 transition-colors shadow-lg"
+              title="播放器選項 / Player Options"
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+
             {/* Open in MPV Button (Available on local desktop) */}
             {platform.supportsLocalMpv && (
               <button
@@ -1486,20 +1734,81 @@ export default function VideoPlayer({
 
         {/* Bottom Control Bar */}
         <div className="p-4 sm:p-6 bg-gradient-to-t from-black/95 via-black/60 to-transparent">
-          {/* Seekbar */}
-          <div className="flex items-center gap-3 mb-3">
-            <span className="text-xs text-zinc-300 font-mono w-12 text-right">
+          {/* Interactive Custom Seekbar with Buffer & Live Thumbnail Tooltip */}
+          <div className="relative mb-3 flex items-center gap-3 select-none">
+            <span className="text-xs text-zinc-300 font-mono w-12 text-right shrink-0">
               {formatTime(currentTime)}
             </span>
-            <input
-              type="range"
-              min={0}
-              max={duration || 100}
-              value={currentTime}
-              onChange={handleSeek}
-              className="flex-1 h-1.5 bg-zinc-700 accent-[#E50914] rounded-lg cursor-pointer"
-            />
-            <span className="text-xs text-zinc-300 font-mono w-12">
+
+            <div 
+              ref={seekbarRef}
+              onMouseMove={handleSeekbarMouseMove}
+              onMouseLeave={handleSeekbarMouseLeave}
+              onMouseDown={handleSeekbarMouseDown}
+              onTouchStart={handleSeekbarTouchStart}
+              onTouchMove={handleSeekbarTouchMove}
+              onTouchEnd={handleSeekbarTouchEnd}
+              className="relative flex-1 h-7 flex items-center cursor-pointer group/seek touch-none"
+            >
+              {/* Floating Scrubber Preview Tooltip Bubble */}
+              {(isHoveringSeekbar || isScrubbing) && hoverTime !== null && (
+                <div 
+                  style={{ 
+                    left: `${Math.max(60, Math.min(hoverPixelX, (seekbarRef.current?.clientWidth || 300) - 60))}px`,
+                    transform: 'translateX(-50%)'
+                  }}
+                  className="absolute bottom-9 z-50 pointer-events-none flex flex-col items-center animate-in fade-in duration-100"
+                >
+                  <div className="bg-[#121216]/95 border border-zinc-700/80 rounded-2xl shadow-2xl p-1.5 backdrop-blur-xl flex flex-col items-center ring-1 ring-white/10">
+                    {/* Thumbnail Preview Card */}
+                    <div className="w-32 sm:w-36 h-20 bg-black rounded-xl overflow-hidden relative border border-zinc-800 flex items-center justify-center">
+                      <video
+                        ref={previewVideoRef}
+                        src={toPlayableUrl(streamUrl, referer)}
+                        muted
+                        playsInline
+                        preload="auto"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+                      <span className="absolute bottom-1 right-1.5 text-[9px] font-mono font-bold bg-black/75 px-1.5 py-0.2 rounded text-zinc-300">
+                        {Math.round(hoverPercent)}%
+                      </span>
+                    </div>
+
+                    {/* Timestamp Tooltip */}
+                    <div className="mt-1.5 px-2 py-0.5 rounded-md bg-zinc-800/90 text-white font-mono text-[11px] font-bold">
+                      {formatTime(hoverTime)}
+                    </div>
+                  </div>
+
+                  {/* Downward Arrow */}
+                  <div className="w-2.5 h-2.5 bg-[#121216] border-r border-b border-zinc-700 transform rotate-45 -mt-1.5" />
+                </div>
+              )}
+
+              {/* Track Background */}
+              <div className="w-full h-1.5 group-hover/seek:h-2.5 bg-zinc-700/80 rounded-full overflow-hidden transition-all relative">
+                {/* Buffered Range Bar */}
+                <div 
+                  style={{ width: `${duration ? (bufferedEnd / duration) * 100 : 0}%` }}
+                  className="absolute top-0 bottom-0 left-0 bg-white/30 transition-all duration-200"
+                />
+                {/* Played Progress Bar */}
+                <div 
+                  style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+                  className="absolute top-0 bottom-0 left-0 bg-[#E50914] transition-all"
+                />
+              </div>
+
+              {/* Scrubber Knob Thumb */}
+              <div 
+                style={{ left: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+                className="absolute -translate-x-1/2 w-3.5 h-3.5 group-hover/seek:w-4 group-hover/seek:h-4 bg-white rounded-full shadow-lg ring-2 ring-[#E50914] transition-transform pointer-events-none"
+              />
+            </div>
+
+            <span className="text-xs text-zinc-300 font-mono w-12 shrink-0">
               {formatTime(duration)}
             </span>
           </div>

@@ -13,43 +13,64 @@ const TOOLS = [
   { name: 'git', scoopSubdir: 'git', versionArg: '--version', critical: false }
 ];
 
+export const isContainerEnvironment = () => {
+  return (
+    fs.existsSync('/.dockerenv') ||
+    process.env.ANIFLIX_CONTAINER === 'true' ||
+    Boolean(process.env.DOCKER_CONTAINER) ||
+    process.env.ANIFLIX_DATA_DIR === '/data' ||
+    fs.existsSync('/downloads')
+  );
+};
+
 /**
- * Dynamically locate any binary across user Scoop directory, local bin folder, or system PATH.
- * Never hardcodes any user home directory.
+ * Dynamically locate any binary across user Scoop directory, local bin folder, system PATH,
+ * or standard Linux/Docker container directories.
  */
 export function findBinary(name, scoopSubdir = name) {
   const home = os.homedir();
+  const isWindows = process.platform === 'win32';
+
   const candidates = [
     // 1. Local project bin directory (portable bundle)
     path.join(process.cwd(), 'bin', `${name}.exe`),
     path.join(process.cwd(), 'bin', `${name}.cmd`),
     path.join(process.cwd(), 'bin', name),
 
-    // 2. User's Scoop shims directory
+    // 2. Standard Unix / Linux / Docker container paths
+    `/usr/local/bin/${name}`,
+    `/usr/bin/${name}`,
+    `/bin/${name}`,
+    path.join(home, '.local', 'bin', name),
+
+    // 3. User's Scoop shims directory (Windows)
     path.join(home, 'scoop', 'shims', `${name}.exe`),
     path.join(home, 'scoop', 'shims', `${name}.cmd`),
     path.join(home, 'scoop', 'shims', `${name}.ps1`),
     path.join(home, 'scoop', 'shims', name),
 
-    // 3. User's Scoop apps directory
+    // 4. User's Scoop apps directory (Windows)
     path.join(home, 'scoop', 'apps', scoopSubdir, 'current', `${name}.exe`),
     path.join(home, 'scoop', 'apps', scoopSubdir, 'current', `${name}.cmd`),
     path.join(home, 'scoop', 'apps', scoopSubdir, 'current', name),
 
-    // 4. Common Program Files locations
+    // 5. Common Program Files locations (Windows)
     path.join('C:\\Program Files\\Git\\bin', `${name}.exe`),
     path.join('C:\\Program Files\\mpv', `${name}.exe`)
   ];
 
   for (const c of candidates) {
-    if (fs.existsSync(c)) {
-      return c;
-    }
+    try {
+      if (fs.existsSync(c)) {
+        return c;
+      }
+    } catch {}
   }
 
-  // 5. System PATH lookup via where.exe
+  // 6. System PATH lookup via which (Linux/macOS) or where (Windows)
   try {
-    const stdout = execSync(`where ${name} 2>nul`, { encoding: 'utf-8', timeout: 1500 });
+    const lookupCmd = isWindows ? `where ${name} 2>nul` : `which ${name} 2>/dev/null || command -v ${name} 2>/dev/null`;
+    const stdout = execSync(lookupCmd, { encoding: 'utf-8', timeout: 1500 });
     const firstLine = stdout.trim().split(/\r?\n/)[0];
     if (firstLine && fs.existsSync(firstLine)) {
       return firstLine;
@@ -57,7 +78,7 @@ export function findBinary(name, scoopSubdir = name) {
   } catch {}
 
   // Fallback to bare executable name
-  return process.platform === 'win32' ? `${name}.exe` : name;
+  return isWindows ? `${name}.exe` : name;
 }
 
 /**
@@ -65,12 +86,17 @@ export function findBinary(name, scoopSubdir = name) {
  */
 function getVersion(binaryPath, versionArg = '--version') {
   try {
-    if (!fs.existsSync(binaryPath) && !binaryPath.endsWith('.exe')) {
+    const isWindows = process.platform === 'win32';
+    // If path exists or is a standard executable command
+    const exists = fs.existsSync(binaryPath);
+    if (!exists && isWindows && !binaryPath.endsWith('.exe')) {
       return null;
     }
-    const stdout = execSync(`"${binaryPath}" ${versionArg}`, { 
+
+    const execCmd = binaryPath.includes(' ') ? `"${binaryPath}"` : binaryPath;
+    const stdout = execSync(`${execCmd} ${versionArg}`, { 
       encoding: 'utf-8', 
-      timeout: 2000,
+      timeout: 2500,
       stdio: ['ignore', 'pipe', 'ignore'] 
     });
     const firstLine = stdout.trim().split(/\r?\n/)[0];
@@ -87,17 +113,24 @@ export function getEnvironmentStatus() {
   const home = os.homedir();
   const scoopShimPath = path.join(home, 'scoop', 'shims');
   const hasScoop = fs.existsSync(path.join(home, 'scoop'));
+  const isContainer = isContainerEnvironment();
 
   const results = {};
   let criticalMissingCount = 0;
 
   for (const tool of TOOLS) {
     const binPath = findBinary(tool.name, tool.scoopSubdir);
-    const exists = fs.existsSync(binPath);
+    let exists = fs.existsSync(binPath);
     let version = null;
 
     if (exists) {
       version = getVersion(binPath, tool.versionArg);
+    } else {
+      // In container or Linux PATH, test command availability directly
+      version = getVersion(tool.name, tool.versionArg);
+      if (version) {
+        exists = true;
+      }
     }
 
     results[tool.name] = {
@@ -120,6 +153,9 @@ export function getEnvironmentStatus() {
     ready,
     allInstalled,
     hasScoop,
+    isContainer,
+    platform: process.platform,
+    containerType: isContainer ? (fs.existsSync('/etc/alpine-release') ? 'Linux Alpine' : 'Linux Container') : null,
     scoopPath: scoopShimPath,
     tools: results
   };
