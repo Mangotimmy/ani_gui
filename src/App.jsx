@@ -11,6 +11,8 @@ import SettingsModal from './components/SettingsModal';
 import SetupWizardModal from './components/SetupWizardModal';
 import DownloadedFilesModal from './components/DownloadedFilesModal';
 import AnimeCard from './components/AnimeCard';
+import MarqueeTicker from './components/animata/MarqueeTicker';
+import BentoGrid from './components/animata/BentoGrid';
 import { getPlatformInfo } from './utils/platform';
 import { 
   Flame, Star, Trophy, Swords, Sparkles, Loader2, 
@@ -142,8 +144,29 @@ export default function App() {
   }, [isDownloadsOpen]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState('content');
   const [isSetupWizardOpen, setIsSetupWizardOpen] = useState(false);
   const [isDownloadedFilesOpen, setIsDownloadedFilesOpen] = useState(false);
+  const [serverInfo, setServerInfo] = useState({ isContainer: false, platform: 'win32' });
+
+  const handleOpenSettings = (tab = 'content') => {
+    setSettingsInitialTab(tab);
+    setIsSettingsOpen(true);
+  };
+
+  useEffect(() => {
+    fetch('/api/system/info')
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          setServerInfo({
+            isContainer: Boolean(data.isContainer),
+            platform: data.platform || 'win32'
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Downloader Real-Time State (SSE)
   const [downloadTasks, setDownloadTasks] = useState([]);
@@ -615,7 +638,7 @@ export default function App() {
         onSearch={setSearchQuery}
         activeDownloadsCount={activeDownloadsCount}
         onOpenDownloads={() => setIsDownloadsOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={() => handleOpenSettings('content')}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         favoritesCount={favorites.length}
@@ -977,6 +1000,14 @@ export default function App() {
               />
             )}
 
+            {/* Animata Infinite Marquee Highlights Bar */}
+            {activeTab === 'home' && (
+              <MarqueeTicker 
+                currentLang={currentLang}
+                isContainer={serverInfo.isContainer}
+              />
+            )}
+
             {/* Loading Indicator */}
             {isLoading && (
               <div className="h-96 flex items-center justify-center">
@@ -984,9 +1015,21 @@ export default function App() {
               </div>
             )}
 
-            {/* Horizontal Carousels */}
+            {/* Horizontal Carousels & Bento Dashboard */}
             {!isLoading && (
               <div className={`space-y-6 ${activeTab === 'home' ? 'relative z-20 -mt-8 md:-mt-12' : 'pt-24'}`}>
+                {/* Animata Architecture & System Bento Dashboard */}
+                {activeTab === 'home' && (
+                  <BentoGrid
+                    isContainer={serverInfo.isContainer}
+                    containerType={serverInfo.platform === 'linux' ? 'Linux Alpine / Synology NAS' : 'Windows Host'}
+                    onOpenArchitectureSettings={() => handleOpenSettings('architecture')}
+                    currentLang={currentLang}
+                    trendingCount={filteredTrending.length}
+                    activeDownloadsCount={downloadTasks.length}
+                  />
+                )}
+
                 {/* 0. Continue Watching Carousel */}
                 {activeTab === 'home' && watchHistory.length > 0 && (
                   <AnimeCarousel
@@ -1225,6 +1268,7 @@ export default function App() {
         currentLang={currentLang}
         gpuSettings={gpuSettings}
         onUpdateGpuSettings={handleSaveSettings}
+        initialTab={settingsInitialTab}
       />
 
       {/* Downloaded Anime Files Browser Modal (Mobile & Web) */}

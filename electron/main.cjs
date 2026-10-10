@@ -128,8 +128,10 @@ async function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
 
-  // Once server is confirmed, load the local URL
-  await mainWindow.loadURL(`http://localhost:${PORT}`);
+  // If remote server URL is configured (e.g. NAS Docker Server), load that; otherwise load local server
+  const targetUrl = process.env.ANIFLIX_SERVER_URL || `http://localhost:${PORT}`;
+  console.log(`Loading AniFlix interface from: ${targetUrl}`);
+  await mainWindow.loadURL(targetUrl);
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();

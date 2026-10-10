@@ -32,10 +32,10 @@ function AnimeCard({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Poster Image Container */}
+      {/* Poster Image Container with Animata spotlight & better-ui outline */}
       <div 
         onClick={() => onMoreInfo(anime)}
-        className="relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 shadow-md card-hover-effect transition-all duration-300 group-hover:border-zinc-700"
+        className="relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 shadow-md card-hover-effect transition-all duration-300 group-hover:border-red-500/50 outline outline-1 outline-white/10 -outline-offset-1"
       >
         <img
           src={poster}
@@ -147,21 +147,21 @@ function AnimeCard({
             <>
               <button
                 onClick={(e) => { e.stopPropagation(); onPlay(anime, 1); }}
-                className="w-10 h-10 rounded-full bg-white hover:bg-zinc-200 text-black flex items-center justify-center shadow-lg transition-transform hover:scale-110"
+                className="w-10 h-10 rounded-full bg-white hover:bg-zinc-200 text-black flex items-center justify-center shadow-lg transition-transform hover:scale-110 motion-safe:active:scale-[0.96]"
                 title={currentLang === 'ja' ? '第 1 話を再生' : currentLang.startsWith('zh') ? '播放第 1 集' : 'Play Episode 1'}
               >
                 <Play className="w-5 h-5 fill-black ml-0.5" />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); onDownload(anime); }}
-                className="w-9 h-9 rounded-full bg-[#E50914] hover:bg-[#B81D24] text-white flex items-center justify-center shadow-lg transition-transform hover:scale-110"
+                className="w-9 h-9 rounded-full bg-[#E50914] hover:bg-[#B81D24] text-white flex items-center justify-center shadow-lg transition-transform hover:scale-110 motion-safe:active:scale-[0.96]"
                 title={currentLang === 'ja' ? 'ダウンロード' : currentLang.startsWith('zh') ? '下載此動漫' : 'Download Series'}
               >
                 <Download className="w-4 h-4" />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); onMoreInfo(anime); }}
-                className="w-9 h-9 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-white flex items-center justify-center shadow-lg transition-transform hover:scale-110"
+                className="w-9 h-9 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-white flex items-center justify-center shadow-lg transition-transform hover:scale-110 motion-safe:active:scale-[0.96]"
                 title={currentLang === 'ja' ? '詳細・エピソード一覧' : currentLang.startsWith('zh') ? '詳細資訊與集數' : 'Details & Episodes'}
               >
                 <Info className="w-4 h-4" />

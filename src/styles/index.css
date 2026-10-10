@@ -86,3 +86,17 @@
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.8), 0 0 15px 1px rgba(229, 9, 20, 0.2);
   z-index: 20;
 }
+
+/* Animata Infinite Marquee Keyframe */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 35s linear infinite;
+}

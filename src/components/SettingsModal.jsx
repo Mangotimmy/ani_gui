@@ -4,7 +4,7 @@ import {
   X, Settings, Folder, Check, Terminal, Wrench, RefreshCw, 
   DownloadCloud, AlertTriangle, CheckCircle, ExternalLink, Sparkles,
   Shield, ShieldAlert, ShieldCheck, Database, FileText, UploadCloud, FileCode,
-  Cpu, Zap, Gauge, Monitor, Sliders
+  Cpu, Zap, Gauge, Monitor, Sliders, Server, Layers, Copy, Smartphone, Network
 } from 'lucide-react';
 import { 
   collectUserData, exportToXml, exportToCsv, downloadBackupFile, 
@@ -15,6 +15,7 @@ const I18N = {
   'zh-TW': {
     title: '系統設定與環境管理',
     tabContent: '內容偏好與分級',
+    tabArchitecture: '連線架構與 Docker (PowerShell)',
     tabGpu: 'GPU 與播放效能',
     tabPlugins: '組件管理與更新',
     tabDownloads: '下載儲存路徑',
@@ -68,6 +69,7 @@ const I18N = {
   'zh-CN': {
     title: '系统设置与环境管理',
     tabContent: '内容偏好与分级',
+    tabArchitecture: '连接架构与 Docker (PowerShell)',
     tabGpu: 'GPU 与播放性能',
     tabPlugins: '组件管理与更新',
     tabDownloads: '下载存储路径',
@@ -121,6 +123,7 @@ const I18N = {
   'ja': {
     title: '設定と動作環境',
     tabContent: 'コンテンツと安全設定',
+    tabArchitecture: '接続構成と Docker (PowerShell)',
     tabGpu: 'GPU と画質設定',
     tabPlugins: 'プラグインと更新',
     tabDownloads: 'ダウンロード保存先',
@@ -174,6 +177,7 @@ const I18N = {
   'en': {
     title: 'Settings & Environment',
     tabContent: 'Content & Safety',
+    tabArchitecture: 'Architecture & Docker (PowerShell)',
     tabGpu: 'GPU & Playback',
     tabPlugins: 'Plugins & Auto-Updater',
     tabDownloads: 'Downloader Storage',
@@ -237,12 +241,19 @@ export default function SettingsModal({
   onToggleHideR18,
   currentLang = 'zh-TW',
   gpuSettings,
-  onUpdateGpuSettings
+  onUpdateGpuSettings,
+  initialTab = 'content'
 }) {
   const txt = I18N[currentLang] || I18N['zh-TW'];
-  const [activeTab, setActiveTab] = useState('content'); // 'content' | 'gpu' | 'plugins' | 'downloads' | 'backup'
+  const [activeTab, setActiveTab] = useState(initialTab || 'content'); // 'content' | 'architecture' | 'gpu' | 'plugins' | 'downloads' | 'backup'
   const [downloadDir, setDownloadDir] = useState(currentDir || '');
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   // GPU & Performance Profile states
   const [gpuProfile, setGpuProfile] = useState(gpuSettings?.gpuProfile || 'igpu');
@@ -339,6 +350,35 @@ export default function SettingsModal({
   const [showLogModal, setShowLogModal] = useState(false);
   const [appUpdateInfo, setAppUpdateInfo] = useState(null);
   const [isCheckingApp, setIsCheckingApp] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState('');
+  const [pingLatency, setPingLatency] = useState(null);
+  const [isPinging, setIsPinging] = useState(false);
+
+  const handleCopyText = (text, key) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedCmd(key);
+      setTimeout(() => setCopiedCmd(''), 2500);
+    }
+  };
+
+  const handlePing = async () => {
+    setIsPinging(true);
+    const start = performance.now();
+    try {
+      const res = await fetch('/api/trending?limit=1');
+      if (res.ok) {
+        const end = performance.now();
+        setPingLatency(Math.round(end - start));
+      } else {
+        setPingLatency(-1);
+      }
+    } catch {
+      setPingLatency(-1);
+    } finally {
+      setIsPinging(false);
+    }
+  };
 
   const logBottomRef = useRef(null);
 
@@ -491,6 +531,18 @@ export default function SettingsModal({
           </button>
 
           <button
+            onClick={() => setActiveTab('architecture')}
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 whitespace-nowrap ${
+              activeTab === 'architecture'
+                ? 'bg-[#E50914] text-white shadow-md shadow-red-600/30'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>{txt.tabArchitecture}</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('gpu')}
             className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 whitespace-nowrap ${
               activeTab === 'gpu'
@@ -599,6 +651,246 @@ export default function SettingsModal({
                     <span>{txt.r18Warning}</span>
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 0.2: Connection & Environment Architecture (Docker vs PC App) */}
+        {activeTab === 'architecture' && (
+          <div className="mt-5 space-y-4">
+            {/* 1. Header & Live Environment Status */}
+            <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-5 shadow-inner space-y-4">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl border mt-0.5 shrink-0 ${
+                    envStatus?.isContainer 
+                      ? 'bg-sky-950/40 border-sky-600/50 text-sky-400' 
+                      : 'bg-purple-950/40 border-purple-600/50 text-purple-400'
+                  }`}>
+                    {envStatus?.isContainer ? <Server className="w-6 h-6" /> : <Monitor className="w-6 h-6" />}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h4 className="text-sm font-bold text-white">
+                        {envStatus?.isContainer ? '🐳 Docker 容器化伺服器環境' : '💻 PC 本地桌面客戶端 (App) 環境'}
+                      </h4>
+                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                        envStatus?.isContainer
+                          ? 'bg-sky-900/40 border-sky-600/50 text-sky-300'
+                          : 'bg-purple-900/40 border-purple-600/50 text-purple-300'
+                      }`}>
+                        {envStatus?.isContainer ? 'Docker Server' : 'PC Desktop App'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                      {envStatus?.isContainer 
+                        ? '伺服器端正運行於 Docker 容器中 (Synology NAS / Linux)。負責影音抓取、轉發串流與批次下載。' 
+                        : '本機桌面環境運行中。具備本地 Direct3D 11 / Intel QuickSync 硬體加速、MPV 外顯著色器與本機 Scoop 依賴。'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Live Ping Test Button */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePing}
+                    disabled={isPinging}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-xs font-bold transition-all motion-safe:active:scale-[0.96]"
+                  >
+                    <Activity className={`w-3.5 h-3.5 text-emerald-400 ${isPinging ? 'animate-spin' : ''}`} />
+                    <span>測試連線延遲</span>
+                  </button>
+                  {pingLatency !== null && (
+                    <span className={`text-xs font-mono font-bold px-2.5 py-1 rounded-lg border ${
+                      pingLatency >= 0 && pingLatency < 100
+                        ? 'bg-emerald-950/40 border-emerald-600/50 text-emerald-300'
+                        : pingLatency >= 100
+                        ? 'bg-amber-950/40 border-amber-600/50 text-amber-300'
+                        : 'bg-red-950/40 border-red-600/50 text-red-300'
+                    }`}>
+                      {pingLatency >= 0 ? `🟢 ${pingLatency} ms` : '🔴 連線逾時'}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 2. Interactive Topology Visualizer (Matching Hand-Drawn Diagrams) */}
+              <div className="pt-3 border-t border-zinc-800 space-y-3">
+                <span className="text-xs font-bold text-zinc-300 block">
+                  🌐 系統連線與權責拓撲架構圖 (System Architecture Topology)
+                </span>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Left Box: Client Access Modes */}
+                  <div className="p-4 rounded-xl bg-zinc-950/80 border border-zinc-800 space-y-2.5">
+                    <div className="flex items-center justify-between text-xs font-bold text-zinc-200 pb-1 border-b border-zinc-800/80">
+                      <span className="flex items-center gap-1.5">
+                        <Smartphone className="w-4 h-4 text-sky-400" />
+                        <span>多終端連線 (Clients)</span>
+                      </span>
+                      <span className="text-[10px] text-zinc-500 font-mono">Mobile / PC</span>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-white block">📱 Mobile (iOS / Android)</span>
+                          <span className="text-[11px] text-zinc-400">行動端手勢快進 (±10s) • 縮圖預覽 • 支援外部 VLC / Infuse 播放</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-sky-400 bg-sky-950/60 px-2 py-0.5 rounded border border-sky-800/40 shrink-0">
+                          Web / HLS
+                        </span>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-white block">💻 PC 瀏覽器 (Web Client)</span>
+                          <span className="text-[11px] text-zinc-400">直接連線 Docker 伺服器 • 跨網域存取與遠端管理</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-purple-400 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/40 shrink-0">
+                          Port 3000
+                        </span>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-purple-950/30 border border-purple-800/40 flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-purple-200 block">🖥️ PC 桌面端 (Electron App)</span>
+                          <span className="text-[11px] text-zinc-300">本機 GPU 硬體著色 • MPV 外顯播放器 • 本機 Scoop 組件</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-purple-300 bg-purple-900/60 px-2 py-0.5 rounded border border-purple-600/40 shrink-0">
+                          Desktop Native
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Box: Docker Server Environment */}
+                  <div className="p-4 rounded-xl bg-zinc-950/80 border border-zinc-800 space-y-2.5">
+                    <div className="flex items-center justify-between text-xs font-bold text-zinc-200 pb-1 border-b border-zinc-800/80">
+                      <span className="flex items-center gap-1.5">
+                        <Server className="w-4 h-4 text-red-400" />
+                        <span>🐳 Docker 伺服器 (Server)</span>
+                      </span>
+                      <span className="text-[10px] text-zinc-500 font-mono">NAS / Linux / VPS</span>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800">
+                        <span className="font-bold text-zinc-200 flex items-center gap-1.5">
+                          <Wrench className="w-3.5 h-3.5 text-amber-400" />
+                          <span>容器內置組件 (Plugins Update & Install)</span>
+                        </span>
+                        <p className="text-[11px] text-zinc-400 mt-1">
+                          容器內置 <code className="text-zinc-200 font-mono">ffmpeg</code>、<code className="text-zinc-200 font-mono">yt-dlp</code>、<code className="text-zinc-200 font-mono">aria2c</code>，由映像檔自動管理與更新。
+                        </p>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800">
+                        <span className="font-bold text-zinc-200 flex items-center gap-1.5">
+                          <Folder className="w-3.5 h-3.5 text-sky-400" />
+                          <span>持久化儲存 (Volumes)</span>
+                        </span>
+                        <p className="text-[11px] text-zinc-400 mt-1 font-mono">
+                          /data (設定/歷史) & /downloads (下載影片檔)
+                        </p>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-800/40">
+                        <span className="font-bold text-emerald-300 flex items-center gap-1.5">
+                          <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>無頭運作 (Headless Daemon)</span>
+                        </span>
+                        <p className="text-[11px] text-zinc-300 mt-1">
+                          無視窗與 3D 著色器開銷，低功耗提供 HTTP 206 串流與背景下載。
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. PowerShell Deployment Station (while use docker server, show the installation but use powershell) */}
+            <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-5 shadow-inner space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-sky-400" />
+                    <span>PowerShell Docker 部署工作站 (Windows PowerShell)</span>
+                  </h4>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    在 Windows PowerShell 中直接執行以下指令進行容器啟動、管理與組件更新。
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {/* PowerShell Snippet 1: Docker Run */}
+                <div className="p-3.5 rounded-xl bg-black/60 border border-zinc-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-zinc-300">
+                      1. 一鍵 Docker Run 啟動指令 (PowerShell 反引號 ` 換行語法)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(`docker run -d --name aniflix \`\n  -p 3000:3000 \`\n  -v \${PWD}/data:/data \`\n  -v \${PWD}/downloads:/downloads \`\n  --restart unless-stopped \`\n  ghcr.io/atszl/aniflix:latest`, 'docker-run')}
+                      className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold"
+                    >
+                      {copiedCmd === 'docker-run' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedCmd === 'docker-run' ? '已複製！' : '複製指令'}</span>
+                    </button>
+                  </div>
+                  <pre className="text-xs font-mono text-emerald-400 overflow-x-auto whitespace-pre p-2 bg-zinc-950/80 rounded border border-zinc-900">
+{`docker run -d --name aniflix \`
+  -p 3000:3000 \`
+  -v \${PWD}/data:/data \`
+  -v \${PWD}/downloads:/downloads \`
+  --restart unless-stopped \`
+  ghcr.io/atszl/aniflix:latest`}
+                  </pre>
+                </div>
+
+                {/* PowerShell Snippet 2: Docker Compose */}
+                <div className="p-3.5 rounded-xl bg-black/60 border border-zinc-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-zinc-300">
+                      2. Docker Compose 部署 (PowerShell)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(`docker compose pull; docker compose up -d`, 'docker-compose')}
+                      className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold"
+                    >
+                      {copiedCmd === 'docker-compose' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedCmd === 'docker-compose' ? '已複製！' : '複製指令'}</span>
+                    </button>
+                  </div>
+                  <pre className="text-xs font-mono text-emerald-400 overflow-x-auto whitespace-pre p-2 bg-zinc-950/80 rounded border border-zinc-900">
+{`docker compose pull; docker compose up -d`}
+                  </pre>
+                </div>
+
+                {/* PowerShell Snippet 3: Update Container Plugins */}
+                <div className="p-3.5 rounded-xl bg-black/60 border border-zinc-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-zinc-300">
+                      3. 更新容器內部影音組件 (PowerShell)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(`docker exec -it aniflix yt-dlp -U`, 'docker-update')}
+                      className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold"
+                    >
+                      {copiedCmd === 'docker-update' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedCmd === 'docker-update' ? '已複製！' : '複製指令'}</span>
+                    </button>
+                  </div>
+                  <pre className="text-xs font-mono text-emerald-400 overflow-x-auto whitespace-pre p-2 bg-zinc-950/80 rounded border border-zinc-900">
+{`docker exec -it aniflix yt-dlp -U`}
+                  </pre>
+                </div>
               </div>
             </div>
           </div>
