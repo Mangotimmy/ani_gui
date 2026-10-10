@@ -580,8 +580,22 @@ app.get('/api/system/info', (req, res) => {
       memory: process.memoryUsage(),
       downloadDir: downloadManager.downloadDir,
       isContainer,
-      containerType: isContainer ? (fs.existsSync('/etc/alpine-release') ? 'Linux Alpine' : 'Linux Container') : null
+      containerType: isContainer ? (fs.existsSync('/etc/alpine-release') ? 'Linux Alpine' : 'Linux Container') : null,
+      hasElectronDevTools: typeof global.__openDevTools === 'function'
     });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Toggle Electron DevTools Console (Log Console)
+app.post('/api/system/devtools', (req, res) => {
+  try {
+    if (typeof global.__openDevTools === 'function') {
+      const opened = global.__openDevTools();
+      return res.json({ success: true, opened });
+    }
+    res.json({ success: false, message: 'DevTools is available via F12 or Ctrl+Shift+I' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

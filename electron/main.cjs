@@ -148,7 +148,26 @@ async function createWindow() {
     return { action: 'allow' };
   });
 
-  // Native Right-Click Mouse Context Menu (Cut, Copy, Paste, Select All)
+  // Handle F12 and Ctrl+Shift+I to toggle DevTools Log Console
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown') {
+      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        mainWindow.webContents.toggleDevTools();
+        event.preventDefault();
+      }
+    }
+  });
+
+  // Global helper for backend API to toggle DevTools
+  global.__openDevTools = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.toggleDevTools();
+      return true;
+    }
+    return false;
+  };
+
+  // Native Right-Click Mouse Context Menu (Cut, Copy, Paste, DevTools)
   mainWindow.webContents.on('context-menu', (event, params) => {
     const menu = new Menu();
     if (params.isEditable) {
@@ -159,12 +178,20 @@ async function createWindow() {
       menu.append(new MenuItem({ label: 'Copy', role: 'copy' }));
       menu.append(new MenuItem({ label: 'Paste', role: 'paste' }));
       menu.append(new MenuItem({ label: 'Select All', role: 'selectAll' }));
-      menu.popup({ window: mainWindow });
+      menu.append(new MenuItem({ type: 'separator' }));
     } else if (params.selectionText && params.selectionText.trim().length > 0) {
       menu.append(new MenuItem({ label: 'Copy', role: 'copy' }));
       menu.append(new MenuItem({ label: 'Select All', role: 'selectAll' }));
-      menu.popup({ window: mainWindow });
+      menu.append(new MenuItem({ type: 'separator' }));
     }
+
+    menu.append(new MenuItem({
+      label: '開啟開發人員主控台 (Inspect / DevTools)',
+      accelerator: 'F12',
+      click: () => mainWindow.webContents.toggleDevTools()
+    }));
+
+    menu.popup({ window: mainWindow });
   });
 
   mainWindow.on('closed', () => {

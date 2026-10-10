@@ -398,6 +398,22 @@ export default function SettingsModal({
     }
   };
 
+  const [logConsoleNotice, setLogConsoleNotice] = useState('');
+
+  const handleOpenLogConsole = async () => {
+    try {
+      const res = await fetch('/api/system/devtools', { method: 'POST' });
+      const data = await res.json();
+      if (data.opened) {
+        setLogConsoleNotice('✅ 已開啟開發人員除錯主控台 (DevTools Console)！');
+        setTimeout(() => setLogConsoleNotice(''), 3000);
+        return;
+      }
+    } catch {}
+    setLogConsoleNotice('💡 提示：請按鍵盤 F12 或 Ctrl+Shift+I 即可開啟除錯主控台 (Console)。');
+    setTimeout(() => setLogConsoleNotice(''), 4500);
+  };
+
   const logBottomRef = useRef(null);
 
   // Fetch Environment Status
@@ -721,7 +737,7 @@ export default function SettingsModal({
                 </div>
 
                 {/* Live Ping Test Button */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
                     onClick={handlePing}
@@ -740,6 +756,23 @@ export default function SettingsModal({
                         : 'bg-red-950/40 border-red-600/50 text-red-300'
                     }`}>
                       {pingLatency >= 0 ? `🟢 ${pingLatency} ms` : '🔴 連線逾時'}
+                    </span>
+                  )}
+
+                  {/* Open DevTools Log Console button */}
+                  <button
+                    type="button"
+                    onClick={handleOpenLogConsole}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-xs font-bold transition-all motion-safe:active:scale-[0.96] cursor-pointer"
+                    title="開啟開發人員除錯控制台 (F12 / Ctrl+Shift+I)"
+                  >
+                    <Terminal className="w-3.5 h-3.5 text-sky-400" />
+                    <span>開啟除錯主控台 (F12)</span>
+                  </button>
+
+                  {logConsoleNotice && (
+                    <span className="text-xs text-sky-300 font-bold bg-sky-950/60 border border-sky-800/50 px-2.5 py-1 rounded-lg animate-in fade-in">
+                      {logConsoleNotice}
                     </span>
                   )}
                 </div>
