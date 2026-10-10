@@ -1,6 +1,6 @@
 // server/services/streamResolver.js - Native high-speed anime stream resolver
 // Scrapes HiAnime/ZokoAnime streaming endpoints directly without CLI/Bash overhead
-
+import './dnsFallback.js';
 import { BoundedCache } from './cache.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -123,6 +123,12 @@ async function searchAnime(queryOrCandidates) {
     if (stripped && stripped.toLowerCase() !== q.toLowerCase()) {
       const strippedRes = await searchSingleQuery(stripped);
       if (strippedRes) return strippedRes;
+    }
+    // Try stripping season suffix e.g. "Season 3", "3rd Season", "Part 2", "第三季", "第3期"
+    const noSeason = q.replace(/(season\s*\d+|part\s*\d+|\d+(st|nd|rd|th)\s*season|第[一二三四五六七八九十\d]+[季期])/gi, '').trim();
+    if (noSeason && noSeason.length > 2 && noSeason.toLowerCase() !== q.toLowerCase()) {
+      const noSeasonRes = await searchSingleQuery(noSeason);
+      if (noSeasonRes) return noSeasonRes;
     }
   }
 

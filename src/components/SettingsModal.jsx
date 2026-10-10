@@ -10,6 +10,7 @@ import {
   collectUserData, exportToXml, exportToCsv, downloadBackupFile, 
   restoreFromJson, restoreFromXml 
 } from '../utils/dataExport.js';
+import BentoGrid from './animata/BentoGrid.jsx';
 
 const I18N = {
   'zh-TW': {
@@ -242,12 +243,29 @@ export default function SettingsModal({
   currentLang = 'zh-TW',
   gpuSettings,
   onUpdateGpuSettings,
-  initialTab = 'content'
+  initialTab = 'content',
+  serverInfo = { isContainer: false, platform: 'win32' },
+  trendingCount = 0,
+  activeDownloadsCount = 0
 }) {
   const txt = I18N[currentLang] || I18N['zh-TW'];
   const [activeTab, setActiveTab] = useState(initialTab || 'content'); // 'content' | 'architecture' | 'gpu' | 'plugins' | 'downloads' | 'backup'
   const [downloadDir, setDownloadDir] = useState(currentDir || '');
   const [saved, setSaved] = useState(false);
+
+  const powershellSectionRef = useRef(null);
+  const [isHighlightingPs, setIsHighlightingPs] = useState(false);
+
+  const handleScrollToPowerShell = () => {
+    setActiveTab('architecture');
+    setTimeout(() => {
+      if (powershellSectionRef.current) {
+        powershellSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setIsHighlightingPs(true);
+        setTimeout(() => setIsHighlightingPs(false), 2500);
+      }
+    }, 60);
+  };
 
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -659,6 +677,17 @@ export default function SettingsModal({
         {/* Tab 0.2: Connection & Environment Architecture (Docker vs PC App) */}
         {activeTab === 'architecture' && (
           <div className="mt-5 space-y-4">
+            {/* Animata BentoGrid Dashboard embedded directly in Settings */}
+            <BentoGrid
+              compact={true}
+              isContainer={envStatus?.isContainer ?? serverInfo?.isContainer}
+              containerType={(envStatus?.platform || serverInfo?.platform) === 'linux' ? 'Linux Alpine / Synology NAS' : 'Windows Host'}
+              onScrollToPowerShell={handleScrollToPowerShell}
+              currentLang={currentLang}
+              trendingCount={trendingCount}
+              activeDownloadsCount={activeDownloadsCount}
+            />
+
             {/* 1. Header & Live Environment Status */}
             <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-5 shadow-inner space-y-4">
               <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -813,8 +842,16 @@ export default function SettingsModal({
             </div>
 
             {/* 3. PowerShell Deployment Station (while use docker server, show the installation but use powershell) */}
-            <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-5 shadow-inner space-y-4">
-              <div className="flex items-center justify-between">
+            <div 
+              ref={powershellSectionRef}
+              id="powershell-deployment-section"
+              className={`bg-zinc-900/90 border rounded-2xl p-5 shadow-inner space-y-4 transition-all duration-500 ${
+                isHighlightingPs 
+                  ? 'border-sky-500 ring-2 ring-sky-400/80 shadow-lg shadow-sky-500/20' 
+                  : 'border-zinc-800'
+              }`}
+            >
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
                   <h4 className="text-sm font-bold text-white flex items-center gap-2">
                     <Terminal className="w-4 h-4 text-sky-400" />
@@ -824,6 +861,16 @@ export default function SettingsModal({
                     在 Windows PowerShell 中直接執行以下指令進行容器啟動、管理與組件更新。
                   </p>
                 </div>
+
+                {/* 1-Click deploy-docker.ps1 execution snippet button */}
+                <button
+                  type="button"
+                  onClick={() => handleCopyText('powershell -ExecutionPolicy Bypass -File .\\scripts\\deploy-docker.ps1', 'deploy-script')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold shadow-md shadow-sky-600/30 motion-safe:active:scale-[0.96] transition-all cursor-pointer"
+                >
+                  {copiedCmd === 'deploy-script' ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Terminal className="w-3.5 h-3.5" />}
+                  <span>{copiedCmd === 'deploy-script' ? '已複製執行指令！' : '複製一鍵部署腳本 (deploy-docker.ps1)'}</span>
+                </button>
               </div>
 
               <div className="space-y-3">

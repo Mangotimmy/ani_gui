@@ -12,7 +12,6 @@ import SetupWizardModal from './components/SetupWizardModal';
 import DownloadedFilesModal from './components/DownloadedFilesModal';
 import AnimeCard from './components/AnimeCard';
 import MarqueeTicker from './components/animata/MarqueeTicker';
-import BentoGrid from './components/animata/BentoGrid';
 import { getPlatformInfo } from './utils/platform';
 import { 
   Flame, Star, Trophy, Swords, Sparkles, Loader2, 
@@ -1015,21 +1014,9 @@ export default function App() {
               </div>
             )}
 
-            {/* Horizontal Carousels & Bento Dashboard */}
+            {/* Horizontal Carousels */}
             {!isLoading && (
               <div className={`space-y-6 ${activeTab === 'home' ? 'relative z-20 -mt-8 md:-mt-12' : 'pt-24'}`}>
-                {/* Animata Architecture & System Bento Dashboard */}
-                {activeTab === 'home' && (
-                  <BentoGrid
-                    isContainer={serverInfo.isContainer}
-                    containerType={serverInfo.platform === 'linux' ? 'Linux Alpine / Synology NAS' : 'Windows Host'}
-                    onOpenArchitectureSettings={() => handleOpenSettings('architecture')}
-                    currentLang={currentLang}
-                    trendingCount={filteredTrending.length}
-                    activeDownloadsCount={downloadTasks.length}
-                  />
-                )}
-
                 {/* 0. Continue Watching Carousel */}
                 {activeTab === 'home' && watchHistory.length > 0 && (
                   <AnimeCarousel
@@ -1269,6 +1256,9 @@ export default function App() {
         gpuSettings={gpuSettings}
         onUpdateGpuSettings={handleSaveSettings}
         initialTab={settingsInitialTab}
+        serverInfo={serverInfo}
+        trendingCount={filteredTrending.length}
+        activeDownloadsCount={downloadTasks.length}
       />
 
       {/* Downloaded Anime Files Browser Modal (Mobile & Web) */}

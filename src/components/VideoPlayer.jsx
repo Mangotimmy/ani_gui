@@ -5,7 +5,7 @@ import {
   Maximize, Minimize, SkipBack, SkipForward, MonitorPlay, 
   Settings, Loader2, Copy, Check, Link2, ExternalLink, SlidersHorizontal,
   Subtitles, Upload, FileUp, Tv, Smartphone, Zap, Sparkles,
-  MoreVertical, Film
+  MoreVertical, Film, AlertTriangle
 } from 'lucide-react';
 import { getPlatformInfo, getExternalPlayerLinks } from '../utils/platform.js';
 
@@ -146,6 +146,9 @@ export default function VideoPlayer({
   // Auto-play next episode countdown
   const [autoPlayCountdown, setAutoPlayCountdown] = useState(null);
   const countdownTimerRef = useRef(null);
+
+  // Official Trailer PV mode
+  const [isPlayingTrailer, setIsPlayingTrailer] = useState(false);
 
   // Resume playback timestamp
   const [resumedTime, setResumedTime] = useState(null);
@@ -303,6 +306,21 @@ export default function VideoPlayer({
         setIsBuffering(false);
         return;
       }
+
+      // Check if anime is unreleased beforehand
+      if (anime?.status === 'NOT_YET_RELEASED' || anime?.episodes === 0) {
+        setIsBuffering(false);
+        setErrorMessage(`《${displayTitle}》本季尚未正式開播 (Coming Soon)。您可以搶先欣賞官方宣傳預告片 (PV)！`);
+        return;
+      }
+
+      const timeoutId = setTimeout(() => {
+        if (!isCancelled && !streamUrl) {
+          setIsBuffering(false);
+          setErrorMessage(prev => prev || '串流載入逾時。您可以嘗試重新整理、欣賞官方預告片或使用外部 MPV 播放器。');
+        }
+      }, 10000);
+
       try {
         const candidateTitles = [
           anime?.title?.romaji,
@@ -335,9 +353,11 @@ export default function VideoPlayer({
           .catch(() => ({ success: false, subtitles: [] }));
 
         const [streamRes, localSubsRes] = await Promise.all([streamPromise, localSubsPromise]);
+        clearTimeout(timeoutId);
 
         if (!isCancelled) {
-          if (streamRes.success && (streamRes.data.proxiedStreamUrl || streamRes.data.streamUrl)) {
+          const hasValidStream = streamRes.success && streamRes.data && (streamRes.data.proxiedStreamUrl || streamRes.data.streamUrl);
+          if (hasValidStream) {
             const raw = streamRes.data.streamUrl;
             const proxied = streamRes.data.proxiedStreamUrl || toPlayableUrl(raw, streamRes.data.referer);
             const refHeader = streamRes.data.referer || 'https://zokoanime.video/';
@@ -450,13 +470,18 @@ export default function VideoPlayer({
               }
             }
           } else {
-            setErrorMessage(streamRes.error || 'Unable to resolve anime stream for this episode.');
+            const rawErr = streamRes.error || streamRes.data?.error || '';
+            const isAiredErr = rawErr.includes('not officially aired');
+            const friendlyErr = isAiredErr
+              ? `《${displayTitle}》第 ${episode} 集目前尚未正式播映 (未發行)。`
+              : (rawErr || '來源端查無此集數之串流資源，您可以嘗試其他集數或欣賞官方預告片。');
+            setErrorMessage(friendlyErr);
           }
         }
       } catch (err) {
         console.error('Failed to load stream:', err);
         if (!isCancelled) {
-          setErrorMessage(err.message || 'Network error fetching video stream.');
+          setErrorMessage(err.message || '網路連線異常，無法取得串流位址。');
         }
       } finally {
         if (!isCancelled) setIsBuffering(false);
@@ -1056,6 +1081,15 @@ export default function VideoPlayer({
     };
   }, [isScrubbing, duration]);
 
+  const hasTrailer = Boolean(anime?.trailer?.id && (anime.trailer?.site === 'youtube' || !anime.trailer?.site));
+  const isUnreleased = Boolean(
+    anime?.status === 'NOT_YET_RELEASED' || 
+    anime?.episodes === 0 || 
+    (anime?.nextAiringEpisode?.episode && Number(episode) >= anime.nextAiringEpisode.episode) ||
+    errorMessage?.toLowerCase().includes('not officially aired') ||
+    errorMessage?.includes('尚未正式開播')
+  );
+
   return (
     <div 
       ref={containerRef}
@@ -1070,6 +1104,44 @@ export default function VideoPlayer({
       }}
       className="fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden touch-manipulation"
     >
+      {/* ─── Official Trailer (PV) Playback Mode ─── */}
+      {isPlayingTrailer && hasTrailer && (
+        <div className="absolute inset-0 z-50 flex flex-col bg-black">
+          <div className="absolute top-4 left-4 right-4 z-50 flex items-center justify-between bg-black/80 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/10 shadow-2xl">
+            <div className="flex items-center gap-2.5 text-xs font-bold text-white">
+              <span className="flex h-2.5 w-2.5 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+              </span>
+              <span>官方宣傳預告片 (Official Trailer PV) • {displayTitle}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsPlayingTrailer(false)}
+                className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold border border-zinc-700 cursor-pointer"
+              >
+                返回播放器
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <iframe
+            src={`https://www.youtube.com/embed/${anime.trailer.id}?autoplay=1&rel=0`}
+            title={`${displayTitle} Official Trailer`}
+            className="w-full h-full border-0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+          />
+        </div>
+      )}
+
       {/* Video Element */}
       <video
         ref={videoRef}
@@ -1463,32 +1535,57 @@ export default function VideoPlayer({
 
       {/* Error Message Overlay */}
       {errorMessage && (
-        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center p-6 bg-black/90 text-center">
-          <div className="w-12 h-12 rounded-full bg-red-600/20 text-[#E50914] flex items-center justify-center mb-3">
-            <X className="w-6 h-6" />
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center p-6 bg-black/95 text-center pointer-events-auto">
+          <div className="w-14 h-14 rounded-2xl bg-red-600/20 text-[#E50914] flex items-center justify-center mb-4 border border-red-600/30 shadow-lg shadow-red-600/10">
+            {isUnreleased ? <Sparkles className="w-7 h-7 text-amber-400" /> : <AlertTriangle className="w-7 h-7" />}
           </div>
-          <h3 className="text-lg font-bold text-white mb-2">Stream Playback Issue</h3>
-          <p className="text-sm text-zinc-400 max-w-md mb-6">{errorMessage}</p>
-          <div className="flex items-center gap-3">
+          <h3 className="text-xl font-black text-white mb-2">
+            {isUnreleased ? '🎬 本季尚未正式開播 (Coming Soon)' : '⚠️ 串流資源連線提示 (Playback Notice)'}
+          </h3>
+          <p className="text-sm text-zinc-300 max-w-lg mb-6 leading-relaxed bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800">
+            {errorMessage}
+          </p>
+
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            {/* If trailer is available, prominent button to watch trailer */}
+            {hasTrailer && (
+              <button
+                type="button"
+                onClick={() => { setErrorMessage(''); setIsPlayingTrailer(true); }}
+                className="flex items-center gap-2 bg-[#E50914] hover:bg-red-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition-all shadow-xl shadow-red-600/30 motion-safe:active:scale-[0.96] cursor-pointer"
+              >
+                <Play className="w-4 h-4 fill-white" />
+                <span>搶先欣賞官方宣傳 PV (Watch Trailer)</span>
+              </button>
+            )}
+
+            {/* External MPV */}
             <button
+              type="button"
               onClick={() => onLaunchMpv(anime, episode, audioMode, rawStreamUrl || streamUrl)}
-              className="flex items-center gap-2 bg-[#E50914] hover:bg-red-700 text-white font-bold px-4 py-2 rounded-lg text-xs transition-colors shadow-lg shadow-red-600/20"
+              className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold px-4 py-2.5 rounded-xl text-xs transition-colors border border-zinc-700 cursor-pointer"
             >
-              <MonitorPlay className="w-4 h-4" />
-              <span>Play with External MPV</span>
+              <MonitorPlay className="w-4 h-4 text-purple-400" />
+              <span>外部 MPV 播放</span>
             </button>
+
+            {/* Inspect / Custom M3U8 Link */}
             <button
+              type="button"
               onClick={() => setShowLinkModal(true)}
-              className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold px-4 py-2 rounded-lg text-xs transition-colors border border-zinc-700"
+              className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold px-4 py-2.5 rounded-xl text-xs transition-colors border border-zinc-700 cursor-pointer"
             >
-              <Link2 className="w-4 h-4" />
-              <span>Inspect M3U8 Link</span>
+              <Link2 className="w-4 h-4 text-sky-400" />
+              <span>自訂 / 檢查 M3U8 連結</span>
             </button>
+
+            {/* Close / Return */}
             <button
+              type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-lg text-xs transition-colors"
+              className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
             >
-              Close
+              關閉播放器 (返回首頁)
             </button>
           </div>
         </div>

@@ -13,14 +13,17 @@ export default function BentoGrid({
   isContainer = false,
   containerType = 'Linux Alpine',
   onOpenArchitectureSettings,
+  onScrollToPowerShell,
   currentLang = 'zh-TW',
   trendingCount = 0,
-  activeDownloadsCount = 0
+  activeDownloadsCount = 0,
+  compact = false
 }) {
   const isZh = currentLang.startsWith('zh');
+  const handlePowerShellClick = onScrollToPowerShell || onOpenArchitectureSettings;
 
   return (
-    <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6" aria-label="System Architecture & Highlights">
+    <section className={`w-full ${compact ? 'py-1 px-0' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6'}`} aria-label="System Architecture & Highlights">
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
 
         {/* 1. Large Hero Bento Card: Architecture & Connection Status */}
@@ -87,7 +90,8 @@ export default function BentoGrid({
             </div>
 
             <button
-              onClick={onOpenArchitectureSettings}
+              type="button"
+              onClick={handlePowerShellClick}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-600/90 hover:bg-red-600 text-white text-xs font-bold shadow-md shadow-red-600/20 motion-safe:active:scale-[0.96] transition-all cursor-pointer"
             >
               <Terminal className="w-3.5 h-3.5" />

@@ -1,4 +1,5 @@
 // server/index.js - AniFlix Express backend server
+import './services/dnsFallback.js';
 import express from 'express';
 import cors from 'cors';
 import { 
@@ -338,6 +339,13 @@ app.post('/api/stream', async (req, res) => {
   try {
     const { animeTitle, candidates, episode = 1, mode = 'sub', quality = 'best', maxAiredCap } = req.body;
     const streamData = await resolveStream({ animeTitle, candidates, episode, mode, quality, maxAiredCap });
+    if (!streamData || streamData.success === false) {
+      return res.status(200).json({
+        success: false,
+        error: streamData?.error || 'Unable to resolve anime stream for this episode',
+        data: streamData || null
+      });
+    }
     res.json({ success: true, data: streamData });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
