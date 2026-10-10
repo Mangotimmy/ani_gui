@@ -688,6 +688,16 @@ export default function App() {
         t={t}
       />
 
+      {/* Top Status & Announcement Marquee Bar */}
+      {activeTab === 'home' && !searchQuery && (
+        <div className="pt-[58px] sm:pt-[64px] relative z-30">
+          <MarqueeTicker 
+            currentLang={currentLang}
+            isContainer={serverInfo.isContainer}
+          />
+        </div>
+      )}
+
       {/* Main Content Area */}
       <main className="flex-1 pb-16">
         {/* Search Results Grid View */}
@@ -1037,14 +1047,6 @@ export default function App() {
                 onPlay={handlePlay}
                 onDownload={handleOpenBatchDownload}
                 onMoreInfo={setSelectedAnime}
-              />
-            )}
-
-            {/* Animata Infinite Marquee Highlights Bar */}
-            {activeTab === 'home' && (
-              <MarqueeTicker 
-                currentLang={currentLang}
-                isContainer={serverInfo.isContainer}
               />
             )}
 
