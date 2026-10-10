@@ -4,7 +4,7 @@ import {
   X, Settings, Folder, Check, Terminal, Wrench, RefreshCw, 
   DownloadCloud, AlertTriangle, CheckCircle, ExternalLink, Sparkles,
   Shield, ShieldAlert, ShieldCheck, Database, FileText, UploadCloud, FileCode,
-  Cpu, Zap, Gauge, Monitor, Sliders, Server, Layers, Copy, Smartphone, Network
+  Cpu, Zap, Gauge, Monitor, Sliders, Server, Layers, Copy, Smartphone, Network, Activity
 } from 'lucide-react';
 import { 
   collectUserData, exportToXml, exportToCsv, downloadBackupFile, 
