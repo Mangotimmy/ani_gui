@@ -70,7 +70,7 @@ const MEDIA_FIELDS = `
   }
 `;
 
-export async function getTrending(page = 1, perPage = 20) {
+export async function getTrending(page = 1, perPage = 50) {
   const query = `
     query ($page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
@@ -80,11 +80,11 @@ export async function getTrending(page = 1, perPage = 20) {
       }
     }
   `;
-  const data = await anilistQuery(query, { page, perPage });
+  const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
   return enrichWithChineseTitles(data?.Page?.media || []);
 }
 
-export async function getPopular(page = 1, perPage = 20) {
+export async function getPopular(page = 1, perPage = 50) {
   const query = `
     query ($page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
@@ -94,11 +94,11 @@ export async function getPopular(page = 1, perPage = 20) {
       }
     }
   `;
-  const data = await anilistQuery(query, { page, perPage });
+  const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
   return enrichWithChineseTitles(data?.Page?.media || []);
 }
 
-export async function getTopRated(page = 1, perPage = 20) {
+export async function getTopRated(page = 1, perPage = 50) {
   const query = `
     query ($page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
@@ -108,11 +108,11 @@ export async function getTopRated(page = 1, perPage = 20) {
       }
     }
   `;
-  const data = await anilistQuery(query, { page, perPage });
+  const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
   return enrichWithChineseTitles(data?.Page?.media || []);
 }
 
-export async function getUpcoming(page = 1, perPage = 20) {
+export async function getUpcoming(page = 1, perPage = 50) {
   const query = `
     query ($page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
@@ -122,11 +122,11 @@ export async function getUpcoming(page = 1, perPage = 20) {
       }
     }
   `;
-  const data = await anilistQuery(query, { page, perPage });
+  const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
   return enrichWithChineseTitles(data?.Page?.media || []);
 }
 
-export async function getByGenre(genre, page = 1, perPage = 20) {
+export async function getByGenre(genre, page = 1, perPage = 50) {
   const query = `
     query ($genre: String, $page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
@@ -136,11 +136,11 @@ export async function getByGenre(genre, page = 1, perPage = 20) {
       }
     }
   `;
-  const data = await anilistQuery(query, { genre, page, perPage });
+  const data = await anilistQuery(query, { genre, page: parseInt(page), perPage: parseInt(perPage) });
   return enrichWithChineseTitles(data?.Page?.media || []);
 }
 
-export async function searchAnime(keyword, page = 1, perPage = 20) {
+export async function searchAnime(keyword, page = 1, perPage = 50) {
   const cleanKeyword = (keyword || '').trim();
   if (!cleanKeyword) return [];
 

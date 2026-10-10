@@ -262,6 +262,42 @@ export default function SettingsModal({
   // Electron desktop environment check (GPU tab is only available in Electron)
   const isElectron = platformInfo.isElectron || Boolean(sysInfo?.isElectron);
 
+  const [cacheStats, setCacheStats] = useState({ videoMb: 0, videoCount: 0, imageMb: 0, imageCount: 0, totalMb: 0 });
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [cacheClearNotice, setCacheClearNotice] = useState('');
+
+  const loadCacheStats = async () => {
+    try {
+      const res = await fetch('/api/cache/stats').then(r => r.json());
+      if (res.success && res.stats) setCacheStats(res.stats);
+    } catch {}
+  };
+
+  const handleClearCache = async (type = 'all') => {
+    setIsClearingCache(true);
+    try {
+      const res = await fetch('/api/cache/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type })
+      }).then(r => r.json());
+
+      if (typeof window !== 'undefined' && 'caches' in window && (type === 'all' || type === 'image')) {
+        try { await caches.delete('aniflix-thumbnails-v1'); } catch {}
+      }
+
+      if (res.success && res.stats) {
+        setCacheStats(res.stats);
+        setCacheClearNotice(currentLang === 'ja' ? 'キャッシュを正常に削除しました！' : currentLang.startsWith('zh') ? '快取已成功清理！' : 'Cache cleared successfully!');
+        setTimeout(() => setCacheClearNotice(''), 3000);
+      }
+    } catch (e) {
+      console.warn('Failed to clear cache:', e);
+    } finally {
+      setIsClearingCache(false);
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       const loadSysInfo = async () => {
@@ -277,6 +313,7 @@ export default function SettingsModal({
         }
       };
       loadSysInfo();
+      loadCacheStats();
     }
   }, [isOpen]);
 
@@ -1554,6 +1591,79 @@ export default function SettingsModal({
                   <Folder className="w-3.5 h-3.5" />
                   <span>瀏覽已下載影片</span>
                 </button>
+              </div>
+
+              {/* Media & Thumbnail Cache Management */}
+              <div className="mt-4 p-4 bg-zinc-900/80 border border-zinc-800 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Database className="w-4 h-4 text-rose-500" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      {currentLang === 'ja' ? 'メディア＆サムネイルキャッシュ管理' : currentLang.startsWith('zh') ? '本地暫存與快取管理 (Media & Thumbnail Cache)' : 'Media & Thumbnail Cache'}
+                    </span>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-rose-400 bg-rose-950/60 px-2.5 py-0.5 rounded-full border border-rose-500/30">
+                    {cacheStats.totalMb} MB
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-zinc-400">
+                  {currentLang === 'ja'
+                    ? '再生済みのHLS動画フラグメントとアニメ表紙画像をPC/ブラウザにキャッシュし、次回以降の読み込みを0秒高速化します。'
+                    : currentLang.startsWith('zh')
+                    ? '已播放的 HLS 影片分段與動漫封面縮圖會自動持久化快取於本地磁碟與瀏覽器，重播或往回拖拉進度條 0 秒秒開，大幅節省頻寬。'
+                    : 'Played HLS video segments and cover thumbnails are cached locally on disk and browser storage for instant zero-buffer seeking and offline speed.'}
+                </p>
+
+                {cacheClearNotice && (
+                  <div className="text-xs font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-500/40 px-3 py-1.5 rounded-xl">
+                    {cacheClearNotice}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  <div className="bg-zinc-950/60 p-2.5 rounded-xl border border-zinc-800/80 flex items-center justify-between">
+                    <div>
+                      <span className="text-zinc-300 font-semibold block">🎬 影片分段快取</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">{cacheStats.videoCount} 個分段檔案 ({cacheStats.videoMb} MB)</span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isClearingCache || cacheStats.videoCount === 0}
+                      onClick={() => handleClearCache('video')}
+                      className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg text-[11px] font-semibold border border-zinc-700 transition-all disabled:opacity-40"
+                    >
+                      清理
+                    </button>
+                  </div>
+
+                  <div className="bg-zinc-950/60 p-2.5 rounded-xl border border-zinc-800/80 flex items-center justify-between">
+                    <div>
+                      <span className="text-zinc-300 font-semibold block">🖼️ 封面縮圖快取</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">{cacheStats.imageCount} 張圖片 ({cacheStats.imageMb} MB)</span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isClearingCache || (cacheStats.imageCount === 0 && cacheStats.imageMb === 0)}
+                      onClick={() => handleClearCache('image')}
+                      className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg text-[11px] font-semibold border border-zinc-700 transition-all disabled:opacity-40"
+                    >
+                      清理
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    disabled={isClearingCache || (cacheStats.videoCount === 0 && cacheStats.imageCount === 0)}
+                    onClick={() => handleClearCache('all')}
+                    className="px-3 py-1.5 bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 hover:text-white border border-rose-800/50 rounded-xl text-xs font-bold transition-all disabled:opacity-40 flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isClearingCache ? 'animate-spin' : ''}`} />
+                    <span>{isClearingCache ? '清理中...' : '清空所有快取'}</span>
+                  </button>
+                </div>
               </div>
             </div>
 

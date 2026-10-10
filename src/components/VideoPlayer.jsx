@@ -203,6 +203,8 @@ export default function VideoPlayer({
   const [isHoveringSeekbar, setIsHoveringSeekbar] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [bufferedEnd, setBufferedEnd] = useState(0);
+  const lastScrubPreviewTimeRef = useRef(0);
+  const scrubThrottleTimerRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -654,11 +656,12 @@ export default function VideoPlayer({
 
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
+        lowLatencyMode: false,
         progressive: true,
-        backBufferLength: 90,
-        maxBufferLength: 60,
+        backBufferLength: 300,
+        maxBufferLength: 120,
         maxMaxBufferLength: 600,
+        maxBufferSize: 128 * 1024 * 1024,
         enableSoftwareAES: false,
       });
       hlsRef.current = hls;
@@ -686,6 +689,16 @@ export default function VideoPlayer({
       hls.on(Hls.Events.BUFFER_APPENDED, () => setIsBuffering(false));
 
       hls.on(Hls.Events.ERROR, (event, data) => {
+        if (data.details === 'bufferStalledError') {
+          setIsBuffering(true);
+          return;
+        }
+        if (data.details === 'bufferSeekOverHole') {
+          return;
+        }
+        if (!data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          return;
+        }
         console.warn('[HLS Error Event]', data.type, data.details, data.fatal);
         if (data.fatal) {
           switch (data.type) {
@@ -751,6 +764,17 @@ export default function VideoPlayer({
       previewHls.on(Hls.Events.MANIFEST_PARSED, (e, data) => {
         if (data.levels && data.levels.length > 0) {
           previewHls.currentLevel = 0; // lowest level for fast thumbnail rendering
+        }
+      });
+
+      previewHls.on(Hls.Events.ERROR, (e, data) => {
+        // Silently recover preview errors without console spam
+        if (data.fatal) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            previewHls.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            previewHls.recoverMediaError();
+          }
         }
       });
     } else {
@@ -1049,9 +1073,22 @@ export default function VideoPlayer({
     setHoverTime(targetTime);
 
     if (previewVideoRef.current && isFinite(targetTime)) {
-      try {
-        previewVideoRef.current.currentTime = targetTime;
-      } catch {}
+      const now = Date.now();
+      if (now - lastScrubPreviewTimeRef.current > 150) {
+        lastScrubPreviewTimeRef.current = now;
+        try {
+          previewVideoRef.current.currentTime = targetTime;
+        } catch {}
+      } else {
+        if (scrubThrottleTimerRef.current) clearTimeout(scrubThrottleTimerRef.current);
+        scrubThrottleTimerRef.current = setTimeout(() => {
+          if (previewVideoRef.current && isFinite(targetTime)) {
+            try {
+              previewVideoRef.current.currentTime = targetTime;
+            } catch {}
+          }
+        }, 150);
+      }
     }
   };
 

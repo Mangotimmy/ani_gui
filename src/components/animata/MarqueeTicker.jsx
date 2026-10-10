@@ -72,9 +72,7 @@ export default function MarqueeTicker({
 
       {/* Marquee Track Container */}
       <div 
-        className={`flex w-max items-center gap-6 sm:gap-10 motion-safe:animate-marquee ${
-          pauseOnHover ? 'hover:[animation-play-state:paused]' : ''
-        } motion-reduce:animate-none motion-reduce:overflow-x-auto`}
+        className={`flex w-max items-center gap-6 sm:gap-10 animate-marquee select-none ${className}`}
         style={{
           animationDuration: `${speed}s`,
           animationTimingFunction: 'linear',

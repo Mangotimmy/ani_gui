@@ -194,12 +194,12 @@ export default function App() {
       setIsLoading(true);
       try {
         const [trendRes, popRes, topRes, actRes, fanRes, upRes, seasonRes] = await Promise.all([
-          fetch('/api/trending').then(r => r.json()),
-          fetch('/api/popular').then(r => r.json()),
-          fetch('/api/top-rated').then(r => r.json()),
-          fetch('/api/genre/Action').then(r => r.json()),
-          fetch('/api/genre/Fantasy').then(r => r.json()),
-          fetch('/api/upcoming').then(r => r.json()),
+          fetch('/api/trending?perPage=50').then(r => r.json()),
+          fetch('/api/popular?perPage=50').then(r => r.json()),
+          fetch('/api/top-rated?perPage=50').then(r => r.json()),
+          fetch('/api/genre/Action?perPage=50').then(r => r.json()),
+          fetch('/api/genre/Fantasy?perPage=50').then(r => r.json()),
+          fetch('/api/upcoming?perPage=50').then(r => r.json()),
           fetch('/api/catalog/current-season').then(r => r.json()).catch(() => ({ success: false }))
         ]);
 
@@ -214,9 +214,9 @@ export default function App() {
           setCurrentSeasonInfo({ year: seasonRes.year, season: seasonRes.season, label: seasonRes.label });
           setCatalogYear(seasonRes.year);
 
-          // Fetch this season's anime for Home row
+          // Fetch this season's anime for Home row (up to 50 items)
           try {
-            const thisSeasonData = await fetch(`/api/catalog?year=${seasonRes.year}&season=${seasonRes.season}&perPage=20`).then(r => r.json());
+            const thisSeasonData = await fetch(`/api/catalog?year=${seasonRes.year}&season=${seasonRes.season}&perPage=50`).then(r => r.json());
             if (thisSeasonData.success && Array.isArray(thisSeasonData.media)) {
               setThisSeasonAnimes(thisSeasonData.media);
             }

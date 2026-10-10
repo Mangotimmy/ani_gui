@@ -20,7 +20,8 @@ import {
 import { resolveStream, getAvailableEpisodes } from './services/streamResolver.js';
 import { launchMpv, openFolder, openMagnetLink } from './services/playerLauncher.js';
 import { downloadManager } from './services/downloader.js';
-import { handleProxyStream } from './services/proxy.js';
+import { handleProxyStream, handleProxyImage } from './services/proxy.js';
+import { mediaCache } from './services/mediaCache.js';
 import { handleSubtitleTranslate } from './services/subtitleTranslator.js';
 import { 
   getEnvironmentStatus, 
@@ -114,7 +115,9 @@ app.use(express.json());
 
 app.get('/api/trending', async (req, res) => {
   try {
-    const list = await getTrending();
+    const page = parseInt(req.query.page) || 1;
+    const perPage = Math.min(parseInt(req.query.perPage) || 50, 50);
+    const list = await getTrending(page, perPage);
     res.json({ success: true, data: list });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -123,7 +126,9 @@ app.get('/api/trending', async (req, res) => {
 
 app.get('/api/popular', async (req, res) => {
   try {
-    const list = await getPopular();
+    const page = parseInt(req.query.page) || 1;
+    const perPage = Math.min(parseInt(req.query.perPage) || 50, 50);
+    const list = await getPopular(page, perPage);
     res.json({ success: true, data: list });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -132,7 +137,9 @@ app.get('/api/popular', async (req, res) => {
 
 app.get('/api/top-rated', async (req, res) => {
   try {
-    const list = await getTopRated();
+    const page = parseInt(req.query.page) || 1;
+    const perPage = Math.min(parseInt(req.query.perPage) || 50, 50);
+    const list = await getTopRated(page, perPage);
     res.json({ success: true, data: list });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -141,7 +148,9 @@ app.get('/api/top-rated', async (req, res) => {
 
 app.get('/api/upcoming', async (req, res) => {
   try {
-    const list = await getUpcoming();
+    const page = parseInt(req.query.page) || 1;
+    const perPage = Math.min(parseInt(req.query.perPage) || 50, 50);
+    const list = await getUpcoming(page, perPage);
     res.json({ success: true, data: list });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -177,7 +186,9 @@ app.get('/api/catalog/current-season', (req, res) => {
 
 app.get('/api/genre/:genre', async (req, res) => {
   try {
-    const list = await getByGenre(req.params.genre);
+    const page = parseInt(req.query.page) || 1;
+    const perPage = Math.min(parseInt(req.query.perPage) || 50, 50);
+    const list = await getByGenre(req.params.genre, page, perPage);
     res.json({ success: true, data: list });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -299,6 +310,28 @@ app.post('/api/recommendations', async (req, res) => {
 // --- Stream & Player Routes ---
 
 app.get('/api/proxy', handleProxyStream);
+app.get('/api/proxy/image', handleProxyImage);
+
+// Media & Image Cache Management
+app.get('/api/cache/stats', (req, res) => {
+  try {
+    const stats = mediaCache.getStats();
+    res.json({ success: true, stats });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/cache/clear', (req, res) => {
+  try {
+    const { type = 'all' } = req.body || {};
+    const stats = mediaCache.clear(type);
+    res.json({ success: true, message: 'Cache cleared successfully', stats });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/subtitles/translate', handleSubtitleTranslate);
 
 // Auto-discover matching local subtitle files (.vtt, .srt, .ass, .ssa)
