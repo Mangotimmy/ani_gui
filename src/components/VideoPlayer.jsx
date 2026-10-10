@@ -195,6 +195,8 @@ export default function VideoPlayer({
   // Interactive scrubber with thumbnail preview & buffer tracking
   const seekbarRef = useRef(null);
   const previewVideoRef = useRef(null);
+  const previewHlsRef = useRef(null);
+  const [previewReady, setPreviewReady] = useState(false);
   const [hoverTime, setHoverTime] = useState(null);
   const [hoverPercent, setHoverPercent] = useState(0);
   const [hoverPixelX, setHoverPixelX] = useState(0);
@@ -720,6 +722,48 @@ export default function VideoPlayer({
       }
     };
   }, [streamUrl]);
+
+  // Setup Preview HLS instance for hover thumbnail seekbar
+  useEffect(() => {
+    const previewVideo = previewVideoRef.current;
+    if (!previewVideo || !streamUrl) return;
+
+    setPreviewReady(false);
+    const playable = toPlayableUrl(streamUrl, referer);
+
+    if (Hls.isSupported() && (playable.includes('.m3u8') || playable.includes('/api/proxy'))) {
+      if (previewHlsRef.current) previewHlsRef.current.destroy();
+
+      const previewHls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        autoStartLoad: true,
+        capLevelToPlayerSize: true,
+        maxBufferLength: 6,
+        maxMaxBufferLength: 12,
+        enableSoftwareAES: false,
+      });
+      previewHlsRef.current = previewHls;
+
+      previewHls.loadSource(playable);
+      previewHls.attachMedia(previewVideo);
+
+      previewHls.on(Hls.Events.MANIFEST_PARSED, (e, data) => {
+        if (data.levels && data.levels.length > 0) {
+          previewHls.currentLevel = 0; // lowest level for fast thumbnail rendering
+        }
+      });
+    } else {
+      previewVideo.src = playable;
+    }
+
+    return () => {
+      if (previewHlsRef.current) {
+        previewHlsRef.current.destroy();
+        previewHlsRef.current = null;
+      }
+    };
+  }, [streamUrl, referer]);
 
   // Synchronize active subtitle track on video element
   useEffect(() => {
@@ -1873,18 +1917,30 @@ export default function VideoPlayer({
                   className="absolute bottom-9 z-50 pointer-events-none flex flex-col items-center animate-in fade-in duration-100"
                 >
                   <div className="bg-[#121216]/95 border border-zinc-700/80 rounded-2xl shadow-2xl p-1.5 backdrop-blur-xl flex flex-col items-center ring-1 ring-white/10">
-                    {/* Thumbnail Preview Card */}
-                    <div className="w-32 sm:w-36 h-20 bg-black rounded-xl overflow-hidden relative border border-zinc-800 flex items-center justify-center">
+                    {/* Thumbnail Preview Card with Poster Fallback */}
+                    <div className="w-32 sm:w-36 h-20 bg-zinc-950 rounded-xl overflow-hidden relative border border-zinc-800 flex items-center justify-center">
+                      {/* Poster / Cover Image Fallback (Ensures it is never a black screen) */}
+                      {(anime?.image || anime?.coverImage) && (
+                        <img
+                          src={anime?.image || anime?.coverImage}
+                          alt="Thumbnail Preview"
+                          className="absolute inset-0 w-full h-full object-cover opacity-70 filter blur-[0.5px]"
+                          loading="eager"
+                        />
+                      )}
                       <video
                         ref={previewVideoRef}
-                        src={toPlayableUrl(streamUrl, referer)}
                         muted
                         playsInline
                         preload="auto"
-                        className="w-full h-full object-cover"
+                        className={`w-full h-full object-cover relative z-10 transition-opacity duration-200 ${
+                          previewReady ? 'opacity-100' : 'opacity-0'
+                        }`}
+                        onCanPlay={() => setPreviewReady(true)}
+                        onLoadedData={() => setPreviewReady(true)}
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
-                      <span className="absolute bottom-1 right-1.5 text-[9px] font-mono font-bold bg-black/75 px-1.5 py-0.2 rounded text-zinc-300">
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 pointer-events-none z-20" />
+                      <span className="absolute bottom-1 right-1.5 text-[9px] font-mono font-bold bg-black/80 px-1.5 py-0.5 rounded text-zinc-200 z-30 shadow">
                         {Math.round(hoverPercent)}%
                       </span>
                     </div>

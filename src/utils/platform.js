@@ -45,6 +45,28 @@ export function getPlatformInfo() {
   // Server-side MPV execution is only sensible when the browser is running on the same local PC machine
   const supportsLocalMpv = !isMobile && isLocalhost;
 
+  // Electron Desktop environment check
+  const isElectron = /Electron/i.test(ua) || 
+    (typeof window !== 'undefined' && Boolean(window.electron)) || 
+    (typeof window !== 'undefined' && Boolean(window.process?.versions?.electron));
+
+  // Client OS Name
+  let clientOS = 'Unknown OS';
+  if (isWindows) clientOS = 'Windows';
+  else if (isMacOS) clientOS = 'macOS';
+  else if (isLinux) clientOS = 'Linux';
+  else if (isIOS) clientOS = 'iOS';
+  else if (isIPad) clientOS = 'iPadOS';
+  else if (isAndroid) clientOS = 'Android';
+
+  // Client Browser Name
+  let browserName = 'Web Browser';
+  if (isElectron) browserName = 'Electron Desktop';
+  else if (/Edg/i.test(ua)) browserName = 'Microsoft Edge';
+  else if (/Chrome/i.test(ua)) browserName = 'Google Chrome';
+  else if (/Firefox/i.test(ua)) browserName = 'Mozilla Firefox';
+  else if (/Safari/i.test(ua)) browserName = 'Apple Safari';
+
   return {
     isMobile,
     isIOS,
@@ -54,7 +76,10 @@ export function getPlatformInfo() {
     isWindows,
     isLinux,
     isLocalhost,
-    supportsLocalMpv
+    supportsLocalMpv,
+    isElectron,
+    clientOS,
+    browserName
   };
 }
 

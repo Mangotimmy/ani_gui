@@ -167,6 +167,22 @@ async function createWindow() {
     return false;
   };
 
+  // Global helper for backend API to open native folder selection dialog
+  global.__selectFolder = async (defaultPath) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const { dialog } = require('electron');
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: '選擇下載目的地目錄 (Select Download Directory)',
+        defaultPath: defaultPath || app.getPath('downloads'),
+        properties: ['openDirectory', 'createDirectory']
+      });
+      if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
+        return result.filePaths[0];
+      }
+    }
+    return null;
+  };
+
   // Native Right-Click Mouse Context Menu (Cut, Copy, Paste, DevTools)
   mainWindow.webContents.on('context-menu', (event, params) => {
     const menu = new Menu();

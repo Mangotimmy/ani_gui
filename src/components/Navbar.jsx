@@ -1,10 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Download, X, Settings, Heart, 
+  Search, Download, X, Settings, Heart, Bell,
   Clock, Trash2, Flame, History, Compass, Globe, ChevronDown, Check,
   Clipboard, Sparkles, Swords, Star, Menu
 } from 'lucide-react';
 import { SUPPORTED_LANGS } from '../utils/i18n';
+import { 
+  getStoredNotifications, 
+  markAllNotificationsAsRead, 
+  clearAllNotifications,
+  getNotificationPermission,
+  requestNotificationPermission 
+} from '../utils/notifications.js';
 
 const POPULAR_SEARCHES = [
   'Solo Leveling',
@@ -47,6 +54,34 @@ function Navbar({
   });
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false);
   const searchContainerRef = useRef(null);
+
+  // Notification center state
+  const [notifications, setNotifications] = useState(() => getStoredNotifications());
+  const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
+  const [notifPermission, setNotifPermission] = useState(() => getNotificationPermission());
+  const notifDropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleUpdate = () => setNotifications(getStoredNotifications());
+    window.addEventListener('aniflix:notification', handleUpdate);
+    window.addEventListener('aniflix:notification_read', handleUpdate);
+    return () => {
+      window.removeEventListener('aniflix:notification', handleUpdate);
+      window.removeEventListener('aniflix:notification_read', handleUpdate);
+    };
+  }, []);
+
+  const unreadCount = notifications.filter(n => !n.read).length;
+
+  useEffect(() => {
+    const handleClickOutsideNotif = (e) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target)) {
+        setShowNotificationsDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutsideNotif);
+    return () => document.removeEventListener('mousedown', handleClickOutsideNotif);
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -457,6 +492,105 @@ function Navbar({
             </span>
           )}
         </button>
+
+        {/* Notification Center Bell */}
+        <div className="relative" ref={notifDropdownRef}>
+          <button
+            type="button"
+            onClick={() => {
+              setShowNotificationsDropdown(prev => !prev);
+              if (!showNotificationsDropdown && unreadCount > 0) {
+                markAllNotificationsAsRead();
+              }
+            }}
+            className="relative flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-white/[0.06] hover:bg-white/[0.12] active:scale-95 text-zinc-300 hover:text-white rounded-full border border-white/[0.08] hover:border-white/20 transition-all shadow-sm"
+            title="通知中心 (Notifications)"
+          >
+            <Bell className="w-4 h-4 text-amber-400" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-4 h-4 px-1 bg-red-600 text-white text-[10px] font-black rounded-full shadow-md animate-pulse">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+
+          {/* Notifications Dropdown Panel */}
+          {showNotificationsDropdown && (
+            <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-[#16161a]/98 border border-white/[0.12] rounded-2xl shadow-[0_25px_50px_rgba(0,0,0,0.85)] backdrop-blur-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95">
+              {/* Header */}
+              <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-white/[0.08] bg-white/[0.02]">
+                <div className="flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-[#E50914]" />
+                  <span className="text-xs font-bold text-white">動漫更新與開播通知</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {notifications.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearAllNotifications}
+                      className="text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors px-2 py-0.5 rounded hover:bg-white/10"
+                    >
+                      清空
+                    </button>
+                  )}
+                  {notifPermission !== 'granted' && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const p = await requestNotificationPermission();
+                        setNotifPermission(p);
+                      }}
+                      className="text-[10px] bg-red-600/30 text-red-300 hover:bg-red-600 hover:text-white px-2 py-0.5 rounded-full font-bold transition-all border border-red-500/40"
+                    >
+                      開啟桌面推播
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Notification List */}
+              <div className="max-h-72 overflow-y-auto divide-y divide-white/[0.04]">
+                {notifications.length === 0 ? (
+                  <div className="p-6 text-center text-zinc-500 text-xs">
+                    <Bell className="w-8 h-8 text-zinc-700 mx-auto mb-2 opacity-60" />
+                    <p>目前尚無更新通知</p>
+                    <p className="text-[10px] text-zinc-600 mt-1">點擊愛心收藏動漫，開播時將第一時間提醒您！</p>
+                  </div>
+                ) : (
+                  notifications.map(item => (
+                    <div
+                      key={item.id}
+                      onClick={() => {
+                        if (item.animeId) {
+                          window.dispatchEvent(new CustomEvent('aniflix:open_anime', { detail: { animeId: item.animeId } }));
+                          setShowNotificationsDropdown(false);
+                        }
+                      }}
+                      className={`p-3 flex items-start gap-2.5 hover:bg-white/[0.06] transition-colors cursor-pointer ${
+                        item.read ? 'opacity-75' : 'bg-red-500/[0.05]'
+                      }`}
+                    >
+                      {item.icon ? (
+                        <img src={item.icon} alt="" className="w-9 h-12 rounded-lg object-cover shrink-0 border border-zinc-800" />
+                      ) : (
+                        <div className="w-8 h-8 rounded-lg bg-red-600/20 text-red-400 flex items-center justify-center shrink-0">
+                          <Bell className="w-4 h-4" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <h5 className="text-xs font-bold text-zinc-200 line-clamp-1">{item.title}</h5>
+                        <p className="text-[11px] text-zinc-400 mt-0.5 line-clamp-2 leading-relaxed">{item.body}</p>
+                        <span className="text-[9px] text-zinc-500 font-mono mt-1 block">
+                          {new Date(item.timestamp).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Language Switcher Dropdown */}
         <div className="relative" ref={langContainerRef}>

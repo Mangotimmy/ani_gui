@@ -19,6 +19,11 @@ import {
   Compass, Filter, Layers, ChevronDown
 } from 'lucide-react';
 import { getSavedLanguage, saveLanguage, createTranslator } from './utils/i18n';
+import { 
+  sendAnimeNotification, 
+  requestNotificationPermission, 
+  checkFavoritesForNewAiring 
+} from './utils/notifications';
 
 // Dynamically compute future years so catalog, UI and scraper seamlessly scale to 2027, 2028 and beyond
 const CURRENT_YEAR = new Date().getFullYear();
@@ -394,7 +399,7 @@ export default function App() {
     return list[0] || null;
   }, [trending, popular, hideR18]);
 
-  // Favorite toggle handler
+  // Favorite toggle handler with real-time notification trigger
   const handleToggleFavorite = (anime) => {
     if (!anime || !anime.id) return;
     setFavorites(prev => {
@@ -404,6 +409,14 @@ export default function App() {
         updated = prev.filter(f => f.id !== anime.id);
       } else {
         updated = [anime, ...prev];
+        const title = anime.title?.chinese || anime.title?.romaji || anime.title?.english || '動漫';
+        sendAnimeNotification({
+          title: `💖 已加入追蹤關注`,
+          body: `當《${title}》開播或有新集數發布時，將第一時間向您通知！`,
+          icon: anime.image || anime.coverImage || '/build/icon.png',
+          animeId: anime.id
+        });
+        requestNotificationPermission().catch(() => {});
       }
       try {
         localStorage.setItem('aniflix_favorites', JSON.stringify(updated));
@@ -411,6 +424,34 @@ export default function App() {
       return updated;
     });
   };
+
+  // Listen for open anime event triggered by notification click
+  useEffect(() => {
+    const handleOpenAnimeFromNotif = async (e) => {
+      const animeId = e.detail?.animeId;
+      if (!animeId) return;
+      try {
+        const res = await fetch(`/api/anime/${animeId}`);
+        const data = await res.json();
+        if (data.success && data.data) {
+          setSelectedAnime(data.data);
+        }
+      } catch (err) {
+        console.warn('Failed to load anime from notification:', err);
+      }
+    };
+    window.addEventListener('aniflix:open_anime', handleOpenAnimeFromNotif);
+    return () => window.removeEventListener('aniflix:open_anime', handleOpenAnimeFromNotif);
+  }, []);
+
+  // Periodic Favorite Airing Status Checker
+  useEffect(() => {
+    if (favorites.length > 0) {
+      checkFavoritesForNewAiring(favorites);
+      const interval = setInterval(() => checkFavoritesForNewAiring(favorites), 15 * 60 * 1000);
+      return () => clearInterval(interval);
+    }
+  }, [favorites]);
 
   // Handlers for Player & Downloads
   const handlePlay = (anime, episode = 1, audioMode = 'sub') => {

@@ -1,7 +1,7 @@
 // src/components/SettingsModal.jsx - Settings & Universal Plugin Environment Manager
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  X, Settings, Folder, Check, Terminal, Wrench, RefreshCw, 
+  X, Settings, Folder, FolderPlus, Check, Terminal, Wrench, RefreshCw, 
   DownloadCloud, AlertTriangle, CheckCircle, ExternalLink, Sparkles,
   Shield, ShieldAlert, ShieldCheck, Database, FileText, UploadCloud, FileCode,
   Cpu, Zap, Gauge, Monitor, Sliders, Server, Layers, Copy, Smartphone, Network, Activity
@@ -10,6 +10,7 @@ import {
   collectUserData, exportToXml, exportToCsv, downloadBackupFile, 
   restoreFromJson, restoreFromXml 
 } from '../utils/dataExport.js';
+import { getPlatformInfo } from '../utils/platform.js';
 import BentoGrid from './animata/BentoGrid.jsx';
 
 const I18N = {
@@ -252,6 +253,57 @@ export default function SettingsModal({
   const [activeTab, setActiveTab] = useState(initialTab || 'content'); // 'content' | 'architecture' | 'gpu' | 'plugins' | 'downloads' | 'backup'
   const [downloadDir, setDownloadDir] = useState(currentDir || '');
   const [saved, setSaved] = useState(false);
+
+  const platformInfo = getPlatformInfo();
+  const [sysInfo, setSysInfo] = useState(null);
+  const [folderPresets, setFolderPresets] = useState([]);
+  const [isPickingFolder, setIsPickingFolder] = useState(false);
+
+  // Electron desktop environment check (GPU tab is only available in Electron)
+  const isElectron = platformInfo.isElectron || Boolean(sysInfo?.isElectron);
+
+  useEffect(() => {
+    if (isOpen) {
+      const loadSysInfo = async () => {
+        try {
+          const [infoRes, presetsRes] = await Promise.all([
+            fetch('/api/system/info').then(r => r.json()).catch(() => ({ success: false })),
+            fetch('/api/system/folder-presets').then(r => r.json()).catch(() => ({ success: false }))
+          ]);
+          if (infoRes.success) setSysInfo(infoRes);
+          if (presetsRes.success) setFolderPresets(presetsRes.presets || []);
+        } catch (e) {
+          console.warn('Failed to load system info in modal:', e);
+        }
+      };
+      loadSysInfo();
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isElectron && activeTab === 'gpu') {
+      setActiveTab('content');
+    }
+  }, [isElectron, activeTab]);
+
+  const handleSelectFolder = async () => {
+    setIsPickingFolder(true);
+    try {
+      const res = await fetch('/api/system/select-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentDir: downloadDir })
+      });
+      const data = await res.json();
+      if (data.success && data.folder) {
+        setDownloadDir(data.folder);
+      }
+    } catch (err) {
+      console.warn('Folder selection failed:', err);
+    } finally {
+      setIsPickingFolder(false);
+    }
+  };
 
   const powershellSectionRef = useRef(null);
   const [isHighlightingPs, setIsHighlightingPs] = useState(false);
@@ -576,17 +628,20 @@ export default function SettingsModal({
             <span>{txt.tabArchitecture}</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('gpu')}
-            className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 whitespace-nowrap ${
-              activeTab === 'gpu'
-                ? 'bg-[#E50914] text-white shadow-md shadow-red-600/30'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-            }`}
-          >
-            <Cpu className="w-3.5 h-3.5" />
-            <span>{txt.tabGpu}</span>
-          </button>
+          {/* Only render GPU & Performance profile tab in Electron Desktop app */}
+          {isElectron && (
+            <button
+              onClick={() => setActiveTab('gpu')}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 whitespace-nowrap ${
+                activeTab === 'gpu'
+                  ? 'bg-[#E50914] text-white shadow-md shadow-red-600/30'
+                  : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>{txt.tabGpu}</span>
+            </button>
+          )}
 
           <button
             onClick={() => setActiveTab('plugins')}
@@ -1203,6 +1258,46 @@ export default function SettingsModal({
         {/* Tab 1: Plugins & Environment */}
         {activeTab === 'plugins' && (
           <div className="mt-5 space-y-4">
+            {/* System & OS Environment Detection Card */}
+            <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-3.5 shadow-xl space-y-2.5">
+              <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2">
+                <div className="flex items-center gap-2">
+                  <Server className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">作業系統與運行環境 (System & OS)</span>
+                </div>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                  sysInfo?.isContainer 
+                    ? 'bg-sky-950/60 border-sky-600/50 text-sky-300' 
+                    : isElectron
+                    ? 'bg-purple-950/60 border-purple-600/50 text-purple-300'
+                    : 'bg-emerald-950/60 border-emerald-600/50 text-emerald-300'
+                }`}>
+                  {sysInfo?.isContainer ? '🐳 Docker 容器' : isElectron ? '⚡ Electron 桌面版' : '🌐 Web 伺服器'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="p-2.5 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
+                  <span className="text-[11px] text-zinc-500 font-medium block">伺服器主機作業系統 (Host OS)</span>
+                  <span className="text-xs font-mono font-bold text-zinc-100 mt-0.5 block truncate">
+                    🖥️ {sysInfo?.osName || (envStatus?.platform === 'win32' ? 'Windows' : 'Linux')}
+                  </span>
+                  <span className="text-[10px] text-zinc-400 font-mono">
+                    架構：{sysInfo?.arch || 'x64'} / Node.js：{sysInfo?.nodeVersion || 'v20+'}
+                  </span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
+                  <span className="text-[11px] text-zinc-500 font-medium block">目前瀏覽端模式 (Client Mode)</span>
+                  <span className="text-xs font-mono font-bold text-zinc-100 mt-0.5 block truncate">
+                    {isElectron ? '💻 Electron 原生桌面核心' : `📱 ${platformInfo.clientOS} · ${platformInfo.browserName}`}
+                  </span>
+                  <span className="text-[10px] text-zinc-400 font-mono">
+                    GPU 標籤頁：{isElectron ? '已啟用硬體加速配置' : '純 Web 模式已自動隱藏'}
+                  </span>
+                </div>
+              </div>
+            </div>
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-bold text-white">{txt.pluginsTitle}</h4>
@@ -1388,14 +1483,45 @@ export default function SettingsModal({
                 />
                 <button
                   type="button"
+                  onClick={handleSelectFolder}
+                  disabled={isPickingFolder}
+                  className="px-3.5 py-2.5 bg-zinc-800 hover:bg-zinc-700 active:scale-95 rounded-xl text-xs font-semibold text-emerald-400 border border-zinc-700 flex items-center justify-center gap-1.5 shrink-0 transition-all"
+                  title="選擇目錄 / 瀏覽資料夾"
+                >
+                  <FolderPlus className={`w-4 h-4 ${isPickingFolder ? 'animate-spin' : ''}`} />
+                  <span>{isPickingFolder ? '選取中...' : '選擇資料夾'}</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => onOpenFolder && onOpenFolder(downloadDir)}
-                  className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-xl text-xs font-semibold text-zinc-200 border border-zinc-700 flex items-center justify-center gap-2 shrink-0 transition-colors"
+                  className="px-3.5 py-2.5 bg-zinc-800 hover:bg-zinc-700 active:scale-95 rounded-xl text-xs font-semibold text-zinc-200 border border-zinc-700 flex items-center justify-center gap-1.5 shrink-0 transition-all"
                   title={txt.openFolder}
                 >
                   <Folder className="w-4 h-4 text-amber-400" />
                   <span>{txt.openFolder}</span>
                 </button>
               </div>
+
+              {/* Quick Directory Presets */}
+              {folderPresets.length > 0 && (
+                <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] text-zinc-400 font-medium">常用預設目錄：</span>
+                  {folderPresets.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setDownloadDir(preset.path)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-mono border transition-all ${
+                        downloadDir === preset.path
+                          ? 'bg-red-950/60 border-red-600/70 text-red-300 font-bold'
+                          : 'bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 border-zinc-700/80'
+                      }`}
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* In-App Mobile & Web Download File Manager Helper */}
               <div className="mt-3.5 p-3.5 bg-zinc-900/60 border border-zinc-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">

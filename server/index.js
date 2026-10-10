@@ -33,6 +33,8 @@ import { computeRecommendations } from './services/recommendation.js';
 import { findLocalSubtitles, assToVtt, srtToVtt } from './services/localSubtitleService.js';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -567,13 +569,44 @@ app.delete('/api/downloads/file', (req, res) => {
   }
 });
 
+// Helper to format friendly OS Name
+function getFriendlyOSName() {
+  const plat = process.platform;
+  const rel = os.release() || '';
+  if (isContainerEnvironment()) {
+    if (fs.existsSync('/etc/alpine-release')) {
+      const v = fs.readFileSync('/etc/alpine-release', 'utf8').trim();
+      return `Alpine Linux ${v} (Docker Container)`;
+    }
+    return 'Linux Container (Docker)';
+  }
+  if (plat === 'win32') {
+    const build = parseInt(rel.split('.')[2] || '0', 10);
+    if (build >= 22000) return `Windows 11 (Build ${build})`;
+    if (rel.startsWith('10.0')) return `Windows 10 (Build ${build})`;
+    return `Windows (${rel})`;
+  }
+  if (plat === 'darwin') {
+    return `macOS (${rel})`;
+  }
+  if (plat === 'linux') {
+    return `Linux (${rel})`;
+  }
+  return `${os.type()} ${rel}`;
+}
+
 // System Information Route
 app.get('/api/system/info', (req, res) => {
   try {
     const isContainer = isContainerEnvironment();
+    const isElectron = typeof global.__openDevTools === 'function' || typeof global.__selectFolder === 'function';
     res.json({
       success: true,
       platform: process.platform,
+      osType: os.type(),
+      osRelease: os.release(),
+      osName: getFriendlyOSName(),
+      hostname: os.hostname(),
       arch: process.arch,
       nodeVersion: process.version,
       uptime: Math.floor(process.uptime()),
@@ -581,7 +614,9 @@ app.get('/api/system/info', (req, res) => {
       downloadDir: downloadManager.downloadDir,
       isContainer,
       containerType: isContainer ? (fs.existsSync('/etc/alpine-release') ? 'Linux Alpine' : 'Linux Container') : null,
-      hasElectronDevTools: typeof global.__openDevTools === 'function'
+      isElectron,
+      hasElectronDevTools: typeof global.__openDevTools === 'function',
+      hasNativeFolderPicker: typeof global.__selectFolder === 'function' || process.platform === 'win32'
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -596,6 +631,78 @@ app.post('/api/system/devtools', (req, res) => {
       return res.json({ success: true, opened });
     }
     res.json({ success: false, message: 'DevTools is available via F12 or Ctrl+Shift+I' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Native or OS Folder Picker Route
+app.post('/api/system/select-folder', async (req, res) => {
+  try {
+    const currentDir = req.body?.currentDir || downloadManager.downloadDir;
+
+    // 1. If running in Electron, use native Electron dialog
+    if (typeof global.__selectFolder === 'function') {
+      const selected = await global.__selectFolder(currentDir);
+      if (selected) {
+        return res.json({ success: true, folder: selected });
+      }
+      return res.json({ success: false, cancelled: true });
+    }
+
+    // 2. If running on Windows host (Node server on Windows)
+    if (process.platform === 'win32') {
+      const psScript = `
+        Add-Type -AssemblyName System.Windows.Forms
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dialog.Description = '請選擇 AniFlix 動漫下載儲存資料夾'
+        $dialog.ShowNewFolderButton = $true
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+          Write-Output $dialog.SelectedPath
+        }
+      `;
+      return exec(`powershell -NoProfile -Command "${psScript.replace(/\r?\n\s*/g, ' ')}"`, (err, stdout) => {
+        if (err || !stdout.trim()) {
+          return res.json({ success: false, cancelled: true });
+        }
+        res.json({ success: true, folder: stdout.trim() });
+      });
+    }
+
+    // 3. Fallback for headless/Docker/other
+    res.json({ 
+      success: false, 
+      message: 'Native folder dialog unavailable on this platform. Please select from quick presets or enter path manually.' 
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Folder Quick Presets Route
+app.get('/api/system/folder-presets', (req, res) => {
+  try {
+    const home = os.homedir();
+    const presets = [];
+
+    if (isContainerEnvironment()) {
+      presets.push(
+        { id: 'docker-downloads', name: 'Docker 預設下載目錄', path: '/downloads', icon: 'docker' },
+        { id: 'docker-media', name: 'Docker 影音掛載目錄', path: '/media', icon: 'folder' }
+      );
+    } else {
+      presets.push(
+        { id: 'downloads', name: '系統下載目錄 (Downloads)', path: path.join(home, 'Downloads', 'Anime'), icon: 'download' },
+        { id: 'videos', name: '系統影片目錄 (Videos)', path: path.join(home, 'Videos', 'Anime'), icon: 'film' },
+        { id: 'desktop', name: '桌面目錄 (Desktop)', path: path.join(home, 'Desktop', 'Anime'), icon: 'monitor' }
+      );
+    }
+
+    res.json({
+      success: true,
+      current: downloadManager.downloadDir,
+      presets
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
