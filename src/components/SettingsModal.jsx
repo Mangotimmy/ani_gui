@@ -286,8 +286,11 @@ export default function SettingsModal({
     }
   }, [isElectron, activeTab]);
 
+  const [selectedFolderNotice, setSelectedFolderNotice] = useState('');
+
   const handleSelectFolder = async () => {
     setIsPickingFolder(true);
+    setSelectedFolderNotice('');
     try {
       const res = await fetch('/api/system/select-folder', {
         method: 'POST',
@@ -297,9 +300,16 @@ export default function SettingsModal({
       const data = await res.json();
       if (data.success && data.folder) {
         setDownloadDir(data.folder);
+        setSelectedFolderNotice(`🟢 已選定目錄：${data.folder}`);
+        setTimeout(() => setSelectedFolderNotice(''), 4000);
+      } else if (data.cancelled) {
+        setSelectedFolderNotice('ℹ️ 已取消選取');
+        setTimeout(() => setSelectedFolderNotice(''), 2500);
       }
     } catch (err) {
       console.warn('Folder selection failed:', err);
+      setSelectedFolderNotice('⚠️ 選取資料夾失敗，請直接輸入');
+      setTimeout(() => setSelectedFolderNotice(''), 3000);
     } finally {
       setIsPickingFolder(false);
     }
@@ -1501,6 +1511,13 @@ export default function SettingsModal({
                   <span>{txt.openFolder}</span>
                 </button>
               </div>
+
+              {/* Folder Selection Feedback Notice */}
+              {selectedFolderNotice && (
+                <div className="mt-2 text-xs font-mono font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-600/50 px-3 py-1.5 rounded-xl animate-in fade-in">
+                  {selectedFolderNotice}
+                </div>
+              )}
 
               {/* Quick Directory Presets */}
               {folderPresets.length > 0 && (

@@ -34,7 +34,7 @@ import { findLocalSubtitles, assToVtt, srtToVtt } from './services/localSubtitle
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -652,21 +652,21 @@ app.post('/api/system/select-folder', async (req, res) => {
 
     // 2. If running on Windows host (Node server on Windows)
     if (process.platform === 'win32') {
-      const psScript = `
-        Add-Type -AssemblyName System.Windows.Forms
-        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-        $dialog.Description = '請選擇 AniFlix 動漫下載儲存資料夾'
-        $dialog.ShowNewFolderButton = $true
-        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-          Write-Output $dialog.SelectedPath
-        }
-      `;
-      return exec(`powershell -NoProfile -Command "${psScript.replace(/\r?\n\s*/g, ' ')}"`, (err, stdout) => {
-        if (err || !stdout.trim()) {
-          return res.json({ success: false, cancelled: true });
-        }
-        res.json({ success: true, folder: stdout.trim() });
-      });
+      const scriptPath = path.join(__dirname, '..', 'scripts', 'select-folder.ps1');
+      if (fs.existsSync(scriptPath)) {
+        return execFile(
+          'powershell.exe',
+          ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-STA', '-File', scriptPath, currentDir || ''],
+          { timeout: 120000, windowsHide: false },
+          (err, stdout) => {
+            if (err || !stdout || !stdout.trim()) {
+              return res.json({ success: false, cancelled: true });
+            }
+            const folder = stdout.trim();
+            res.json({ success: true, folder });
+          }
+        );
+      }
     }
 
     // 3. Fallback for headless/Docker/other
