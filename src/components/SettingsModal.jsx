@@ -324,16 +324,22 @@ export default function SettingsModal({
   }, [isElectron, activeTab]);
 
   const [selectedFolderNotice, setSelectedFolderNotice] = useState('');
+  const folderInputRef = useRef(null);
 
   const handleSelectFolder = async () => {
     setIsPickingFolder(true);
     setSelectedFolderNotice('');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
     try {
       const res = await fetch('/api/system/select-folder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentDir: downloadDir })
+        body: JSON.stringify({ currentDir: downloadDir }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       const data = await res.json();
       if (data.success && data.folder) {
         setDownloadDir(data.folder);
@@ -342,13 +348,34 @@ export default function SettingsModal({
       } else if (data.cancelled) {
         setSelectedFolderNotice('ℹ️ 已取消選取');
         setTimeout(() => setSelectedFolderNotice(''), 2500);
+      } else {
+        if (folderInputRef.current) {
+          folderInputRef.current.click();
+        }
       }
     } catch (err) {
-      console.warn('Folder selection failed:', err);
-      setSelectedFolderNotice('⚠️ 選取資料夾失敗，請直接輸入');
-      setTimeout(() => setSelectedFolderNotice(''), 3000);
+      clearTimeout(timeoutId);
+      console.warn('Folder selection notice:', err);
+      if (folderInputRef.current) {
+        folderInputRef.current.click();
+      } else {
+        setSelectedFolderNotice('ℹ️ 請從下方預設目錄選取或直接輸入');
+        setTimeout(() => setSelectedFolderNotice(''), 3000);
+      }
     } finally {
       setIsPickingFolder(false);
+    }
+  };
+
+  const handleBrowserFolderChange = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      const relPath = file.webkitRelativePath || '';
+      const topDir = relPath.split('/')[0] || relPath.split('\\')[0];
+      if (topDir) {
+        setSelectedFolderNotice(`🟢 已選定資料夾：${topDir}`);
+        setTimeout(() => setSelectedFolderNotice(''), 4000);
+      }
     }
   };
 
@@ -1517,16 +1544,28 @@ export default function SettingsModal({
         {activeTab === 'downloads' && (
           <form onSubmit={handleSaveDownloads} className="mt-5 space-y-4">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+              <label htmlFor="downloadDirInput" className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
                 {txt.saveDir}
               </label>
               <div className="flex flex-col sm:flex-row gap-2">
                 <input
+                  id="downloadDirInput"
+                  name="downloadDir"
                   type="text"
                   value={downloadDir}
                   onChange={(e) => setDownloadDir(e.target.value)}
                   placeholder="C:\Users\...\Downloads\Anime 或 /downloads"
                   className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-[#E50914] shadow-inner"
+                />
+                {/* Hidden Native Browser Directory Picker Fallback */}
+                <input
+                  type="file"
+                  ref={folderInputRef}
+                  webkitdirectory="true"
+                  directory="true"
+                  onChange={handleBrowserFolderChange}
+                  className="hidden"
+                  aria-hidden="true"
                 />
                 <button
                   type="button"

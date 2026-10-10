@@ -1,6 +1,6 @@
-// src/components/AnimeCarousel.jsx - Horizontal Scrolling Carousel with Favorites Support
+// src/components/AnimeCarousel.jsx - Infinite Horizontal Scrolling Carousel with Auto-Load
 import React, { useRef } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import AnimeCard from './AnimeCard';
 
 function AnimeCarousel({ 
@@ -13,18 +13,38 @@ function AnimeCarousel({
   onMoreInfo,
   favoriteIds = new Set(),
   onToggleFavorite,
-  currentLang = 'zh-TW'
+  currentLang = 'zh-TW',
+  onLoadMore,
+  isLoadingMore = false,
+  hasMore = false
 }) {
   const rowRef = useRef(null);
 
   const scroll = (direction) => {
     if (rowRef.current) {
-      const { scrollLeft, clientWidth } = rowRef.current;
+      const { scrollLeft, clientWidth, scrollWidth } = rowRef.current;
       const scrollAmount = clientWidth * 0.75;
+      const targetLeft = direction === 'left' ? scrollLeft - scrollAmount : scrollLeft + scrollAmount;
+      
       rowRef.current.scrollTo({
-        left: direction === 'left' ? scrollLeft - scrollAmount : scrollLeft + scrollAmount,
+        left: targetLeft,
         behavior: 'smooth'
       });
+
+      // Trigger load more if scrolling near the end
+      if (direction === 'right' && onLoadMore && !isLoadingMore && hasMore) {
+        if (targetLeft + clientWidth >= scrollWidth - 500) {
+          onLoadMore();
+        }
+      }
+    }
+  };
+
+  const handleScroll = () => {
+    if (!rowRef.current || !onLoadMore || isLoadingMore || !hasMore) return;
+    const { scrollLeft, clientWidth, scrollWidth } = rowRef.current;
+    if (scrollLeft + clientWidth >= scrollWidth - 400) {
+      onLoadMore();
     }
   };
 
@@ -48,9 +68,16 @@ function AnimeCarousel({
             )}
           </div>
         </div>
-        <span className="text-xs text-zinc-500 font-medium">
-          {animes.length} {currentLang === 'ja' ? '作品' : currentLang.startsWith('zh') ? '部作品' : 'titles'}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-zinc-400 font-semibold font-mono">
+            {animes.length} {currentLang === 'ja' ? '作品' : currentLang.startsWith('zh') ? '部作品' : 'titles'}
+          </span>
+          {hasMore && (
+            <span className="text-[10px] font-bold text-red-400 bg-red-950/50 px-2 py-0.5 rounded-full border border-red-800/40 uppercase tracking-wider">
+              ∞ 無限載入
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Relative Carousel Container with Arrows */}
@@ -67,6 +94,7 @@ function AnimeCarousel({
         {/* Horizontal Scrolling Items */}
         <div
           ref={rowRef}
+          onScroll={handleScroll}
           className="flex items-center gap-3.5 overflow-x-auto hide-scrollbar scroll-smooth py-2"
         >
           {animes.map((anime) => (
@@ -81,6 +109,14 @@ function AnimeCarousel({
               currentLang={currentLang}
             />
           ))}
+
+          {/* Endless Scroll Loading Tile */}
+          {isLoadingMore && (
+            <div className="flex-none w-[120px] sm:w-[150px] aspect-[2/3] rounded-xl bg-zinc-900/60 border border-zinc-800 flex flex-col items-center justify-center text-zinc-500 gap-2 shrink-0 animate-pulse">
+              <Loader2 className="w-6 h-6 text-[#E50914] animate-spin" />
+              <span className="text-[11px] font-semibold text-zinc-400">載入更多...</span>
+            </div>
+          )}
         </div>
 
         {/* Right Arrow Button */}

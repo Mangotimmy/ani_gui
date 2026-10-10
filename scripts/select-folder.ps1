@@ -4,7 +4,7 @@ param([string]$InitialDirectory = "")
 try {
     Add-Type -AssemblyName System.Windows.Forms
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dialog.Description = "請選擇 AniFlix 動漫下載儲存資料夾 (Select Download Directory)"
+    $dialog.Description = "Select AniFlix Download Folder"
     $dialog.AutoUpgradeEnabled = $true
     $dialog.ShowNewFolderButton = $true
 
@@ -17,25 +17,14 @@ try {
         }
     }
 
-    $form = New-Object System.Windows.Forms.Form
-    $form.TopMost = $true
-    $form.Width = 0
-    $form.Height = 0
-    $form.ShowInTaskbar = $false
-    $form.Opacity = 0
-    $form.Show()
-
-    $result = $dialog.ShowDialog($form)
-    $form.Close()
-    $form.Dispose()
-
+    $result = $dialog.ShowDialog()
     if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         Write-Output $dialog.SelectedPath
     }
 } catch {
     try {
         $shell = New-Object -ComObject Shell.Application
-        $folder = $shell.BrowseForFolder(0, "請選擇 AniFlix 動漫下載儲存資料夾", 0x50, 0)
+        $folder = $shell.BrowseForFolder(0, "Select AniFlix Download Folder", 0x50, 0)
         if ($folder) {
             Write-Output $folder.Self.Path
         }

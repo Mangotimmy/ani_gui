@@ -66,6 +66,66 @@ export default function App() {
   const [recommendations, setRecommendations] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Infinite Horizontal Carousel Pagination State
+  const [carouselPages, setCarouselPages] = useState({
+    thisSeason: 1,
+    trending: 1,
+    topRated: 1,
+    popular: 1,
+    upcoming: 1,
+    action: 1,
+    fantasy: 1,
+  });
+  const [carouselLoadingMore, setCarouselLoadingMore] = useState({});
+  const [carouselHasMore, setCarouselHasMore] = useState({
+    thisSeason: true,
+    trending: true,
+    topRated: true,
+    popular: true,
+    upcoming: true,
+    action: true,
+    fantasy: true,
+  });
+
+  const handleLoadMoreCarousel = async (category) => {
+    if (carouselLoadingMore[category] || carouselHasMore[category] === false) return;
+    setCarouselLoadingMore(prev => ({ ...prev, [category]: true }));
+    const nextPage = (carouselPages[category] || 1) + 1;
+
+    try {
+      let url = '';
+      if (category === 'trending') url = `/api/trending?page=${nextPage}&perPage=50`;
+      else if (category === 'topRated') url = `/api/top-rated?page=${nextPage}&perPage=50`;
+      else if (category === 'popular') url = `/api/popular?page=${nextPage}&perPage=50`;
+      else if (category === 'upcoming') url = `/api/upcoming?page=${nextPage}&perPage=50`;
+      else if (category === 'action') url = `/api/genre/Action?page=${nextPage}&perPage=50`;
+      else if (category === 'fantasy') url = `/api/genre/Fantasy?page=${nextPage}&perPage=50`;
+      else if (category === 'thisSeason') url = `/api/catalog?year=${currentSeasonInfo.year}&season=${currentSeasonInfo.season}&page=${nextPage}&perPage=50`;
+
+      if (url) {
+        const res = await fetch(url).then(r => r.json());
+        const items = res.data || res.media || [];
+        if (items && items.length > 0) {
+          if (category === 'trending') setTrending(prev => [...prev, ...items]);
+          else if (category === 'topRated') setTopRated(prev => [...prev, ...items]);
+          else if (category === 'popular') setPopular(prev => [...prev, ...items]);
+          else if (category === 'upcoming') setUpcoming(prev => [...prev, ...items]);
+          else if (category === 'action') setActionAnimes(prev => [...prev, ...items]);
+          else if (category === 'fantasy') setFantasyAnimes(prev => [...prev, ...items]);
+          else if (category === 'thisSeason') setThisSeasonAnimes(prev => [...prev, ...items]);
+
+          setCarouselPages(prev => ({ ...prev, [category]: nextPage }));
+        } else {
+          setCarouselHasMore(prev => ({ ...prev, [category]: false }));
+        }
+      }
+    } catch (err) {
+      console.warn(`Failed to load more for ${category}:`, err);
+    } finally {
+      setCarouselLoadingMore(prev => ({ ...prev, [category]: false }));
+    }
+  };
+
   // Catalog & Seasonal Content State
   const [currentSeasonInfo, setCurrentSeasonInfo] = useState({ year: CURRENT_YEAR, season: 'FALL', label: `Fall ${CURRENT_YEAR}` });
   const [thisSeasonAnimes, setThisSeasonAnimes] = useState([]);
@@ -1114,6 +1174,9 @@ export default function App() {
                     onMoreInfo={setSelectedAnime}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
+                    onLoadMore={() => handleLoadMoreCarousel('thisSeason')}
+                    isLoadingMore={Boolean(carouselLoadingMore.thisSeason)}
+                    hasMore={Boolean(carouselHasMore.thisSeason)}
                   />
                 )}
 
@@ -1130,6 +1193,9 @@ export default function App() {
                     onMoreInfo={setSelectedAnime}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
+                    onLoadMore={() => handleLoadMoreCarousel('trending')}
+                    isLoadingMore={Boolean(carouselLoadingMore.trending)}
+                    hasMore={Boolean(carouselHasMore.trending)}
                   />
                 )}
 
@@ -1146,6 +1212,9 @@ export default function App() {
                     onMoreInfo={setSelectedAnime}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
+                    onLoadMore={() => handleLoadMoreCarousel('topRated')}
+                    isLoadingMore={Boolean(carouselLoadingMore.topRated)}
+                    hasMore={Boolean(carouselHasMore.topRated)}
                   />
                 )}
 
@@ -1162,6 +1231,9 @@ export default function App() {
                     onMoreInfo={setSelectedAnime}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
+                    onLoadMore={() => handleLoadMoreCarousel('popular')}
+                    isLoadingMore={Boolean(carouselLoadingMore.popular)}
+                    hasMore={Boolean(carouselHasMore.popular)}
                   />
                 )}
 
@@ -1178,6 +1250,9 @@ export default function App() {
                     onMoreInfo={setSelectedAnime}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
+                    onLoadMore={() => handleLoadMoreCarousel('upcoming')}
+                    isLoadingMore={Boolean(carouselLoadingMore.upcoming)}
+                    hasMore={Boolean(carouselHasMore.upcoming)}
                   />
                 )}
 
@@ -1193,6 +1268,9 @@ export default function App() {
                     onMoreInfo={setSelectedAnime}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
+                    onLoadMore={() => handleLoadMoreCarousel('action')}
+                    isLoadingMore={Boolean(carouselLoadingMore.action)}
+                    hasMore={Boolean(carouselHasMore.action)}
                   />
                 )}
 
@@ -1208,6 +1286,9 @@ export default function App() {
                     onMoreInfo={setSelectedAnime}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
+                    onLoadMore={() => handleLoadMoreCarousel('fantasy')}
+                    isLoadingMore={Boolean(carouselLoadingMore.fantasy)}
+                    hasMore={Boolean(carouselHasMore.fantasy)}
                   />
                 )}
               </div>
