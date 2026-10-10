@@ -57,8 +57,12 @@ if (appSettings.gpuProfile === 'software') {
   }
 }
 
-// Ensure Scoop shims are in PATH so yt-dlp, aria2c, and mpv work seamlessly
-process.env.PATH = `C:\\Users\\Atszl\\scoop\\shims;${process.env.PATH}`;
+// Ensure Scoop shims are in PATH dynamically so yt-dlp, aria2c, and mpv work seamlessly
+const os = require('os');
+const scoopShims = path.join(os.homedir(), 'scoop', 'shims');
+if (fs.existsSync(scoopShims)) {
+  process.env.PATH = `${scoopShims};${process.env.PATH}`;
+}
 
 const PORT = 3001;
 let mainWindow = null;
