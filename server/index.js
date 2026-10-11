@@ -36,10 +36,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import http from 'node:http';
-import https from 'node:https';
 import { exec, execFile } from 'child_process';
 import { fileURLToPath } from 'url';
-import { getOrCreateSslCertificates } from './services/ssl.js';
 import { listUsers, getUser, saveUser, deleteUser } from './services/userService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -987,30 +985,9 @@ app.get('*', (req, res, next) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
-// Start Express & HTTPS servers
-const isContainer = isContainerEnvironment();
-// Allow explicit opt-in for internal HTTPS; default false when behind reverse proxies
-const ENABLE_HTTPS = process.env.ENABLE_HTTPS === 'true';
-const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '3443', 10);
-
-// 1. Primary HTTP server on PORT (e.g. 3000) ALWAYS serves the application directly!
-// This guarantees seamless compatibility with Synology Reverse Proxy, Nginx, Traefik, Caddy, Cloudflare, and local browsers.
+// Start standard Express HTTP server
 const httpServer = http.createServer(app);
 httpServer.listen(PORT, () => {
   console.log(`🎬 AniFlix server running on http://localhost:${PORT}`);
 });
-
-// 2. Secondary HTTPS server if explicitly enabled via ENABLE_HTTPS=true
-if (ENABLE_HTTPS) {
-  const sslConfig = getOrCreateSslCertificates(USER_DATA_DIR);
-  if (sslConfig && sslConfig.cert && sslConfig.key) {
-    const httpsServer = https.createServer({ key: sslConfig.key, cert: sslConfig.cert }, app);
-    httpsServer.listen(HTTPS_PORT, () => {
-      console.log(`🔒 AniFlix Secure HTTPS server running on https://localhost:${HTTPS_PORT}`);
-      if (sslConfig.isSelfSigned) {
-        console.log(`   (Using auto-generated self-signed SSL certificate from ${sslConfig.certPath})`);
-      }
-    });
-  }
-}
 

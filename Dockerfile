@@ -37,8 +37,6 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV ENABLE_HTTPS=false
-ENV HTTPS_PORT=3443
 ENV ANIFLIX_DATA_DIR=/data
 ENV ANIFLIX_DOWNLOADS_DIR=/downloads
 
@@ -57,7 +55,7 @@ RUN mkdir -p /downloads /data && chown -R node:node /downloads /data /app
 
 VOLUME ["/downloads", "/data"]
 
-EXPOSE 3000 3443
+EXPOSE 3000
 
 USER node
 

@@ -4,7 +4,6 @@
 [CmdletBinding()]
 param (
     [string]$Port = "3000",
-    [string]$HttpsPort = "3443",
     [string]$Image = "ghcr.io/mangotimmy/ani_gui:latest",
     [string]$ContainerName = "aniflix",
     [switch]$BuildLocal,
@@ -68,13 +67,10 @@ $dockerRunArgs = @(
     "run", "-d",
     "--name", $ContainerName,
     "-p", "${Port}:3000",
-    "-p", "${HttpsPort}:3443",
     "-v", "${DataDir}:/data",
     "-v", "${DownloadsDir}:/downloads",
     "-e", "NODE_ENV=production",
     "-e", "PORT=3000",
-    "-e", "ENABLE_HTTPS=false",
-    "-e", "HTTPS_PORT=3443",
     "-e", "ANIFLIX_DATA_DIR=/data",
     "-e", "ANIFLIX_DOWNLOADS_DIR=/downloads",
     "--restart", "unless-stopped",
@@ -86,11 +82,10 @@ $dockerRunArgs = @(
 if ($LASTEXITCODE -eq 0) {
     Write-Host "==========================================================" -ForegroundColor Green
     Write-Host "  [✓] AniFlix Docker Server successfully deployed!" -ForegroundColor Green
-    Write-Host "  🌐 HTTP / Reverse Proxy: http://localhost:$Port" -ForegroundColor Cyan
-    Write-Host "  🔒 Direct HTTPS (Opt):   https://localhost:$HttpsPort" -ForegroundColor Gray
-    Write-Host "  📱 Mobile / LAN:         http://<Your-LAN-IP>:$Port" -ForegroundColor Cyan
-    Write-Host "  📂 Downloads:        $DownloadsDir" -ForegroundColor White
-    Write-Host "  💾 Data/DB:          $DataDir" -ForegroundColor White
+    Write-Host "  🌐 Web URL:       http://localhost:$Port" -ForegroundColor Cyan
+    Write-Host "  📱 LAN / Proxy:   http://<Your-LAN-IP>:$Port" -ForegroundColor Cyan
+    Write-Host "  📂 Downloads:     $DownloadsDir" -ForegroundColor White
+    Write-Host "  💾 Data/DB:       $DataDir" -ForegroundColor White
     Write-Host "==========================================================" -ForegroundColor Green
 
     # Optional: Update plugins inside container

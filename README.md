@@ -73,12 +73,9 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-      - "3443:3443"
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - ENABLE_HTTPS=true
-      - HTTPS_PORT=3443
       - TZ=Asia/Taipei
       - ANIFLIX_DATA_DIR=/data
       - ANIFLIX_DOWNLOADS_DIR=/downloads
@@ -89,7 +86,7 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.centurylinklabs.watchtower.scope=aniflix"
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -k -f https://localhost:3443/api/trending || curl -f http://localhost:3000/api/trending"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/trending"]
       interval: 30s
       timeout: 10s
       retries: 3
