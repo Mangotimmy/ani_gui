@@ -22,7 +22,7 @@ jobs:
 
     # 2. 設定 Docker Buildx（用於建置映像檔的高階工具）
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v6
+      uses: docker/setup-buildx-action@v3
 
     # 3. 登入到 Docker Hub
     - name: Log in to Docker Hub
