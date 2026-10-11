@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { 
   X, Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, 
@@ -1000,16 +1000,63 @@ export default function VideoPlayer({
     setShowLinkModal(false);
   };
 
-  // Controls Visibility Timeout (10 seconds of inactivity)
-  const handleMouseMove = () => {
+  // Controls Visibility Timeout (10 seconds when playing, 30 seconds when paused)
+  const resetControlsTimeout = useCallback((customTimeoutMs) => {
     setShowControls(true);
-    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+      controlsTimeoutRef.current = null;
+    }
+
+    const video = videoRef.current;
+    const isCurrentlyPlaying = video ? !video.paused : isPlaying;
+    const timeoutMs = customTimeoutMs !== undefined 
+      ? customTimeoutMs 
+      : (isCurrentlyPlaying ? 10000 : 30000);
+
     controlsTimeoutRef.current = setTimeout(() => {
-      if (isPlaying && !showLinkModal && !showQualityMenu && !showContextMenu && !showSubtitlesMenu && !showEpisodeDrawer && !showExternalMenu) {
+      // Do not hide if interactive menus, drawers, or scrubbers are active
+      if (
+        !showLinkModal &&
+        !showQualityMenu &&
+        !showContextMenu &&
+        !showSubtitlesMenu &&
+        !showEpisodeDrawer &&
+        !showExternalMenu &&
+        !showDebugPanel &&
+        !showHiddenOptions &&
+        !isScrubbing
+      ) {
         setShowControls(false);
       }
-    }, 10000);
+    }, timeoutMs);
+  }, [
+    isPlaying,
+    showLinkModal,
+    showQualityMenu,
+    showContextMenu,
+    showSubtitlesMenu,
+    showEpisodeDrawer,
+    showExternalMenu,
+    showDebugPanel,
+    showHiddenOptions,
+    isScrubbing
+  ]);
+
+  const handleMouseMove = () => {
+    resetControlsTimeout();
   };
+
+  // Automatically adjust timeout whenever playback state toggles (10s on play, 30s on pause)
+  useEffect(() => {
+    resetControlsTimeout();
+    return () => {
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+        controlsTimeoutRef.current = null;
+      }
+    };
+  }, [isPlaying, resetControlsTimeout]);
 
   // Synchronous relative seek with instant scrubber bar & knob follow
   const seekRelative = (seconds) => {
@@ -1415,8 +1462,16 @@ export default function VideoPlayer({
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleVideoEnded}
         onWaiting={() => setIsBuffering(true)}
-        onPlaying={() => { setIsBuffering(false); setIsPlaying(true); }}
-        onPause={() => { setIsPlaying(false); setIsBuffering(false); }}
+        onPlaying={() => { 
+          setIsBuffering(false); 
+          setIsPlaying(true); 
+          resetControlsTimeout(10000); 
+        }}
+        onPause={() => { 
+          setIsPlaying(false); 
+          setIsBuffering(false); 
+          resetControlsTimeout(30000); 
+        }}
         onCanPlay={() => setIsBuffering(false)}
         onCanPlayThrough={() => setIsBuffering(false)}
         onSeeked={() => setIsBuffering(false)}
