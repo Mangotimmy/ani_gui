@@ -61,28 +61,60 @@ Deploy AniFlix effortlessly on **Synology DSM 7.2 (Container Manager)**, **QNAP 
 1. Create a `docker-compose.yml` file:
 
 ```yaml
-version: '3.8'
+ version: '3.8'
 
 services:
   aniflix:
     image: ghcr.io/mangotimmy/ani_gui:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: aniflix
     restart: unless-stopped
     ports:
+      - "3000:3000"
       - "3443:3443"
     environment:
       - NODE_ENV=production
-      - PORT=3443
+      - PORT=3000
+      - ENABLE_HTTPS=true
+      - HTTPS_PORT=3443
       - TZ=Asia/Taipei
       - ANIFLIX_DATA_DIR=/data
       - ANIFLIX_DOWNLOADS_DIR=/downloads
     volumes:
       - ./data:/data
       - ./downloads:/downloads
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.centurylinklabs.watchtower.scope=aniflix"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -k -f https://localhost:3443/api/trending || curl -f http://localhost:3000/api/trending"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     deploy:
       resources:
         limits:
           memory: 1024M
+
+  # 🚀 Auto-Updater: Watchtower automatically polls GHCR and updates AniFlix with zero downtime
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: aniflix-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600
+      - WATCHTOWER_INCLUDE_STOPPED=false
+      - WATCHTOWER_REVIVE_STOPPED=false
+      - WATCHTOWER_SCOPE=aniflix
+    labels:
+      - "com.centurylinklabs.watchtower.scope=aniflix"
+      
 ```
 
 2. Launch container:
