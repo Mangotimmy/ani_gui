@@ -14,7 +14,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - ENABLE_HTTPS=true
+      - ENABLE_HTTPS=false # Behind Synology Reverse Proxy / Nginx / Cloudflare, SSL is terminated on port 443
       - HTTPS_PORT=3443
       - TZ=Asia/Taipei
       - ANIFLIX_DATA_DIR=/data

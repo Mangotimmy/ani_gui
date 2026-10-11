@@ -73,7 +73,7 @@ $dockerRunArgs = @(
     "-v", "${DownloadsDir}:/downloads",
     "-e", "NODE_ENV=production",
     "-e", "PORT=3000",
-    "-e", "ENABLE_HTTPS=true",
+    "-e", "ENABLE_HTTPS=false",
     "-e", "HTTPS_PORT=3443",
     "-e", "ANIFLIX_DATA_DIR=/data",
     "-e", "ANIFLIX_DOWNLOADS_DIR=/downloads",
@@ -86,9 +86,9 @@ $dockerRunArgs = @(
 if ($LASTEXITCODE -eq 0) {
     Write-Host "==========================================================" -ForegroundColor Green
     Write-Host "  [✓] AniFlix Docker Server successfully deployed!" -ForegroundColor Green
-    Write-Host "  🔒 Secure HTTPS Web: https://localhost:$HttpsPort" -ForegroundColor Cyan
-    Write-Host "  🌐 HTTP (Redirect):  http://localhost:$Port" -ForegroundColor Gray
-    Write-Host "  📱 Mobile / LAN:     https://<Your-LAN-IP>:$HttpsPort" -ForegroundColor Cyan
+    Write-Host "  🌐 HTTP / Reverse Proxy: http://localhost:$Port" -ForegroundColor Cyan
+    Write-Host "  🔒 Direct HTTPS (Opt):   https://localhost:$HttpsPort" -ForegroundColor Gray
+    Write-Host "  📱 Mobile / LAN:         http://<Your-LAN-IP>:$Port" -ForegroundColor Cyan
     Write-Host "  📂 Downloads:        $DownloadsDir" -ForegroundColor White
     Write-Host "  💾 Data/DB:          $DataDir" -ForegroundColor White
     Write-Host "==========================================================" -ForegroundColor Green

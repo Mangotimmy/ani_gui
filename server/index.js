@@ -112,6 +112,9 @@ try {
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust reverse proxies (Synology DSM Nginx, Cloudflare, Traefik, Caddy)
+app.set('trust proxy', true);
+
 app.use(cors());
 app.use(express.json());
 
@@ -986,40 +989,28 @@ app.get('*', (req, res, next) => {
 
 // Start Express & HTTPS servers
 const isContainer = isContainerEnvironment();
-const ENABLE_HTTPS = process.env.ENABLE_HTTPS === 'true' || isContainer;
+// Allow explicit opt-in for internal HTTPS; default false when behind reverse proxies
+const ENABLE_HTTPS = process.env.ENABLE_HTTPS === 'true';
 const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '3443', 10);
 
-let sslConfig = null;
+// 1. Primary HTTP server on PORT (e.g. 3000) ALWAYS serves the application directly!
+// This guarantees seamless compatibility with Synology Reverse Proxy, Nginx, Traefik, Caddy, Cloudflare, and local browsers.
+const httpServer = http.createServer(app);
+httpServer.listen(PORT, () => {
+  console.log(`🎬 AniFlix server running on http://localhost:${PORT}`);
+});
+
+// 2. Secondary HTTPS server if explicitly enabled via ENABLE_HTTPS=true
 if (ENABLE_HTTPS) {
-  sslConfig = getOrCreateSslCertificates(USER_DATA_DIR);
-}
-
-if (sslConfig && sslConfig.cert && sslConfig.key) {
-  const httpsServer = https.createServer({ key: sslConfig.key, cert: sslConfig.cert }, app);
-  httpsServer.listen(HTTPS_PORT, () => {
-    console.log(`🔒 AniFlix Secure HTTPS server running on https://localhost:${HTTPS_PORT}`);
-    if (sslConfig.isSelfSigned) {
-      console.log(`   (Using auto-generated self-signed SSL certificate from ${sslConfig.certPath})`);
-    }
-  });
-
-  // Start HTTP redirect server on standard PORT (e.g. 3000)
-  const redirectApp = express();
-  redirectApp.use((req, res) => {
-    const host = req.headers.host ? req.headers.host.split(':')[0] : 'localhost';
-    const portSuffix = (HTTPS_PORT === 443) ? '' : `:${HTTPS_PORT}`;
-    res.redirect(301, `https://${host}${portSuffix}${req.url}`);
-  });
-
-  const httpServer = http.createServer(redirectApp);
-  httpServer.listen(PORT, () => {
-    console.log(`🌐 AniFlix HTTP redirect server running on http://localhost:${PORT} (-> https://localhost:${HTTPS_PORT})`);
-  });
-} else {
-  // Standard HTTP server (local development on Windows/Desktop)
-  const httpServer = http.createServer(app);
-  httpServer.listen(PORT, () => {
-    console.log(`🎬 AniFlix server running on http://localhost:${PORT}`);
-  });
+  const sslConfig = getOrCreateSslCertificates(USER_DATA_DIR);
+  if (sslConfig && sslConfig.cert && sslConfig.key) {
+    const httpsServer = https.createServer({ key: sslConfig.key, cert: sslConfig.cert }, app);
+    httpsServer.listen(HTTPS_PORT, () => {
+      console.log(`🔒 AniFlix Secure HTTPS server running on https://localhost:${HTTPS_PORT}`);
+      if (sslConfig.isSelfSigned) {
+        console.log(`   (Using auto-generated self-signed SSL certificate from ${sslConfig.certPath})`);
+      }
+    });
+  }
 }
 
