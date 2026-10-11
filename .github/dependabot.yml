@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # 設定自動更新 GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily" # 可設定為 daily, weekly 或 monthly
