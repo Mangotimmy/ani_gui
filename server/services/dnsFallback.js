@@ -1,7 +1,6 @@
 // server/services/dnsFallback.js - Resilient DNS Resolver with Cloudflare & Google fallbacks
 // Bypasses ISP/router poisoned or non-resolving anime domain issues (e.g. getaddrinfo ENOENT hianime.at)
 import dns from 'node:dns';
-import { Agent, setGlobalDispatcher } from 'undici';
 
 const FALLBACK_DNS_SERVERS = ['1.1.1.1', '8.8.8.8', '1.0.0.1', '8.8.4.4'];
 
