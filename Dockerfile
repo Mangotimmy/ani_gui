@@ -5,7 +5,7 @@
 # -------------------------------------------------------------------
 
 # Stage 1: Build Frontend Assets
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY . .
 RUN npm run build
 
 # Stage 2: Production Container
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 # Install media extraction dependencies: ffmpeg, aria2c, yt-dlp, python3, and certificates
 RUN apk add --no-cache \
