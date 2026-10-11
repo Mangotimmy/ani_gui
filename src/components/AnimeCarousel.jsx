@@ -33,7 +33,7 @@ function AnimeCarousel({
 
       // Trigger load more if scrolling near the end
       if (direction === 'right' && onLoadMore && !isLoadingMore && hasMore) {
-        if (targetLeft + clientWidth >= scrollWidth - 500) {
+        if (targetLeft + clientWidth >= scrollWidth - 600) {
           onLoadMore();
         }
       }
@@ -43,7 +43,7 @@ function AnimeCarousel({
   const handleScroll = () => {
     if (!rowRef.current || !onLoadMore || isLoadingMore || !hasMore) return;
     const { scrollLeft, clientWidth, scrollWidth } = rowRef.current;
-    if (scrollLeft + clientWidth >= scrollWidth - 400) {
+    if (scrollLeft + clientWidth >= scrollWidth - 500) {
       onLoadMore();
     }
   };

@@ -75,6 +75,7 @@ export default function App() {
     upcoming: 1,
     action: 1,
     fantasy: 1,
+    recommendations: 1,
   });
   const [carouselLoadingMore, setCarouselLoadingMore] = useState({});
   const [carouselHasMore, setCarouselHasMore] = useState({
@@ -85,6 +86,7 @@ export default function App() {
     upcoming: true,
     action: true,
     fantasy: true,
+    recommendations: true,
   });
 
   const handleLoadMoreCarousel = async (category) => {
@@ -101,6 +103,7 @@ export default function App() {
       else if (category === 'action') url = `/api/genre/Action?page=${nextPage}&perPage=50`;
       else if (category === 'fantasy') url = `/api/genre/Fantasy?page=${nextPage}&perPage=50`;
       else if (category === 'thisSeason') url = `/api/catalog?year=${currentSeasonInfo.year}&season=${currentSeasonInfo.season}&page=${nextPage}&perPage=50`;
+      else if (category === 'recommendations') url = `/api/trending?page=${nextPage}&perPage=50`;
 
       if (url) {
         const res = await fetch(url).then(r => r.json());
@@ -113,6 +116,7 @@ export default function App() {
           else if (category === 'action') setActionAnimes(prev => [...prev, ...items]);
           else if (category === 'fantasy') setFantasyAnimes(prev => [...prev, ...items]);
           else if (category === 'thisSeason') setThisSeasonAnimes(prev => [...prev, ...items]);
+          else if (category === 'recommendations') setRecommendations(prev => [...prev, ...items]);
 
           setCarouselPages(prev => ({ ...prev, [category]: nextPage }));
         } else {
@@ -338,7 +342,7 @@ export default function App() {
             favoriteIds: favorites.map(f => f.id),
             favorites,
             watchHistory,
-            limit: 20
+            limit: 60
           })
         });
         const d = await res.json();
@@ -359,7 +363,7 @@ export default function App() {
     try {
       const sParam = season && season !== 'ALL' ? `&season=${season}` : '';
       const adultParam = `&isAdult=${!hideR18}`;
-      const url = `/api/catalog?year=${year}${sParam}&sort=${sort}&page=${page}&perPage=24${adultParam}`;
+      const url = `/api/catalog?year=${year}${sParam}&sort=${sort}&page=${page}&perPage=50${adultParam}`;
       const res = await fetch(url).then(r => r.json());
       if (res.success && Array.isArray(res.media)) {
         if (append) {
@@ -1068,9 +1072,16 @@ export default function App() {
         ) : activeTab === 'upcoming' ? (
           /* Upcoming / Coming Soon Tab Grid */
           <div className="pt-24 px-4 md:px-12">
-            <div className="flex items-center gap-2 mb-6">
-              <Calendar className="w-6 h-6 text-indigo-400" />
-              <h2 className="text-2xl font-black text-white">Coming Soon / Anticipated Releases ({filterAnimeList(upcoming).length})</h2>
+            <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-6 h-6 text-indigo-400" />
+                <h2 className="text-2xl font-black text-white">Coming Soon / Anticipated Releases ({filterAnimeList(upcoming).length})</h2>
+              </div>
+              {carouselHasMore.upcoming && (
+                <span className="text-xs font-bold text-red-400 bg-red-950/50 px-2.5 py-1 rounded-full border border-red-800/40 uppercase tracking-wider">
+                  ∞ 無限載入已啟用
+                </span>
+              )}
             </div>
 
             {filterAnimeList(upcoming).length === 0 ? (
@@ -1079,21 +1090,93 @@ export default function App() {
                 <p className="text-sm mt-3">Loading upcoming releases...</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {filterAnimeList(upcoming).map((anime) => (
-                  <AnimeCard
-                    key={anime.id}
-                    anime={anime}
-                    currentLang={currentLang}
-                    onPlay={handlePlay}
-                    onDownload={handleOpenBatchDownload}
-                    onMoreInfo={setSelectedAnime}
-                    isFavorite={favoriteIds.has(anime.id)}
-                    onToggleFavorite={handleToggleFavorite}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                  {filterAnimeList(upcoming).map((anime) => (
+                    <AnimeCard
+                      key={anime.id}
+                      anime={anime}
+                      currentLang={currentLang}
+                      onPlay={handlePlay}
+                      onDownload={handleOpenBatchDownload}
+                      onMoreInfo={setSelectedAnime}
+                      isFavorite={favoriteIds.has(anime.id)}
+                      onToggleFavorite={handleToggleFavorite}
+                    />
+                  ))}
+                </div>
+
+                {carouselHasMore.upcoming && (
+                  <div className="mt-8 mb-12 flex justify-center">
+                    <button
+                      onClick={() => handleLoadMoreCarousel('upcoming')}
+                      disabled={carouselLoadingMore.upcoming}
+                      className="px-6 py-2.5 rounded-full bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-xs border border-zinc-700 flex items-center gap-2 transition-all disabled:opacity-50"
+                    >
+                      {carouselLoadingMore.upcoming ? <Loader2 className="w-4 h-4 animate-spin text-indigo-400" /> : <Layers className="w-4 h-4 text-indigo-400" />}
+                      <span>{carouselLoadingMore.upcoming ? 'Loading more...' : t('loadMore')}</span>
+                    </button>
+                  </div>
+                )}
+              </>
             )}
+          </div>
+        ) : ['trending', 'top-rated', 'Action', 'Fantasy'].includes(activeTab) ? (
+          /* Dedicated Category Discover Grid with Unlimited Infinite Load More */
+          <div className="pt-24 px-4 md:px-12">
+            {(() => {
+              const catMap = {
+                trending: { title: t('trendingNow'), icon: Flame, list: filteredTrending, key: 'trending', color: 'text-amber-400' },
+                'top-rated': { title: t('highScoreClassics'), icon: Trophy, list: filteredTopRated, key: 'topRated', color: 'text-yellow-400' },
+                Action: { title: t('actionCarousel'), icon: Swords, list: filteredAction, key: 'action', color: 'text-rose-400' },
+                Fantasy: { title: t('fantasyCarousel'), icon: Sparkles, list: filteredFantasy, key: 'fantasy', color: 'text-purple-400' },
+              };
+              const config = catMap[activeTab] || catMap.trending;
+              const IconComp = config.icon;
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+                    <div className="flex items-center gap-2">
+                      <IconComp className={`w-6 h-6 ${config.color}`} />
+                      <h2 className="text-2xl font-black text-white">{config.title} ({config.list.length})</h2>
+                    </div>
+                    {carouselHasMore[config.key] && (
+                      <span className="text-xs font-bold text-red-400 bg-red-950/50 px-2.5 py-1 rounded-full border border-red-800/40 uppercase tracking-wider">
+                        ∞ 無限載入已啟用
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                    {config.list.map((anime) => (
+                      <AnimeCard
+                        key={anime.id}
+                        anime={anime}
+                        currentLang={currentLang}
+                        onPlay={handlePlay}
+                        onDownload={handleOpenBatchDownload}
+                        onMoreInfo={setSelectedAnime}
+                        isFavorite={favoriteIds.has(anime.id)}
+                        onToggleFavorite={handleToggleFavorite}
+                      />
+                    ))}
+                  </div>
+
+                  {carouselHasMore[config.key] && (
+                    <div className="mt-8 mb-12 flex justify-center">
+                      <button
+                        onClick={() => handleLoadMoreCarousel(config.key)}
+                        disabled={carouselLoadingMore[config.key]}
+                        className="px-6 py-2.5 rounded-full bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-xs border border-zinc-700 flex items-center gap-2 transition-all disabled:opacity-50"
+                      >
+                        {carouselLoadingMore[config.key] ? <Loader2 className="w-4 h-4 animate-spin text-red-500" /> : <Layers className="w-4 h-4 text-red-500" />}
+                        <span>{carouselLoadingMore[config.key] ? 'Loading more...' : t('loadMore')}</span>
+                      </button>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         ) : (
           /* Normal Netflix Browsing Rows */
@@ -1158,6 +1241,9 @@ export default function App() {
                     onMoreInfo={setSelectedAnime}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
+                    onLoadMore={() => handleLoadMoreCarousel('recommendations')}
+                    isLoadingMore={Boolean(carouselLoadingMore.recommendations)}
+                    hasMore={Boolean(carouselHasMore.recommendations)}
                   />
                 )}
 
@@ -1180,8 +1266,8 @@ export default function App() {
                   />
                 )}
 
-                {/* 2. Trending Now */}
-                {(activeTab === 'home' || activeTab === 'trending') && (
+                {/* 3. Trending Now */}
+                {activeTab === 'home' && (
                   <AnimeCarousel
                     title={t('trendingNow')}
                     subtitle={t('trendingNowSub')}
@@ -1199,8 +1285,8 @@ export default function App() {
                   />
                 )}
 
-                {/* 3. Top Rated Anime */}
-                {(activeTab === 'home' || activeTab === 'top-rated') && (
+                {/* 4. Top Rated Anime */}
+                {activeTab === 'home' && (
                   <AnimeCarousel
                     title={t('highScoreClassics')}
                     subtitle={t('highScoreClassicsSub')}
@@ -1218,7 +1304,7 @@ export default function App() {
                   />
                 )}
 
-                {/* 4. Popular This Season */}
+                {/* 5. Popular This Season */}
                 {activeTab === 'home' && (
                   <AnimeCarousel
                     title={t('allTimePopular')}
@@ -1237,7 +1323,7 @@ export default function App() {
                   />
                 )}
 
-                {/* 5. Coming Soon & Anticipated Releases */}
+                {/* 6. Coming Soon & Anticipated Releases */}
                 {activeTab === 'home' && upcoming.length > 0 && (
                   <AnimeCarousel
                     title={t('upcoming')}
@@ -1256,8 +1342,8 @@ export default function App() {
                   />
                 )}
 
-                {/* 5. Action & Adventure */}
-                {(activeTab === 'home' || activeTab === 'Action') && (
+                {/* 7. Action & Adventure */}
+                {activeTab === 'home' && (
                   <AnimeCarousel
                     title={t('actionCarousel')}
                     icon={Swords}
@@ -1274,8 +1360,8 @@ export default function App() {
                   />
                 )}
 
-                {/* 6. Sci-Fi & Fantasy */}
-                {(activeTab === 'home' || activeTab === 'Fantasy') && (
+                {/* 8. Sci-Fi & Fantasy */}
+                {activeTab === 'home' && (
                   <AnimeCarousel
                     title={t('fantasyCarousel')}
                     icon={Sparkles}

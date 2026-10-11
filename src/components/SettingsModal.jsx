@@ -330,7 +330,7 @@ export default function SettingsModal({
     setIsPickingFolder(true);
     setSelectedFolderNotice('');
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
 
     try {
       const res = await fetch('/api/system/select-folder', {
@@ -349,19 +349,16 @@ export default function SettingsModal({
         setSelectedFolderNotice('ℹ️ 已取消選取');
         setTimeout(() => setSelectedFolderNotice(''), 2500);
       } else {
-        if (folderInputRef.current) {
-          folderInputRef.current.click();
-        }
+        setSelectedFolderNotice('ℹ️ 請從下方常用預設目錄選取，或直接輸入目標路徑');
+        setTimeout(() => setSelectedFolderNotice(''), 3500);
       }
     } catch (err) {
       clearTimeout(timeoutId);
-      console.warn('Folder selection notice:', err);
-      if (folderInputRef.current) {
-        folderInputRef.current.click();
-      } else {
-        setSelectedFolderNotice('ℹ️ 請從下方預設目錄選取或直接輸入');
-        setTimeout(() => setSelectedFolderNotice(''), 3000);
+      if (err?.name !== 'AbortError') {
+        console.warn('Folder selection notice:', err?.message || err);
       }
+      setSelectedFolderNotice('ℹ️ 請從下方常用預設目錄選取，或直接輸入目標路徑');
+      setTimeout(() => setSelectedFolderNotice(''), 3500);
     } finally {
       setIsPickingFolder(false);
     }

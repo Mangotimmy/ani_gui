@@ -3,6 +3,17 @@ param([string]$InitialDirectory = "")
 
 try {
     Add-Type -AssemblyName System.Windows.Forms
+    
+    $topForm = New-Object System.Windows.Forms.Form
+    $topForm.TopMost = $true
+    $topForm.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $topForm.Size = New-Object System.Drawing.Size(1, 1)
+    $topForm.Opacity = 0
+    $topForm.ShowInTaskbar = $false
+    $topForm.Show()
+    $topForm.BringToFront()
+    $topForm.Activate()
+
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
     $dialog.Description = "Select AniFlix Download Folder"
     $dialog.AutoUpgradeEnabled = $true
@@ -17,7 +28,9 @@ try {
         }
     }
 
-    $result = $dialog.ShowDialog()
+    $result = $dialog.ShowDialog($topForm)
+    $topForm.Dispose()
+
     if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         Write-Output $dialog.SelectedPath
     }

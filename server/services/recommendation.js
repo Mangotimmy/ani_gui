@@ -9,7 +9,7 @@ export async function computeRecommendations({
   favoriteIds = [], 
   favorites = [], 
   watchHistory = [], 
-  limit = 20 
+  limit = 60 
 }) {
   const seenIds = new Set();
   const candidateMap = new Map(); // id -> candidate data
@@ -67,16 +67,16 @@ export async function computeRecommendations({
   normalizedHistory.sort((a, b) => b.weight - a.weight);
 
   // 3. Dual-Path Graph Retrieval:
-  // Path A: Top watched anime seeds (up to 3)
-  const topWatchedSeeds = normalizedHistory.slice(0, 3);
-  // Path B: Top favorites seeds (up to 3)
-  const topFavSeeds = favorites.slice(0, 3);
+  // Path A: Top watched anime seeds (up to 5)
+  const topWatchedSeeds = normalizedHistory.slice(0, 5);
+  // Path B: Top favorites seeds (up to 5)
+  const topFavSeeds = favorites.slice(0, 5);
 
   const fetchSeedRecs = async (seeds, type) => {
     const tasks = seeds.map(async (seed) => {
       const anime = seed.anime || seed;
       try {
-        const recs = await getRecommendationsForAnime(anime.id, 8);
+        const recs = await getRecommendationsForAnime(anime.id, 15);
         return { seedAnime: anime, episode: seed.episode, type, recs };
       } catch (err) {
         return { seedAnime: anime, type, recs: [] };
@@ -129,7 +129,7 @@ export async function computeRecommendations({
   if (candidateMap.size < limit * 2 && sortedAffinityGenres.length > 0) {
     const topGenre = sortedAffinityGenres[0];
     try {
-      const genreCandidates = await getByGenre(topGenre, 1, 15);
+      const genreCandidates = await getByGenre(topGenre, 1, 30);
       for (const cand of (genreCandidates || [])) {
         if (!cand || !cand.id || seenIds.has(Number(cand.id))) continue;
         const cid = Number(cand.id);
@@ -150,7 +150,7 @@ export async function computeRecommendations({
   // 5. Cold Start Fallback (no favorites or history)
   if (candidateMap.size === 0) {
     try {
-      const [trend, pop] = await Promise.all([getTrending(1, 12), getPopular(1, 12)]);
+      const [trend, pop] = await Promise.all([getTrending(1, 30), getPopular(1, 30)]);
       for (const cand of [...(trend || []), ...(pop || [])]) {
         if (!cand || !cand.id || seenIds.has(Number(cand.id))) continue;
         const cid = Number(cand.id);

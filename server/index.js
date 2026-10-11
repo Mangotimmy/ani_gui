@@ -299,7 +299,7 @@ app.post('/api/torrents/open', (req, res) => {
 // Personalized recommendations
 app.post('/api/recommendations', async (req, res) => {
   try {
-    const { favoriteIds = [], favorites = [], watchHistory = [], limit = 18 } = req.body;
+    const { favoriteIds = [], favorites = [], watchHistory = [], limit = 60 } = req.body;
     const recommendations = await computeRecommendations({ favoriteIds, favorites, watchHistory, limit });
     res.json({ success: true, data: recommendations });
   } catch (err) {
