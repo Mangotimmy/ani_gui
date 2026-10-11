@@ -57,15 +57,41 @@ export default function App() {
     setCurrentLang(langCode);
   };
 
-  // Content Data
-  const [trending, setTrending] = useState([]);
-  const [popular, setPopular] = useState([]);
-  const [topRated, setTopRated] = useState([]);
-  const [upcoming, setUpcoming] = useState([]);
-  const [actionAnimes, setActionAnimes] = useState([]);
-  const [fantasyAnimes, setFantasyAnimes] = useState([]);
+const HOME_CACHE_KEY = 'aniflix_home_cache_v2';
+
+function getHomeCache(key) {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(HOME_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed[key]) ? parsed[key] : [];
+  } catch {
+    return [];
+  }
+}
+
+function hasHomeCache() {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = localStorage.getItem(HOME_CACHE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed.trending) && parsed.trending.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+  // Content Data with Instant Local Cache Hydration (0ms F5 reload)
+  const [trending, setTrending] = useState(() => getHomeCache('trending'));
+  const [popular, setPopular] = useState(() => getHomeCache('popular'));
+  const [topRated, setTopRated] = useState(() => getHomeCache('topRated'));
+  const [upcoming, setUpcoming] = useState(() => getHomeCache('upcoming'));
+  const [actionAnimes, setActionAnimes] = useState(() => getHomeCache('actionAnimes'));
+  const [fantasyAnimes, setFantasyAnimes] = useState(() => getHomeCache('fantasyAnimes'));
   const [recommendations, setRecommendations] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => !hasHomeCache());
 
   // Infinite Horizontal Carousel Pagination State
   const [carouselPages, setCarouselPages] = useState({
@@ -133,7 +159,7 @@ export default function App() {
 
   // Catalog & Seasonal Content State
   const [currentSeasonInfo, setCurrentSeasonInfo] = useState({ year: CURRENT_YEAR, season: 'FALL', label: `Fall ${CURRENT_YEAR}` });
-  const [thisSeasonAnimes, setThisSeasonAnimes] = useState([]);
+  const [thisSeasonAnimes, setThisSeasonAnimes] = useState(() => getHomeCache('thisSeasonAnimes'));
   const [catalogYear, setCatalogYear] = useState(CURRENT_YEAR);
   const [catalogSeason, setCatalogSeason] = useState('ALL');
   const [catalogSort, setCatalogSort] = useState('POPULARITY_DESC');
@@ -253,42 +279,54 @@ export default function App() {
     };
   });
 
-  // 1. Initial Content Data Fetching
+  // 1. Initial Content Data Fetching (Parallelized SWR Background Revalidation)
   useEffect(() => {
     async function loadInitialData() {
-      setIsLoading(true);
+      // Only show full-screen blocking spinner if we have no cached data at all
+      if (!hasHomeCache()) {
+        setIsLoading(true);
+      }
+
       try {
-        const [trendRes, popRes, topRes, actRes, fanRes, upRes, seasonRes] = await Promise.all([
-          fetch('/api/trending?perPage=50').then(r => r.json()),
-          fetch('/api/popular?perPage=50').then(r => r.json()),
-          fetch('/api/top-rated?perPage=50').then(r => r.json()),
-          fetch('/api/genre/Action?perPage=50').then(r => r.json()),
-          fetch('/api/genre/Fantasy?perPage=50').then(r => r.json()),
-          fetch('/api/upcoming?perPage=50').then(r => r.json()),
-          fetch('/api/catalog/current-season').then(r => r.json()).catch(() => ({ success: false }))
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const m = now.getMonth() + 1;
+        const currentSeason = (m >= 1 && m <= 3) ? 'WINTER' : (m >= 4 && m <= 6) ? 'SPRING' : (m >= 7 && m <= 9) ? 'SUMMER' : 'FALL';
+
+        // Fetch all 7 categories + this season catalog simultaneously in parallel (NO waterfall delay!)
+        const [trendRes, popRes, topRes, actRes, fanRes, upRes, seasonRes, thisSeasonData] = await Promise.all([
+          fetch('/api/trending?perPage=50').then(r => r.json()).catch(() => ({ success: false })),
+          fetch('/api/popular?perPage=50').then(r => r.json()).catch(() => ({ success: false })),
+          fetch('/api/top-rated?perPage=50').then(r => r.json()).catch(() => ({ success: false })),
+          fetch('/api/genre/Action?perPage=50').then(r => r.json()).catch(() => ({ success: false })),
+          fetch('/api/genre/Fantasy?perPage=50').then(r => r.json()).catch(() => ({ success: false })),
+          fetch('/api/upcoming?perPage=50').then(r => r.json()).catch(() => ({ success: false })),
+          fetch('/api/catalog/current-season').then(r => r.json()).catch(() => ({ success: false })),
+          fetch(`/api/catalog?year=${currentYear}&season=${currentSeason}&perPage=50`).then(r => r.json()).catch(() => ({ success: false }))
         ]);
 
-        if (trendRes.success) setTrending(trendRes.data);
-        if (popRes.success) setPopular(popRes.data);
-        if (topRes.success) setTopRated(topRes.data);
-        if (actRes.success) setActionAnimes(actRes.data);
-        if (fanRes.success) setFantasyAnimes(fanRes.data);
-        if (upRes.success) setUpcoming(upRes.data);
+        const newCache = {};
+        if (trendRes.success && trendRes.data) { setTrending(trendRes.data); newCache.trending = trendRes.data; }
+        if (popRes.success && popRes.data) { setPopular(popRes.data); newCache.popular = popRes.data; }
+        if (topRes.success && topRes.data) { setTopRated(topRes.data); newCache.topRated = topRes.data; }
+        if (actRes.success && actRes.data) { setActionAnimes(actRes.data); newCache.actionAnimes = actRes.data; }
+        if (fanRes.success && fanRes.data) { setFantasyAnimes(fanRes.data); newCache.fantasyAnimes = fanRes.data; }
+        if (upRes.success && upRes.data) { setUpcoming(upRes.data); newCache.upcoming = upRes.data; }
+        if (thisSeasonData.success && Array.isArray(thisSeasonData.media)) {
+          setThisSeasonAnimes(thisSeasonData.media);
+          newCache.thisSeasonAnimes = thisSeasonData.media;
+        }
 
         if (seasonRes && seasonRes.success) {
           setCurrentSeasonInfo({ year: seasonRes.year, season: seasonRes.season, label: seasonRes.label });
           setCatalogYear(seasonRes.year);
-
-          // Fetch this season's anime for Home row (up to 50 items)
-          try {
-            const thisSeasonData = await fetch(`/api/catalog?year=${seasonRes.year}&season=${seasonRes.season}&perPage=50`).then(r => r.json());
-            if (thisSeasonData.success && Array.isArray(thisSeasonData.media)) {
-              setThisSeasonAnimes(thisSeasonData.media);
-            }
-          } catch (e) {
-            console.warn('Failed to load this season anime:', e);
-          }
         }
+
+        try {
+          if (Object.keys(newCache).length > 0) {
+            localStorage.setItem(HOME_CACHE_KEY, JSON.stringify(newCache));
+          }
+        } catch {}
       } catch (err) {
         console.error('Failed to load anime categories:', err);
       } finally {

@@ -70,7 +70,13 @@ const MEDIA_FIELDS = `
   }
 `;
 
+const metadataListCache = new BoundedCache(300, 45 * 60 * 1000); // 45 min TTL
+
 export async function getTrending(page = 1, perPage = 50) {
+  const cacheKey = `trending_${page}_${perPage}`;
+  const cached = metadataListCache.get(cacheKey);
+  if (cached) return cached;
+
   const query = `
     query ($page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
@@ -81,10 +87,16 @@ export async function getTrending(page = 1, perPage = 50) {
     }
   `;
   const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
-  return enrichWithChineseTitles(data?.Page?.media || []);
+  const result = enrichWithChineseTitles(data?.Page?.media || []);
+  if (result && result.length > 0) metadataListCache.set(cacheKey, result);
+  return result;
 }
 
 export async function getPopular(page = 1, perPage = 50) {
+  const cacheKey = `popular_${page}_${perPage}`;
+  const cached = metadataListCache.get(cacheKey);
+  if (cached) return cached;
+
   const query = `
     query ($page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
@@ -95,10 +107,16 @@ export async function getPopular(page = 1, perPage = 50) {
     }
   `;
   const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
-  return enrichWithChineseTitles(data?.Page?.media || []);
+  const result = enrichWithChineseTitles(data?.Page?.media || []);
+  if (result && result.length > 0) metadataListCache.set(cacheKey, result);
+  return result;
 }
 
 export async function getTopRated(page = 1, perPage = 50) {
+  const cacheKey = `topRated_${page}_${perPage}`;
+  const cached = metadataListCache.get(cacheKey);
+  if (cached) return cached;
+
   const query = `
     query ($page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
@@ -109,10 +127,16 @@ export async function getTopRated(page = 1, perPage = 50) {
     }
   `;
   const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
-  return enrichWithChineseTitles(data?.Page?.media || []);
+  const result = enrichWithChineseTitles(data?.Page?.media || []);
+  if (result && result.length > 0) metadataListCache.set(cacheKey, result);
+  return result;
 }
 
 export async function getUpcoming(page = 1, perPage = 50) {
+  const cacheKey = `upcoming_${page}_${perPage}`;
+  const cached = metadataListCache.get(cacheKey);
+  if (cached) return cached;
+
   const query = `
     query ($page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
@@ -123,10 +147,16 @@ export async function getUpcoming(page = 1, perPage = 50) {
     }
   `;
   const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
-  return enrichWithChineseTitles(data?.Page?.media || []);
+  const result = enrichWithChineseTitles(data?.Page?.media || []);
+  if (result && result.length > 0) metadataListCache.set(cacheKey, result);
+  return result;
 }
 
 export async function getByGenre(genre, page = 1, perPage = 50) {
+  const cacheKey = `genre_${genre}_${page}_${perPage}`;
+  const cached = metadataListCache.get(cacheKey);
+  if (cached) return cached;
+
   const query = `
     query ($genre: String, $page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
@@ -137,7 +167,9 @@ export async function getByGenre(genre, page = 1, perPage = 50) {
     }
   `;
   const data = await anilistQuery(query, { genre, page: parseInt(page), perPage: parseInt(perPage) });
-  return enrichWithChineseTitles(data?.Page?.media || []);
+  const result = enrichWithChineseTitles(data?.Page?.media || []);
+  if (result && result.length > 0) metadataListCache.set(cacheKey, result);
+  return result;
 }
 
 export async function searchAnime(keyword, page = 1, perPage = 50) {
@@ -318,12 +350,20 @@ export async function getCatalog({
     }
   `;
 
+  const cacheKey = `catalog_${year}_${season}_${variables.sort.join(',')}_${page}_${perPage}_${variables.isAdult}`;
+  const cached = metadataListCache.get(cacheKey);
+  if (cached) return cached;
+
   try {
     const data = await anilistQuery(query, variables);
-    return {
+    const result = {
       media: enrichWithChineseTitles(data?.Page?.media || []),
       pageInfo: data?.Page?.pageInfo || { hasNextPage: false }
     };
+    if (result.media && result.media.length > 0) {
+      metadataListCache.set(cacheKey, result);
+    }
+    return result;
   } catch (err) {
     console.error('Failed to get seasonal catalog:', err.message);
     return { media: [], pageInfo: { hasNextPage: false } };
