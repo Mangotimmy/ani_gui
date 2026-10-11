@@ -1,11 +1,8 @@
 // src/App.jsx - AniFlix Desktop Netflix Application
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, startTransition, Suspense } from 'react';
 import Navbar from './components/Navbar';
 import HeroBanner from './components/HeroBanner';
 import AnimeCarousel from './components/AnimeCarousel';
-import DetailModal from './components/DetailModal';
-import BatchDownloadModal from './components/BatchDownloadModal';
-import VideoPlayer from './components/VideoPlayer';
 import DownloadManager from './components/DownloadManager';
 import SettingsModal from './components/SettingsModal';
 import SetupWizardModal from './components/SetupWizardModal';
@@ -13,6 +10,11 @@ import DownloadedFilesModal from './components/DownloadedFilesModal';
 import AnimeCard from './components/AnimeCard';
 import MarqueeTicker from './components/animata/MarqueeTicker';
 import { getPlatformInfo } from './utils/platform';
+
+// Code-split heavy modals to eliminate main-thread evaluation on boot and minimize INP latency
+const DetailModal = React.lazy(() => import('./components/DetailModal'));
+const BatchDownloadModal = React.lazy(() => import('./components/BatchDownloadModal'));
+const VideoPlayer = React.lazy(() => import('./components/VideoPlayer'));
 import { 
   Flame, Star, Trophy, Swords, Sparkles, Loader2, 
   Search, Heart, Calendar, History, Trash2, Clock, Play,
@@ -558,15 +560,25 @@ function hasHomeCache() {
 
   // Handlers for Player & Downloads
   const handlePlay = (anime, episode = 1, audioMode = 'sub') => {
-    setActivePlayer({ anime, episode, audioMode });
-    // Append to watch history
-    setWatchHistory(prev => {
-      const filtered = prev.filter(item => item.anime?.id !== anime.id);
-      const updated = [{ anime, episode, timestamp: Date.now() }, ...filtered].slice(0, 30);
-      try {
-        localStorage.setItem('aniflix_watch_history', JSON.stringify(updated));
-      } catch {}
-      return updated;
+    startTransition(() => {
+      setActivePlayer({ anime, episode, audioMode });
+    });
+    // Append to watch history deferred out of pointer interaction frame to eliminate INP latency
+    setTimeout(() => {
+      setWatchHistory(prev => {
+        const filtered = prev.filter(item => item.anime?.id !== anime.id);
+        const updated = [{ anime, episode, timestamp: Date.now() }, ...filtered].slice(0, 30);
+        try {
+          localStorage.setItem('aniflix_watch_history', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+    }, 0);
+  };
+
+  const handleMoreInfo = (anime) => {
+    startTransition(() => {
+      setSelectedAnime(anime);
     });
   };
 
@@ -651,8 +663,10 @@ function hasHomeCache() {
   };
 
   const handleOpenBatchDownload = (anime, audioMode = 'sub', initialRange = '') => {
-    setBatchDownloadData({ anime, audioMode, initialRange });
-    setSelectedAnime(null);
+    startTransition(() => {
+      setBatchDownloadData({ anime, audioMode, initialRange });
+      setSelectedAnime(null);
+    });
   };
 
   const handleStartDownload = async (payload) => {
@@ -1228,7 +1242,7 @@ function hasHomeCache() {
                 t={t}
                 onPlay={handlePlay}
                 onDownload={handleOpenBatchDownload}
-                onMoreInfo={setSelectedAnime}
+                onMoreInfo={handleMoreInfo}
               />
             )}
 
@@ -1241,7 +1255,7 @@ function hasHomeCache() {
 
             {/* Horizontal Carousels */}
             {!isLoading && (
-              <div className={`space-y-6 ${activeTab === 'home' ? 'relative z-20 -mt-8 md:-mt-12' : 'pt-24'}`}>
+              <div className={`space-y-6 min-h-[600px] ${activeTab === 'home' ? 'relative z-20 -mt-8 md:-mt-12' : 'pt-24'}`}>
                 {/* 0. Continue Watching Carousel */}
                 {activeTab === 'home' && watchHistory.length > 0 && (
                   <AnimeCarousel
@@ -1255,7 +1269,7 @@ function hasHomeCache() {
                       handlePlay(anime, historyItem?.episode || 1);
                     }}
                     onDownload={handleOpenBatchDownload}
-                    onMoreInfo={setSelectedAnime}
+                    onMoreInfo={handleMoreInfo}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
                   />
@@ -1277,7 +1291,7 @@ function hasHomeCache() {
                     currentLang={currentLang}
                     onPlay={handlePlay}
                     onDownload={handleOpenBatchDownload}
-                    onMoreInfo={setSelectedAnime}
+                    onMoreInfo={handleMoreInfo}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
                     onLoadMore={() => handleLoadMoreCarousel('recommendations')}
@@ -1296,7 +1310,7 @@ function hasHomeCache() {
                     currentLang={currentLang}
                     onPlay={handlePlay}
                     onDownload={handleOpenBatchDownload}
-                    onMoreInfo={setSelectedAnime}
+                    onMoreInfo={handleMoreInfo}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
                     onLoadMore={() => handleLoadMoreCarousel('thisSeason')}
@@ -1315,7 +1329,7 @@ function hasHomeCache() {
                     currentLang={currentLang}
                     onPlay={handlePlay}
                     onDownload={handleOpenBatchDownload}
-                    onMoreInfo={setSelectedAnime}
+                    onMoreInfo={handleMoreInfo}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
                     onLoadMore={() => handleLoadMoreCarousel('trending')}
@@ -1334,7 +1348,7 @@ function hasHomeCache() {
                     currentLang={currentLang}
                     onPlay={handlePlay}
                     onDownload={handleOpenBatchDownload}
-                    onMoreInfo={setSelectedAnime}
+                    onMoreInfo={handleMoreInfo}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
                     onLoadMore={() => handleLoadMoreCarousel('topRated')}
@@ -1353,7 +1367,7 @@ function hasHomeCache() {
                     currentLang={currentLang}
                     onPlay={handlePlay}
                     onDownload={handleOpenBatchDownload}
-                    onMoreInfo={setSelectedAnime}
+                    onMoreInfo={handleMoreInfo}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
                     onLoadMore={() => handleLoadMoreCarousel('popular')}
@@ -1372,7 +1386,7 @@ function hasHomeCache() {
                     currentLang={currentLang}
                     onPlay={handlePlay}
                     onDownload={handleOpenBatchDownload}
-                    onMoreInfo={setSelectedAnime}
+                    onMoreInfo={handleMoreInfo}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
                     onLoadMore={() => handleLoadMoreCarousel('upcoming')}
@@ -1390,7 +1404,7 @@ function hasHomeCache() {
                     currentLang={currentLang}
                     onPlay={handlePlay}
                     onDownload={handleOpenBatchDownload}
-                    onMoreInfo={setSelectedAnime}
+                    onMoreInfo={handleMoreInfo}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
                     onLoadMore={() => handleLoadMoreCarousel('action')}
@@ -1408,7 +1422,7 @@ function hasHomeCache() {
                     currentLang={currentLang}
                     onPlay={handlePlay}
                     onDownload={handleOpenBatchDownload}
-                    onMoreInfo={setSelectedAnime}
+                    onMoreInfo={handleMoreInfo}
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
                     onLoadMore={() => handleLoadMoreCarousel('fantasy')}
@@ -1429,55 +1443,58 @@ function hasHomeCache() {
 
       {/* Modals & Overlays */}
 
-      {/* Anime Detail & Episode Picker Modal */}
-      {selectedAnime && (
-        <DetailModal
-          anime={selectedAnime}
-          onClose={() => setSelectedAnime(null)}
-          onPlay={handlePlay}
-          onOpenBatchDownload={handleOpenBatchDownload}
-          onPlayMpv={handlePlayMpv}
-          isFavorite={favoriteIds.has(selectedAnime.id)}
-          onToggleFavorite={handleToggleFavorite}
-          onSelectAnime={(newAnime) => setSelectedAnime(newAnime)}
-          currentLang={currentLang}
-          hideR18={hideR18}
-          gpuSettings={gpuSettings}
-          onUpdateGpuSettings={handleSaveSettings}
-          t={t}
-        />
-      )}
+      {/* Lazy-Loaded Modals & Overlays wrapped in Suspense for zero main-thread blocking */}
+      <Suspense fallback={null}>
+        {/* Anime Detail & Episode Picker Modal */}
+        {selectedAnime && (
+          <DetailModal
+            anime={selectedAnime}
+            onClose={() => setSelectedAnime(null)}
+            onPlay={handlePlay}
+            onOpenBatchDownload={handleOpenBatchDownload}
+            onPlayMpv={handlePlayMpv}
+            isFavorite={favoriteIds.has(selectedAnime.id)}
+            onToggleFavorite={handleToggleFavorite}
+            onSelectAnime={(newAnime) => setSelectedAnime(newAnime)}
+            currentLang={currentLang}
+            hideR18={hideR18}
+            gpuSettings={gpuSettings}
+            onUpdateGpuSettings={handleSaveSettings}
+            t={t}
+          />
+        )}
 
-      {/* Batch Downloader Modal */}
-      {batchDownloadData && (
-        <BatchDownloadModal
-          anime={batchDownloadData.anime}
-          initialAudioMode={batchDownloadData.audioMode}
-          initialRange={batchDownloadData.initialRange}
-          onClose={() => setBatchDownloadData(null)}
-          onStartDownload={handleStartDownload}
-        />
-      )}
+        {/* Batch Downloader Modal */}
+        {batchDownloadData && (
+          <BatchDownloadModal
+            anime={batchDownloadData.anime}
+            initialAudioMode={batchDownloadData.audioMode}
+            initialRange={batchDownloadData.initialRange}
+            onClose={() => setBatchDownloadData(null)}
+            onStartDownload={handleStartDownload}
+          />
+        )}
 
-      {/* Embedded In-Browser Video Player */}
-      {activePlayer && (
-        <VideoPlayer
-          anime={activePlayer.anime}
-          episode={activePlayer.episode}
-          audioMode={activePlayer.audioMode}
-          directStreamUrl={activePlayer.directStreamUrl}
-          totalEpisodes={activePlayer.anime?.episodes}
-          onClose={() => setActivePlayer(null)}
-          onSelectEpisode={(ep) => setActivePlayer(prev => ({ ...prev, episode: ep }))}
-          onNextEpisode={() => setActivePlayer(prev => ({ ...prev, episode: prev.episode + 1 }))}
-          onPrevEpisode={() => setActivePlayer(prev => ({ ...prev, episode: Math.max(1, prev.episode - 1) }))}
-          onLaunchMpv={(anime, ep, mode, stream) => handlePlayMpv(anime, ep, mode, stream)}
-          currentLang={currentLang}
-          gpuSettings={gpuSettings}
-          onUpdateGpuSettings={handleSaveSettings}
-          t={t}
-        />
-      )}
+        {/* Embedded In-Browser Video Player */}
+        {activePlayer && (
+          <VideoPlayer
+            anime={activePlayer.anime}
+            episode={activePlayer.episode}
+            audioMode={activePlayer.audioMode}
+            directStreamUrl={activePlayer.directStreamUrl}
+            totalEpisodes={activePlayer.anime?.episodes}
+            onClose={() => setActivePlayer(null)}
+            onSelectEpisode={(ep) => setActivePlayer(prev => ({ ...prev, episode: ep }))}
+            onNextEpisode={() => setActivePlayer(prev => ({ ...prev, episode: prev.episode + 1 }))}
+            onPrevEpisode={() => setActivePlayer(prev => ({ ...prev, episode: Math.max(1, prev.episode - 1) }))}
+            onLaunchMpv={(anime, ep, mode, stream) => handlePlayMpv(anime, ep, mode, stream)}
+            currentLang={currentLang}
+            gpuSettings={gpuSettings}
+            onUpdateGpuSettings={handleSaveSettings}
+            t={t}
+          />
+        )}
+      </Suspense>
 
       {/* Slide-Out Download Manager Drawer */}
       <DownloadManager
