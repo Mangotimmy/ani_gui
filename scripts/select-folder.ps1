@@ -2,44 +2,26 @@
 param([string]$InitialDirectory = "")
 
 try {
-    Add-Type -AssemblyName System.Windows.Forms
-    
-    $topForm = New-Object System.Windows.Forms.Form
-    $topForm.TopMost = $true
-    $topForm.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
-    $topForm.Size = New-Object System.Drawing.Size(1, 1)
-    $topForm.Opacity = 0
-    $topForm.ShowInTaskbar = $false
-    $topForm.Show()
-    $topForm.BringToFront()
-    $topForm.Activate()
-
-    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dialog.Description = "Select AniFlix Download Folder"
-    $dialog.AutoUpgradeEnabled = $true
-    $dialog.ShowNewFolderButton = $true
-
-    if ($InitialDirectory -and (Test-Path $InitialDirectory)) {
-        $dialog.SelectedPath = $InitialDirectory
-    } else {
-        $downloads = [System.IO.Path]::Combine($env:USERPROFILE, "Downloads")
-        if (Test-Path $downloads) {
-            $dialog.SelectedPath = $downloads
-        }
-    }
-
-    $result = $dialog.ShowDialog($topForm)
-    $topForm.Dispose()
-
-    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-        Write-Output $dialog.SelectedPath
+    # Method 1: Windows Shell COM object (lightweight, native, zero WinForms Form deadlocks)
+    $shell = New-Object -ComObject Shell.Application
+    # 0x0040 = BIF_NEWDIALOGSTYLE (resizable, includes Make New Folder button)
+    $folder = $shell.BrowseForFolder(0, "選擇 AniFlix 下載儲存目錄 (Select Download Folder)", 0x40, 0)
+    if ($folder -and $folder.Self -and $folder.Self.Path) {
+        Write-Output $folder.Self.Path
+        exit 0
     }
 } catch {
     try {
-        $shell = New-Object -ComObject Shell.Application
-        $folder = $shell.BrowseForFolder(0, "Select AniFlix Download Folder", 0x50, 0)
-        if ($folder) {
-            Write-Output $folder.Self.Path
+        Add-Type -AssemblyName System.Windows.Forms
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dialog.Description = "Select AniFlix Download Folder"
+        $dialog.ShowNewFolderButton = $true
+        if ($InitialDirectory -and (Test-Path $InitialDirectory)) {
+            $dialog.SelectedPath = $InitialDirectory
+        }
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            Write-Output $dialog.SelectedPath
+            exit 0
         }
     } catch {}
 }

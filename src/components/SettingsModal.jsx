@@ -324,13 +324,73 @@ export default function SettingsModal({
   }, [isElectron, activeTab]);
 
   const [selectedFolderNotice, setSelectedFolderNotice] = useState('');
-  const folderInputRef = useRef(null);
 
   const handleSelectFolder = async () => {
     setIsPickingFolder(true);
     setSelectedFolderNotice('');
+
+    // 1. If running in Electron: Pure JavaScript Electron native dialog
+    if (window.electronAPI?.selectFolder) {
+      try {
+        const folder = await window.electronAPI.selectFolder(downloadDir);
+        if (folder) {
+          setDownloadDir(folder);
+          setSelectedFolderNotice(`🟢 已選定目錄：${folder}`);
+          setTimeout(() => setSelectedFolderNotice(''), 4000);
+        } else {
+          setSelectedFolderNotice('ℹ️ 已取消選取');
+          setTimeout(() => setSelectedFolderNotice(''), 2500);
+        }
+      } catch (err) {
+        console.warn('Electron folder selection notice:', err);
+      } finally {
+        setIsPickingFolder(false);
+      }
+      return;
+    }
+
+    // 2. If modern browser supports File System Access API (Chrome, Edge, Opera, Brave): Pure Client JS!
+    if (typeof window.showDirectoryPicker === 'function') {
+      try {
+        const dirHandle = await window.showDirectoryPicker();
+        if (dirHandle && dirHandle.name) {
+          // Resolve full disk path via pure JS backend resolver
+          try {
+            const res = await fetch('/api/system/resolve-folder-name', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ folderName: dirHandle.name, currentDir: downloadDir })
+            });
+            const data = await res.json();
+            const targetPath = data.path || dirHandle.name;
+            setDownloadDir(targetPath);
+            setSelectedFolderNotice(`🟢 已選定目錄：${targetPath}`);
+            setTimeout(() => setSelectedFolderNotice(''), 4000);
+          } catch {
+            setDownloadDir(dirHandle.name);
+            setSelectedFolderNotice(`🟢 已選定資料夾：${dirHandle.name}`);
+            setTimeout(() => setSelectedFolderNotice(''), 4000);
+          }
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          // User clicked Cancel in browser folder picker
+          setSelectedFolderNotice('ℹ️ 已取消選取');
+          setTimeout(() => setSelectedFolderNotice(''), 2500);
+        } else {
+          console.warn('Browser directory picker notice:', err?.message || err);
+          setSelectedFolderNotice('ℹ️ 請從下方常用預設目錄選取，或直接輸入目標路徑');
+          setTimeout(() => setSelectedFolderNotice(''), 3500);
+        }
+      } finally {
+        setIsPickingFolder(false);
+      }
+      return;
+    }
+
+    // 3. Fallback for older browsers: Call backend with safe timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     try {
       const res = await fetch('/api/system/select-folder', {
@@ -361,18 +421,6 @@ export default function SettingsModal({
       setTimeout(() => setSelectedFolderNotice(''), 3500);
     } finally {
       setIsPickingFolder(false);
-    }
-  };
-
-  const handleBrowserFolderChange = (e) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      const relPath = file.webkitRelativePath || '';
-      const topDir = relPath.split('/')[0] || relPath.split('\\')[0];
-      if (topDir) {
-        setSelectedFolderNotice(`🟢 已選定資料夾：${topDir}`);
-        setTimeout(() => setSelectedFolderNotice(''), 4000);
-      }
     }
   };
 
@@ -1552,45 +1600,44 @@ export default function SettingsModal({
                   value={downloadDir}
                   onChange={(e) => setDownloadDir(e.target.value)}
                   placeholder="C:\Users\...\Downloads\Anime 或 /downloads"
-                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-[#E50914] shadow-inner"
-                />
-                {/* Hidden Native Browser Directory Picker Fallback */}
-                <input
-                  type="file"
-                  ref={folderInputRef}
-                  webkitdirectory="true"
-                  directory="true"
-                  onChange={handleBrowserFolderChange}
-                  className="hidden"
-                  aria-hidden="true"
+                  aria-describedby={selectedFolderNotice ? "folderSelectionNotice" : undefined}
+                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E50914] focus-visible:border-transparent shadow-inner transition-shadow"
                 />
                 <button
                   type="button"
                   onClick={handleSelectFolder}
                   disabled={isPickingFolder}
-                  className="px-3.5 py-2.5 bg-zinc-800 hover:bg-zinc-700 active:scale-95 rounded-xl text-xs font-semibold text-emerald-400 border border-zinc-700 flex items-center justify-center gap-1.5 shrink-0 transition-all"
+                  aria-busy={isPickingFolder}
+                  className="px-3.5 py-2.5 bg-zinc-800 hover:bg-zinc-700 active:scale-95 disabled:opacity-60 rounded-xl text-xs font-semibold text-emerald-400 border border-zinc-700 flex items-center justify-center gap-1.5 shrink-0 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 cursor-pointer disabled:cursor-not-allowed"
                   title="選擇目錄 / 瀏覽資料夾"
                 >
-                  <FolderPlus className={`w-4 h-4 ${isPickingFolder ? 'animate-spin' : ''}`} />
+                  <FolderPlus className={`w-4 h-4 ${isPickingFolder ? 'animate-spin' : ''}`} aria-hidden="true" />
                   <span>{isPickingFolder ? '選取中...' : '選擇資料夾'}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => onOpenFolder && onOpenFolder(downloadDir)}
-                  className="px-3.5 py-2.5 bg-zinc-800 hover:bg-zinc-700 active:scale-95 rounded-xl text-xs font-semibold text-zinc-200 border border-zinc-700 flex items-center justify-center gap-1.5 shrink-0 transition-all"
+                  className="px-3.5 py-2.5 bg-zinc-800 hover:bg-zinc-700 active:scale-95 rounded-xl text-xs font-semibold text-zinc-200 border border-zinc-700 flex items-center justify-center gap-1.5 shrink-0 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 cursor-pointer"
                   title={txt.openFolder}
                 >
-                  <Folder className="w-4 h-4 text-amber-400" />
+                  <Folder className="w-4 h-4 text-amber-400" aria-hidden="true" />
                   <span>{txt.openFolder}</span>
                 </button>
               </div>
 
-              {/* Folder Selection Feedback Notice */}
-              {selectedFolderNotice && (
-                <div className="mt-2 text-xs font-mono font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-600/50 px-3 py-1.5 rounded-xl animate-in fade-in">
-                  {selectedFolderNotice}
-                </div>
-              )}
+              {/* Folder Selection Feedback Notice with Screen Reader Live Announcement */}
+              <div 
+                id="folderSelectionNotice"
+                role="status" 
+                aria-live="polite" 
+                className={`mt-2 transition-all ${selectedFolderNotice ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden m-0'}`}
+              >
+                {selectedFolderNotice && (
+                  <div className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-600/50 px-3 py-1.5 rounded-xl animate-in fade-in">
+                    {selectedFolderNotice}
+                  </div>
+                )}
+              </div>
 
               {/* Quick Directory Presets */}
               {folderPresets.length > 0 && (
@@ -1601,7 +1648,7 @@ export default function SettingsModal({
                       key={preset.id}
                       type="button"
                       onClick={() => setDownloadDir(preset.path)}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-mono border transition-all ${
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-mono border transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 cursor-pointer ${
                         downloadDir === preset.path
                           ? 'bg-red-950/60 border-red-600/70 text-red-300 font-bold'
                           : 'bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 border-zinc-700/80'

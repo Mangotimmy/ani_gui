@@ -689,8 +689,8 @@ app.post('/api/system/select-folder', async (req, res) => {
       if (fs.existsSync(scriptPath)) {
         return execFile(
           'powershell.exe',
-          ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-STA', '-File', scriptPath, currentDir || ''],
-          { timeout: 120000, windowsHide: false },
+          ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', scriptPath, currentDir || ''],
+          { timeout: 30000, windowsHide: true },
           (err, stdout) => {
             if (err || !stdout || !stdout.trim()) {
               return res.json({ success: false, cancelled: true });
@@ -707,6 +707,70 @@ app.post('/api/system/select-folder', async (req, res) => {
       success: false, 
       message: 'Native folder dialog unavailable on this platform. Please select from quick presets or enter path manually.' 
     });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Resolve folder name selected via Web File System Access API (window.showDirectoryPicker)
+app.post('/api/system/resolve-folder-name', (req, res) => {
+  try {
+    const { folderName, currentDir } = req.body || {};
+    if (!folderName || typeof folderName !== 'string') {
+      return res.status(400).json({ success: false, error: 'Missing folderName' });
+    }
+
+    const home = os.homedir();
+    const cleanName = folderName.trim();
+    let resolved = null;
+
+    // Check if currentDir has a direct child with this name
+    if (currentDir && fs.existsSync(currentDir)) {
+      const directChild = path.join(currentDir, cleanName);
+      if (fs.existsSync(directChild)) {
+        resolved = directChild;
+      }
+    }
+
+    // Check common standard directories
+    if (!resolved) {
+      const candidates = [
+        path.join(home, 'Downloads', cleanName),
+        path.join(home, 'Videos', cleanName),
+        path.join(home, 'Desktop', cleanName),
+        path.join(home, cleanName)
+      ];
+
+      for (const cand of candidates) {
+        if (fs.existsSync(cand)) {
+          resolved = cand;
+          break;
+        }
+      }
+    }
+
+    // Special folder names (Downloads, Videos, Desktop)
+    if (!resolved) {
+      const lower = cleanName.toLowerCase();
+      if (lower === 'downloads' || lower === '下載') {
+        resolved = path.join(home, 'Downloads', 'Anime');
+      } else if (lower === 'videos' || lower === '影片') {
+        resolved = path.join(home, 'Videos', 'Anime');
+      } else if (lower === 'desktop' || lower === '桌面') {
+        resolved = path.join(home, 'Desktop', 'Anime');
+      } else {
+        // Default target directory inside user's Downloads
+        resolved = path.join(home, 'Downloads', cleanName);
+      }
+    }
+
+    try {
+      if (!fs.existsSync(resolved)) {
+        fs.mkdirSync(resolved, { recursive: true });
+      }
+    } catch {}
+
+    res.json({ success: true, path: resolved, folderName: cleanName });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
