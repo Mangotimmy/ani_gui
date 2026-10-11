@@ -9,7 +9,7 @@ const TOOLS = [
   { name: 'ffmpeg', scoopSubdir: 'ffmpeg', versionArg: '-version', critical: true },
   { name: 'mpv', scoopSubdir: 'mpv', versionArg: '--version', critical: true },
   { name: 'aria2c', scoopSubdir: 'aria2', versionArg: '--version', critical: false },
-  { name: 'ani-cli', scoopSubdir: 'ani-cli', versionArg: '-v', critical: false },
+  { name: 'ani-cli', scoopSubdir: 'ani-cli', versionArg: '--version', critical: false },
   { name: 'git', scoopSubdir: 'git', versionArg: '--version', critical: false }
 ];
 
@@ -227,12 +227,20 @@ if ($bash) {
 export function installAllPlugins(onProgress) {
   return new Promise((resolve, reject) => {
     if (process.platform !== 'win32' || isContainerEnvironment()) {
-      onProgress('📦 偵測到 Linux / Docker 容器環境，正在檢查核心串流組件...\n');
-      const proc = spawn('sh', ['-c', 'which yt-dlp ffmpeg mpv git 2>&1; yt-dlp -U 2>&1 || true']);
+      onProgress('📦 偵測到 Linux / Docker 容器環境，正在檢查並安裝核心組件 (ani-cli, yt-dlp)...\n');
+      const installCmd = [
+        'curl -sL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && chmod a+rx /usr/local/bin/yt-dlp || true',
+        'curl -sL https://raw.githubusercontent.com/pystardust/ani-cli/master/ani-cli -o /usr/local/bin/ani-cli && chmod a+rx /usr/local/bin/ani-cli || true',
+        'echo ">>> Checking installed tools:"',
+        'which yt-dlp ffmpeg mpv aria2c ani-cli git 2>&1 || true',
+        'ani-cli --version 2>&1 || true',
+        'yt-dlp --version 2>&1 || true'
+      ].join(' && ');
+      const proc = spawn('sh', ['-c', installCmd]);
       proc.stdout.on('data', data => onProgress(data.toString()));
       proc.stderr.on('data', data => onProgress(data.toString()));
       proc.on('close', code => {
-        onProgress(`\n✅ 容器環境組件已就緒 (狀態碼: ${code})。\n`);
+        onProgress(`\n✅ 容器環境組件安裝/檢查完成 (狀態碼: ${code})。\n`);
         resolve({ success: true, code });
       });
       proc.on('error', err => {
@@ -316,8 +324,14 @@ Write-Host ">>> Setup completed successfully!"
 export function updateAllPlugins(onProgress) {
   return new Promise((resolve, reject) => {
     if (process.platform !== 'win32' || isContainerEnvironment()) {
-      onProgress('🔄 正在更新 Docker / Linux 容器內的串流組件 (yt-dlp)...\n');
-      const proc = spawn('sh', ['-c', 'yt-dlp -U 2>&1 || true']);
+      onProgress('🔄 正在更新 Docker / Linux 容器內的串流組件 (yt-dlp, ani-cli)...\n');
+      const updateCmd = [
+        'curl -sL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && chmod a+rx /usr/local/bin/yt-dlp || true',
+        'curl -sL https://raw.githubusercontent.com/pystardust/ani-cli/master/ani-cli -o /usr/local/bin/ani-cli && chmod a+rx /usr/local/bin/ani-cli || true',
+        'ani-cli --version 2>&1 || true',
+        'yt-dlp --version 2>&1 || true'
+      ].join(' && ');
+      const proc = spawn('sh', ['-c', updateCmd]);
       proc.stdout.on('data', (data) => onProgress(data.toString()));
       proc.stderr.on('data', (data) => onProgress(data.toString()));
       proc.on('close', (code) => {

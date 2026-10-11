@@ -18,7 +18,7 @@ RUN npm run build
 # Stage 2: Production Container
 FROM node:24-alpine AS runner
 
-# Install media extraction dependencies: ffmpeg, aria2c, mpv, git, openssl, yt-dlp, python3, and certificates
+# Install media extraction dependencies: ffmpeg, aria2c, mpv, git, openssl, yt-dlp, ani-cli, python3, and certificates
 RUN apk add --no-cache \
     ffmpeg \
     aria2 \
@@ -29,9 +29,16 @@ RUN apk add --no-cache \
     py3-pip \
     curl \
     ca-certificates \
-    tzdata && \
+    tzdata \
+    bash \
+    grep \
+    sed \
+    gawk \
+    fzf && \
     curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
-    chmod a+rx /usr/local/bin/yt-dlp
+    chmod a+rx /usr/local/bin/yt-dlp && \
+    curl -L https://raw.githubusercontent.com/pystardust/ani-cli/master/ani-cli -o /usr/local/bin/ani-cli && \
+    chmod a+rx /usr/local/bin/ani-cli
 
 WORKDIR /app
 
