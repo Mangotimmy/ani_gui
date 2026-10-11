@@ -150,7 +150,7 @@ npm start
 ```
 ┌────────────────────────────────────────────────────────┐
 │                   AniFlix Web Client                   │
-│   React 18 • Vite • TailwindCSS • HLS.js • Lucide UI   │
+│   React 19 • Vite • TailwindCSS • HLS.js • Lucide UI   │
 └───────────────────────────┬────────────────────────────┘
                             │ (REST / SSE / WebSockets)
 ┌───────────────────────────▼────────────────────────────┐
