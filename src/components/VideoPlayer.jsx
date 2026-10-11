@@ -8,6 +8,7 @@ import {
   MoreVertical, Film, AlertTriangle
 } from 'lucide-react';
 import { getPlatformInfo, getExternalPlayerLinks } from '../utils/platform.js';
+import { toCachedImageUrl } from '../utils/image.js';
 
 
 const isTradZh = (lang = '') => {
@@ -208,13 +209,14 @@ export default function VideoPlayer({
 
   // Reliably extract preview poster artwork (supports banner, image, or AniList coverImage object)
   const previewPosterUrl = useMemo(() => {
-    if (typeof anime?.bannerImage === 'string' && anime.bannerImage) return anime.bannerImage;
-    if (typeof anime?.image === 'string' && anime.image) return anime.image;
-    if (typeof anime?.coverImage === 'string' && anime.coverImage) return anime.coverImage;
-    if (anime?.coverImage?.extraLarge) return anime.coverImage.extraLarge;
-    if (anime?.coverImage?.large) return anime.coverImage.large;
-    if (anime?.coverImage?.medium) return anime.coverImage.medium;
-    return '';
+    let raw = '';
+    if (typeof anime?.bannerImage === 'string' && anime.bannerImage) raw = anime.bannerImage;
+    else if (typeof anime?.image === 'string' && anime.image) raw = anime.image;
+    else if (typeof anime?.coverImage === 'string' && anime.coverImage) raw = anime.coverImage;
+    else if (anime?.coverImage?.extraLarge) raw = anime.coverImage.extraLarge;
+    else if (anime?.coverImage?.large) raw = anime.coverImage.large;
+    else if (anime?.coverImage?.medium) raw = anime.coverImage.medium;
+    return toCachedImageUrl(raw);
   }, [anime]);
 
   useEffect(() => {
@@ -236,6 +238,56 @@ export default function VideoPlayer({
     const updateStats = () => {
       const video = videoRef.current;
       const hls = hlsRef.current;
+
+      // Stream native resolution
+      const streamRes = (video && video.videoWidth && video.videoHeight)
+        ? `${video.videoWidth} × ${video.videoHeight}`
+        : (hls && hls.levels && hls.currentLevel >= 0 && hls.levels[hls.currentLevel])
+        ? `${hls.levels[hls.currentLevel].width || 0} × ${hls.levels[hls.currentLevel].height || 0}`
+        : '—';
+
+      // Rendered / viewport resolution
+      const renderRes = video
+        ? `${Math.round(video.clientWidth)} × ${Math.round(video.clientHeight)}`
+        : '—';
+
+      // Windowed / screen resolution & DPR
+      const windowRes = typeof window !== 'undefined'
+        ? `${window.innerWidth} × ${window.innerHeight} (DPR ${window.devicePixelRatio || 1})`
+        : '—';
+
+      // Frame Drop & Playback Quality
+      let frameStats = '0 / 0 (0.00%)';
+      if (video && typeof video.getVideoPlaybackQuality === 'function') {
+        const q = video.getVideoPlaybackQuality();
+        const total = q.totalVideoFrames || 0;
+        const dropped = q.droppedVideoFrames || 0;
+        const rate = total > 0 ? ((dropped / total) * 100).toFixed(2) : '0.00';
+        frameStats = `${dropped} / ${total} (${rate}%)`;
+      }
+
+      // Audio Sampling Rate & Channel Configuration
+      let audioHz = '48,000 Hz';
+      try {
+        const audioCtx = window._aniAudioCtx || (window._aniAudioCtx = new (window.AudioContext || window.webkitAudioContext)());
+        if (audioCtx && audioCtx.sampleRate) {
+          audioHz = `${audioCtx.sampleRate.toLocaleString()} Hz`;
+        }
+      } catch {}
+
+      const activeAudioTrack = (hls && hls.audioTracks && hls.audioTracks.length > 0)
+        ? hls.audioTracks[hls.audioTrack >= 0 ? hls.audioTrack : 0]
+        : null;
+      const audioTrackInfo = activeAudioTrack
+        ? `${activeAudioTrack.name || activeAudioTrack.lang || '立體聲'} · ${audioHz}`
+        : `立體聲 (2ch) · ${audioHz}`;
+
+      // Video Codec Info
+      const activeLvl = (hls && hls.levels && hls.currentLevel >= 0) ? hls.levels[hls.currentLevel] : null;
+      const videoCodec = activeLvl?.videoCodec 
+        ? activeLvl.videoCodec.split('.')[0].toUpperCase() + ` (${activeLvl.videoCodec})`
+        : (activeLvl?.codecSet || 'H.264 / AVC');
+
       setDebugStats({
         currentTime: video ? video.currentTime.toFixed(2) : '—',
         duration: video ? video.duration?.toFixed(2) : '—',
@@ -244,6 +296,12 @@ export default function VideoPlayer({
           : '—',
         readyState: video ? ['HAVE_NOTHING','HAVE_METADATA','HAVE_CURRENT_DATA','HAVE_FUTURE_DATA','HAVE_ENOUGH_DATA'][video.readyState] : '—',
         networkState: video ? ['EMPTY','IDLE','LOADING','NO_SOURCE'][video.networkState] : '—',
+        streamRes,
+        renderRes,
+        windowRes,
+        frameStats,
+        audioTrackInfo,
+        videoCodec,
         playbackRate: video ? video.playbackRate : '—',
         volume: video ? (video.muted ? 'MUTED' : `${Math.round(video.volume * 100)}%`) : '—',
         hlsLevel: hls ? hls.currentLevel : '—',
@@ -1377,17 +1435,23 @@ export default function VideoPlayer({
 
       {/* ─── Debug Info Panel (top-left corner) ──────────────── */}
       {showDebugPanel && (
-        <div className="absolute top-20 left-4 z-[90] bg-black/85 text-green-400 font-mono text-[11px] p-3 rounded-xl border border-green-500/30 backdrop-blur-md max-w-xs w-72 shadow-2xl pointer-events-none">
+        <div className="absolute top-20 left-4 z-[90] bg-black/90 text-green-400 font-mono text-[11px] p-3 rounded-xl border border-green-500/40 backdrop-blur-md max-w-sm w-80 shadow-2xl pointer-events-none ring-1 ring-white/10">
           <div className="text-green-300 font-bold text-xs mb-2 border-b border-green-500/30 pb-1 flex items-center gap-1.5">
-            🔬 AniFlix Debug
+            🔬 AniFlix Debug (Stats for nerds)
             <span className="ml-auto text-[10px] text-green-600 font-normal">右鍵關閉</span>
           </div>
-          <div className="space-y-0.5 text-[10.5px]">
+          <div className="space-y-0.5 text-[10px]">
             {Object.entries({
               '⏱ 時間': `${debugStats.currentTime}s / ${debugStats.duration}s`,
               '📦 緩衝': debugStats.buffered,
               '🎬 就緒': debugStats.readyState,
               '🌐 網路': debugStats.networkState,
+              '🎞 原生解析度': debugStats.streamRes,
+              '🖥 渲染解析度': debugStats.renderRes,
+              '🪟 視窗解析度': debugStats.windowRes,
+              '📉 掉幀品質': debugStats.frameStats,
+              '🎵 音訊採樣': debugStats.audioTrackInfo,
+              '🎥 視訊編碼': debugStats.videoCodec,
               '🔊 音量': debugStats.volume,
               '⏩ 速率': `×${debugStats.playbackRate}`,
               '📡 HLS層': `Level ${debugStats.hlsLevel}`,
@@ -1395,12 +1459,11 @@ export default function VideoPlayer({
               '⏳ 延遲': debugStats.hlsLatency,
               '💬 字幕': `${debugStats.subtitles} tracks | ${debugStats.selectedSub}`,
               '🎮 GPU': `${debugStats.gpuProfile} · 升頻:${debugStats.upscale}`,
-              '🎵 聲軌': debugStats.audioMode,
               '📺 集數': `Ep ${debugStats.episode}`,
               '🔗 串流': debugStats.streamUrl,
             }).map(([k, v]) => (
-              <div key={k} className="flex gap-1.5">
-                <span className="text-green-600 shrink-0 w-20">{k}</span>
+              <div key={k} className="flex gap-1.5 items-baseline">
+                <span className="text-green-600 shrink-0 w-22">{k}</span>
                 <span className="text-green-300 break-all">{v}</span>
               </div>
             ))}

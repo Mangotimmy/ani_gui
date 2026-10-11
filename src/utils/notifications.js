@@ -1,5 +1,4 @@
-// src/utils/notifications.js - Unified Anime Release & Publishing Notification Service
-// Supports Web Notifications API (PC Browser, Mobile Chrome, Safari PWA, Electron) + In-App Notification Center
+import { getAnimeCoverUrl, toCachedImageUrl } from './image.js';
 
 const NOTIFICATIONS_STORAGE_KEY = 'aniflix_notifications';
 const NOTIFIED_EPISODES_KEY = 'aniflix_notified_episodes';
@@ -33,7 +32,9 @@ export function sendAnimeNotification({ title, body, icon, animeId, episode }) {
     id: notifId,
     title: title || 'AniFlix 動畫更新通知',
     body: body || '您關注的動漫有新的動態發布！',
-    icon: icon || '/build/icon.png',
+    icon: (typeof icon === 'string' && icon
+      ? toCachedImageUrl(icon)
+      : (icon && typeof icon === 'object' ? (icon.large || icon.medium || icon.extraLarge || '') : '')) || '/build/icon.png',
     animeId: animeId || null,
     episode: episode || null,
     timestamp: Date.now(),
@@ -134,7 +135,7 @@ export function checkFavoritesForNewAiring(favorites = []) {
         sendAnimeNotification({
           title: `🎬《${animeTitle}》第 ${nextAiring.episode} 集現已發布開播！`,
           body: `您收藏的每週新番最新集數已上線，點擊立即觀看。`,
-          icon: anime.image || anime.coverImage || '/build/icon.png',
+          icon: getAnimeCoverUrl(anime) || '/build/icon.png',
           animeId: anime.id,
           episode: nextAiring.episode
         });

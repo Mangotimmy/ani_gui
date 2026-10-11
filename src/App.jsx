@@ -24,6 +24,7 @@ import {
   requestNotificationPermission, 
   checkFavoritesForNewAiring 
 } from './utils/notifications';
+import { getAnimeCoverUrl } from './utils/image';
 
 // Dynamically compute future years so catalog, UI and scraper seamlessly scale to 2027, 2028 and beyond
 const CURRENT_YEAR = new Date().getFullYear();
@@ -477,7 +478,7 @@ export default function App() {
         sendAnimeNotification({
           title: `💖 已加入追蹤關注`,
           body: `當《${title}》開播或有新集數發布時，將第一時間向您通知！`,
-          icon: anime.image || anime.coverImage || '/build/icon.png',
+          icon: getAnimeCoverUrl(anime) || '/build/icon.png',
           animeId: anime.id
         });
         requestNotificationPermission().catch(() => {});

@@ -1,6 +1,6 @@
-// src/components/AnimeCard.jsx - Netflix-style Card with Favorites & Quick Actions
 import React, { useState } from 'react';
 import { Play, Download, Info, Star, Heart, Sparkles } from 'lucide-react';
+import { getAnimeCoverUrl } from '../utils/image.js';
 
 function AnimeCard({ 
   anime, 
@@ -22,7 +22,7 @@ function AnimeCard({
       ? (anime.titleZhTW || anime.titleZh || anime.title?.native || anime.title?.english || anime.title?.romaji)
       : (anime.title?.english || anime.title?.romaji || anime.title?.native)
   ) || 'Anime';
-  const poster = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage?.medium;
+  const poster = getAnimeCoverUrl(anime);
   const score = anime.averageScore ? `${anime.averageScore}%` : null;
 
   return (
@@ -41,6 +41,9 @@ function AnimeCard({
           src={poster}
           alt={title}
           loading="lazy"
+          onError={(e) => {
+            e.currentTarget.style.opacity = '0.3';
+          }}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
         />
 
@@ -90,7 +93,7 @@ function AnimeCard({
               <span className="truncate">{anime.recommendationReason}</span>
             </div>
           )}
-          <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-red-400 transition-colors">
+          <h3 className="text-xs sm:text-sm font-extrabold text-white line-clamp-1 group-hover:text-red-300 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] transition-colors">
             {title}
           </h3>
           <div className="flex items-center justify-between text-[11px] text-zinc-400 mt-0.5">

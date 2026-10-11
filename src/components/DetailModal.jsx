@@ -6,6 +6,7 @@ import {
   Maximize2, Volume2, Film, AlertCircle, Copy, Check, ExternalLink,
   Users, HardDrive, Radio, Languages, Compass, Search, Zap
 } from 'lucide-react';
+import { getAnimeCoverUrl, getAnimeBannerUrl, toCachedImageUrl } from '../utils/image.js';
 
 export default function DetailModal({ 
   anime, 
@@ -55,8 +56,8 @@ export default function DetailModal({
 
   const title = anime.title?.english || anime.title?.romaji || anime.title?.native || 'Anime Details';
   const nativeTitle = anime.title?.native;
-  const backdrop = anime.bannerImage || anime.coverImage?.extraLarge;
-  const poster = anime.coverImage?.extraLarge || anime.coverImage?.large;
+  const backdrop = getAnimeBannerUrl(anime);
+  const poster = getAnimeCoverUrl(anime);
   const synopsis = anime.description?.replace(/<[^>]*>/g, '') || 'No synopsis provided.';
   
   const totalScheduled = anime.episodes || 12;
@@ -971,7 +972,7 @@ export default function DetailModal({
                       <div className="aspect-video relative overflow-hidden bg-black">
                         {tr.thumbnail ? (
                           <img
-                            src={tr.thumbnail}
+                            src={toCachedImageUrl(tr.thumbnail)}
                             alt={tr.title}
                             className="w-full h-full object-cover group-hover/pv:scale-105 transition-transform duration-300"
                           />
@@ -1305,7 +1306,7 @@ export default function DetailModal({
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
                 {similarAnime.map((sim) => {
                   const simTitle = sim.title?.english || sim.title?.romaji || 'Anime';
-                  const simCover = sim.coverImage?.large || sim.coverImage?.medium;
+                  const simCover = getAnimeCoverUrl(sim);
                   return (
                     <div
                       key={sim.id}

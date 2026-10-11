@@ -12,6 +12,7 @@ import {
   getNotificationPermission,
   requestNotificationPermission 
 } from '../utils/notifications.js';
+import { toCachedImageUrl } from '../utils/image.js';
 
 const POPULAR_SEARCHES = [
   'Solo Leveling',
@@ -570,13 +571,32 @@ function Navbar({
                         item.read ? 'opacity-75' : 'bg-red-500/[0.05]'
                       }`}
                     >
-                      {item.icon ? (
-                        <img src={item.icon} alt="" className="w-9 h-12 rounded-lg object-cover shrink-0 border border-zinc-800" />
-                      ) : (
-                        <div className="w-8 h-8 rounded-lg bg-red-600/20 text-red-400 flex items-center justify-center shrink-0">
-                          <Bell className="w-4 h-4" />
-                        </div>
-                      )}
+                      {(() => {
+                        const rawIcon = typeof item.icon === 'string' && item.icon && item.icon !== '[object Object]'
+                          ? item.icon
+                          : (item.icon && typeof item.icon === 'object' ? (item.icon.large || item.icon.medium || item.icon.extraLarge || '') : '');
+                        const iconUrl = rawIcon ? toCachedImageUrl(rawIcon) : '';
+
+                        return (
+                          <div className="relative shrink-0">
+                            {iconUrl ? (
+                              <img
+                                src={iconUrl}
+                                alt=""
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                  const fallback = e.currentTarget.nextElementSibling;
+                                  if (fallback) fallback.classList.remove('hidden');
+                                }}
+                                className="w-9 h-12 rounded-lg object-cover border border-zinc-800 shadow-sm"
+                              />
+                            ) : null}
+                            <div className={`w-9 h-12 rounded-lg bg-red-600/20 text-red-400 flex items-center justify-center border border-red-500/30 ${iconUrl ? 'hidden' : ''}`}>
+                              <Bell className="w-4 h-4" />
+                            </div>
+                          </div>
+                        );
+                      })()}
                       <div className="flex-1 min-w-0">
                         <h5 className="text-xs font-bold text-zinc-200 line-clamp-1">{item.title}</h5>
                         <p className="text-[11px] text-zinc-400 mt-0.5 line-clamp-2 leading-relaxed">{item.body}</p>

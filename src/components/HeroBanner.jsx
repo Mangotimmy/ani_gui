@@ -1,6 +1,6 @@
-// src/components/HeroBanner.jsx - Featured Anime Hero Banner with Localization & Responsive Layout
 import React, { useState, useEffect } from 'react';
 import { Play, Download, Info, Star } from 'lucide-react';
+import { getAnimeBannerUrl } from '../utils/image.js';
 
 const GENRE_MAP = {
   'Action': { 'zh-TW': '動作', 'zh-CN': '动作', 'ja': 'アクション' },
@@ -67,7 +67,7 @@ export default function HeroBanner({
       : (anime.title?.english || anime.title?.romaji || anime.title?.native)
   ) || 'Anime';
 
-  const backdrop = anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large;
+  const backdrop = getAnimeBannerUrl(anime);
   
   const rawSynopsis = (currentLang === 'zh-TW' || currentLang === 'zh-CN')
     ? (chineseInfo?.summaryZh || anime.summaryZh || anime.description)
