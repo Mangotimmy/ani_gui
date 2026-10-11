@@ -69,10 +69,10 @@ services:
     container_name: aniflix
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3443:3443"
     environment:
       - NODE_ENV=production
-      - PORT=3000
+      - PORT=3443
       - TZ=Asia/Taipei
       - ANIFLIX_DATA_DIR=/data
       - ANIFLIX_DOWNLOADS_DIR=/downloads
