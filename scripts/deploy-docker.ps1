@@ -67,6 +67,8 @@ $dockerRunArgs = @(
     "run", "-d",
     "--name", $ContainerName,
     "-p", "${Port}:3000",
+    "--dns", "1.1.1.1",
+    "--dns", "8.8.8.8",
     "-v", "${DataDir}:/data",
     "-v", "${DownloadsDir}:/downloads",
     "-e", "NODE_ENV=production",

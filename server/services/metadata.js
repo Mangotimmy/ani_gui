@@ -1,4 +1,5 @@
 // metadata.js - AniList GraphQL API metadata provider
+import './dnsFallback.js';
 import * as OpenCC from 'opencc-js';
 import { enrichWithChineseTitles } from './chineseTitleService.js';
 import { BoundedCache } from './cache.js';
@@ -821,7 +822,7 @@ export async function searchTorrents(query, filterLang = 'all', hideR18 = true) 
   // 2. Fetch Nyaa in parallel with timeout
   const nyaaPromises = topNyaa.map(async (nq) => {
     try {
-      const nyaaUrl = `https://nyaa.si/?page=rss&c=1_2&q=${encodeURIComponent(nq)}`;
+      const nyaaUrl = `https://nyaa.si/?page=rss&c=1_0&q=${encodeURIComponent(nq)}`;
       const res = await fetch(nyaaUrl, {
         signal: AbortSignal.timeout(8000),
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AniFlix/1.0' }
