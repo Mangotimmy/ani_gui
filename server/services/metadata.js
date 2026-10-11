@@ -7,7 +7,79 @@ import { BoundedCache } from './cache.js';
 const ANILIST_URL = 'https://graphql.anilist.co';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
+// Rate Limiter & Concurrency Controller for AniList API (Cap: 60 req/min, max 2 concurrent)
+class AniListRateLimiter {
+  constructor() {
+    this.queue = [];
+    this.active = 0;
+    this.maxConcurrent = 2;
+    this.minIntervalMs = 150;
+    this.lastRequestTime = 0;
+    this.timestamps = [];
+    this.rateLimitedUntil = 0;
+  }
+
+  async acquire() {
+    return new Promise((resolve) => {
+      this.queue.push(resolve);
+      this.processQueue();
+    });
+  }
+
+  release() {
+    this.active = Math.max(0, this.active - 1);
+    this.processQueue();
+  }
+
+  setRateLimited(seconds = 30) {
+    this.rateLimitedUntil = Date.now() + (seconds * 1000);
+    console.warn(`[AniList] Rate limit active (HTTP 429). Pausing outbound requests for ${seconds}s.`);
+  }
+
+  processQueue() {
+    if (this.queue.length === 0) return;
+    if (this.active >= this.maxConcurrent) return;
+
+    const now = Date.now();
+    if (now < this.rateLimitedUntil) {
+      const waitTime = this.rateLimitedUntil - now;
+      setTimeout(() => this.processQueue(), Math.min(waitTime, 2000));
+      return;
+    }
+
+    // Clean sliding window (last 60 seconds)
+    const windowStart = now - 60000;
+    this.timestamps = this.timestamps.filter(t => t > windowStart);
+    if (this.timestamps.length >= 60) {
+      const waitTime = (this.timestamps[0] + 60000) - now;
+      setTimeout(() => this.processQueue(), Math.max(waitTime, 200));
+      return;
+    }
+
+    // Enforce minInterval
+    const elapsed = now - this.lastRequestTime;
+    if (elapsed < this.minIntervalMs) {
+      setTimeout(() => this.processQueue(), this.minIntervalMs - elapsed);
+      return;
+    }
+
+    this.active++;
+    this.lastRequestTime = Date.now();
+    this.timestamps.push(this.lastRequestTime);
+    const next = this.queue.shift();
+    if (next) next();
+  }
+}
+
+const anilistLimiter = new AniListRateLimiter();
+
 async function anilistQuery(query, variables = {}) {
+  // If rate-limited, skip immediately to prevent cascading timeouts
+  if (Date.now() < anilistLimiter.rateLimitedUntil) {
+    return null;
+  }
+
+  await anilistLimiter.acquire();
   try {
     const res = await fetch(ANILIST_URL, {
       method: 'POST',
@@ -19,6 +91,14 @@ async function anilistQuery(query, variables = {}) {
       },
       body: JSON.stringify({ query, variables })
     });
+
+    if (res.status === 429) {
+      const retryAfterHeader = res.headers.get('retry-after');
+      const retryAfter = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 30;
+      anilistLimiter.setRateLimited(isNaN(retryAfter) ? 30 : retryAfter);
+      return null;
+    }
+
     if (res.status === 404) {
       return null;
     }
@@ -33,6 +113,8 @@ async function anilistQuery(query, variables = {}) {
       console.warn('AniList fetch notice:', err.message, cause ? `(${cause})` : '');
     }
     return null;
+  } finally {
+    anilistLimiter.release();
   }
 }
 
@@ -76,6 +158,8 @@ const MEDIA_FIELDS = `
 `;
 
 const metadataListCache = new BoundedCache(300, 45 * 60 * 1000); // 45 min TTL
+const detailsCache = new BoundedCache(500, 30 * 60 * 1000); // 30 min TTL
+const searchCache = new BoundedCache(300, 15 * 60 * 1000); // 15 min TTL
 
 export async function getTrending(page = 1, perPage = 50) {
   const cacheKey = `trending_${page}_${perPage}`;
@@ -181,6 +265,10 @@ export async function searchAnime(keyword, page = 1, perPage = 50) {
   const cleanKeyword = (keyword || '').trim();
   if (!cleanKeyword) return [];
 
+  const cacheKey = `${cleanKeyword.toLowerCase()}_${page}_${perPage}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached) return cached;
+
   const query = `
     query ($search: String, $page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
@@ -206,7 +294,7 @@ export async function searchAnime(keyword, page = 1, perPage = 50) {
     try {
       const bgmRes = await fetch(
         `https://api.bgm.tv/search/subject/${encodeURIComponent(cleanKeyword)}?type=2&responseGroup=small`,
-        { headers: { 'User-Agent': 'AniFlix/1.0 (contact: github.com/aniflix)' } }
+        { headers: { 'User-Agent': BROWSER_UA } }
       );
       if (bgmRes.ok) {
         const bgmData = await bgmRes.json();
@@ -234,12 +322,19 @@ export async function searchAnime(keyword, page = 1, perPage = 50) {
     }
   }
 
-  return enrichWithChineseTitles(results);
+  const enriched = enrichWithChineseTitles(results);
+  if (enriched && enriched.length > 0) {
+    searchCache.set(cacheKey, enriched);
+  }
+  return enriched;
 }
 
 export async function getAnimeDetails(id) {
   const numId = parseInt(id, 10);
   if (!numId || isNaN(numId)) return null;
+
+  const cached = detailsCache.get(numId);
+  if (cached) return cached;
 
   const query = `
     query ($id: Int) {
@@ -257,7 +352,9 @@ export async function getAnimeDetails(id) {
   const media = data?.Media || null;
   if (!media) return null;
   const enriched = enrichWithChineseTitles([media]);
-  return enriched[0] || media;
+  const result = enriched[0] || media;
+  detailsCache.set(numId, result);
+  return result;
 }
 
 export async function getRecommendationsForAnime(id, limit = 10) {
@@ -725,6 +822,46 @@ function formatBytes(bytes) {
   return (num / 1024).toFixed(0) + ' KB';
 }
 
+// AnimeTosho API integration (Official high-speed Nyaa mirror, immune to regional ISP SSL interception)
+async function fetchAnimeTosho(q) {
+  try {
+    const toshoUrl = `https://feed.animetosho.net/json?q=${encodeURIComponent(q)}`;
+    const res = await fetch(toshoUrl, {
+      signal: AbortSignal.timeout(7000),
+      headers: { 'User-Agent': BROWSER_UA }
+    });
+    if (!res.ok) return [];
+    const items = await res.json();
+    if (!Array.isArray(items)) return [];
+
+    return items.map((item) => {
+      const title = item.title || item.torrent_name || '';
+      let magnet = item.magnet_uri || null;
+      if (!magnet && item.info_hash) {
+        magnet = `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(title)}`;
+      }
+      return {
+        id: `tosho_${item.id || item.nyaa_id || Math.random().toString(36).slice(2, 9)}`,
+        title,
+        fansub: extractFansub(title),
+        resolution: extractResolution(title),
+        magnet,
+        torrentUrl: item.torrent_url || null,
+        size: formatBytes(item.total_size) || (item.total_size ? `${(item.total_size / (1024 * 1024)).toFixed(1)} MB` : 'Unknown'),
+        seeders: typeof item.seeders === 'number' ? item.seeders : 0,
+        pubDate: item.timestamp ? new Date(item.timestamp * 1000).toLocaleDateString() : '',
+        source: 'AnimeTosho (Nyaa Mirror)',
+        lang: detectTorrentLang(title),
+        infoHash: item.info_hash || null
+      };
+    }).filter(t => t.magnet);
+  } catch (err) {
+    const cause = err.cause?.message || err.cause?.code || '';
+    console.warn(`[Metadata] AnimeTosho error for "${q}":`, err.message, cause ? `(${cause})` : '');
+    return [];
+  }
+}
+
 export async function searchTorrents(query, filterLang = 'all', hideR18 = true) {
   let queries = [];
   if (Array.isArray(query)) {
@@ -754,19 +891,101 @@ export async function searchTorrents(query, filterLang = 'all', hideR18 = true) 
   }
   const topDmhy = dmhyCandidates.slice(0, 3);
 
-  // Nyaa Candidate queries: prioritizes English and Romaji titles, then Native
+  // Nyaa/AnimeTosho Candidate queries: prioritizes English and Romaji titles, then Native
   const nyaaCandidates = queries.filter(q => /^[a-zA-Z0-9\s':\-\.,!?]+$/.test(q));
   if (nyaaCandidates.length === 0) {
     nyaaCandidates.push(...queries);
   }
   const topNyaa = Array.from(new Set([...nyaaCandidates, ...queries])).slice(0, 3);
 
-  // 1. Fetch DMHY in parallel with timeout
+  // 1. Fetch AnimeTosho in parallel (High-speed, unblocked Nyaa mirror)
+  const toshoPromises = topNyaa.map(async (nq) => {
+    try {
+      const toshoItems = await fetchAnimeTosho(nq);
+      for (const item of toshoItems) {
+        const hashMatch = item.magnet ? item.magnet.match(/urn:btih:([a-zA-Z0-9]{32,40})/i) : null;
+        const magnetKey = hashMatch ? hashMatch[1].toLowerCase() : (item.infoHash ? item.infoHash.toLowerCase() : item.magnet);
+        if (!magnetKey || seenMagnets.has(magnetKey)) continue;
+        seenMagnets.add(magnetKey);
+        results.push(item);
+      }
+    } catch {}
+  });
+
+  // 2. Fetch Nyaa in parallel with timeout and SSL error tolerance
+  const nyaaPromises = topNyaa.map(async (nq) => {
+    try {
+      const nyaaUrl = `https://nyaa.si/?page=rss&c=1_0&q=${encodeURIComponent(nq)}`;
+      const res = await fetch(nyaaUrl, {
+        signal: AbortSignal.timeout(6000),
+        headers: { 'User-Agent': BROWSER_UA }
+      });
+      if (!res.ok) return;
+      const text = await res.text();
+      const items = [...text.matchAll(/<item>([\s\S]*?)<\/item>/g)];
+
+      for (const m of items) {
+        const itemXml = m[1];
+        const titleMatch = itemXml.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/) || itemXml.match(/<title>([\s\S]*?)<\/title>/);
+        if (!titleMatch) continue;
+        const title = titleMatch[1].trim();
+
+        const infoHashMatch = itemXml.match(/<nyaa:infoHash>([\s\S]*?)<\/nyaa:infoHash>/);
+        const linkMatch = itemXml.match(/<link>([\s\S]*?)<\/link>/);
+        const sizeMatch = itemXml.match(/<nyaa:size>([\s\S]*?)<\/nyaa:size>/);
+        const seedersMatch = itemXml.match(/<nyaa:seeders>([\s\S]*?)<\/nyaa:seeders>/);
+
+        let magnet = null;
+        if (infoHashMatch) {
+          magnet = `magnet:?xt=urn:btih:${infoHashMatch[1].trim()}&dn=${encodeURIComponent(title)}`;
+        }
+        if (!magnet && linkMatch && linkMatch[1].includes('magnet:')) {
+          magnet = linkMatch[1];
+        }
+        if (!magnet && linkMatch) {
+          magnet = linkMatch[1];
+        }
+        if (!magnet) continue;
+
+        const hashMatch = magnet.match(/urn:btih:([a-zA-Z0-9]{32,40})/i);
+        const magnetKey = hashMatch ? hashMatch[1].toLowerCase() : (infoHashMatch ? infoHashMatch[1].trim().toLowerCase() : magnet);
+        if (seenMagnets.has(magnetKey)) continue;
+        seenMagnets.add(magnetKey);
+
+        const dateMatch = itemXml.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
+        const lang = detectTorrentLang(title);
+
+        results.push({
+          id: `nyaa_${results.length + 1}`,
+          title,
+          fansub: extractFansub(title),
+          resolution: extractResolution(title),
+          magnet,
+          torrentUrl: linkMatch && linkMatch[1].endsWith('.torrent') ? linkMatch[1] : null,
+          size: sizeMatch ? sizeMatch[1].trim() : 'Unknown',
+          seeders: seedersMatch ? parseInt(seedersMatch[1]) : 0,
+          pubDate: dateMatch ? new Date(dateMatch[1]).toLocaleDateString() : '',
+          source: 'Nyaa',
+          lang
+        });
+      }
+    } catch (err) {
+      const isSslInterception = err.message?.includes('wrong version number') || (err.cause && String(err.cause).includes('wrong version number'));
+      if (isSslInterception) {
+        console.warn(`[Metadata] Nyaa intercepted by ISP/middlebox (SSL wrong version number) for "${nq}", AnimeTosho mirror active.`);
+      } else {
+        const cause = err.cause?.message || err.cause?.code || '';
+        console.warn(`[Metadata] Nyaa RSS error for "${nq}":`, err.message, cause ? `(${cause})` : '');
+      }
+    }
+  });
+
+  // 3. Fetch DMHY in parallel with timeout (4s timeout)
   const dmhyPromises = topDmhy.map(async (dq) => {
     try {
       const dmhyUrl = `https://share.dmhy.org/topics/rss/rss.xml?keyword=${encodeURIComponent(dq)}`;
       const res = await fetch(dmhyUrl, {
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(4000),
         headers: { 'User-Agent': BROWSER_UA }
       });
       if (!res.ok) return;
@@ -824,70 +1043,7 @@ export async function searchTorrents(query, filterLang = 'all', hideR18 = true) 
     }
   });
 
-  // 2. Fetch Nyaa in parallel with timeout
-  const nyaaPromises = topNyaa.map(async (nq) => {
-    try {
-      const nyaaUrl = `https://nyaa.si/?page=rss&c=1_0&q=${encodeURIComponent(nq)}`;
-      const res = await fetch(nyaaUrl, {
-        signal: AbortSignal.timeout(8000),
-        headers: { 'User-Agent': BROWSER_UA }
-      });
-      if (!res.ok) return;
-      const text = await res.text();
-      const items = [...text.matchAll(/<item>([\s\S]*?)<\/item>/g)];
-
-      for (const m of items) {
-        const itemXml = m[1];
-        const titleMatch = itemXml.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/) || itemXml.match(/<title>([\s\S]*?)<\/title>/);
-        if (!titleMatch) continue;
-        const title = titleMatch[1].trim();
-
-        const infoHashMatch = itemXml.match(/<nyaa:infoHash>([\s\S]*?)<\/nyaa:infoHash>/);
-        const linkMatch = itemXml.match(/<link>([\s\S]*?)<\/link>/);
-        const sizeMatch = itemXml.match(/<nyaa:size>([\s\S]*?)<\/nyaa:size>/);
-        const seedersMatch = itemXml.match(/<nyaa:seeders>([\s\S]*?)<\/nyaa:seeders>/);
-
-        let magnet = null;
-        if (infoHashMatch) {
-          magnet = `magnet:?xt=urn:btih:${infoHashMatch[1].trim()}&dn=${encodeURIComponent(title)}`;
-        }
-        if (!magnet && linkMatch && linkMatch[1].includes('magnet:')) {
-          magnet = linkMatch[1];
-        }
-        if (!magnet && linkMatch) {
-          magnet = linkMatch[1];
-        }
-        if (!magnet) continue;
-
-        const hashMatch = magnet.match(/urn:btih:([a-zA-Z0-9]{32,40})/i);
-        const magnetKey = hashMatch ? hashMatch[1].toLowerCase() : (infoHashMatch ? infoHashMatch[1].trim().toLowerCase() : magnet);
-        if (seenMagnets.has(magnetKey)) continue;
-        seenMagnets.add(magnetKey);
-
-        const dateMatch = itemXml.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
-        const lang = detectTorrentLang(title);
-
-        results.push({
-          id: `nyaa_${results.length + 1}`,
-          title,
-          fansub: extractFansub(title),
-          resolution: extractResolution(title),
-          magnet,
-          torrentUrl: linkMatch && linkMatch[1].endsWith('.torrent') ? linkMatch[1] : null,
-          size: sizeMatch ? sizeMatch[1].trim() : 'Unknown',
-          seeders: seedersMatch ? parseInt(seedersMatch[1]) : 0,
-          pubDate: dateMatch ? new Date(dateMatch[1]).toLocaleDateString() : '',
-          source: 'Nyaa',
-          lang
-        });
-      }
-    } catch (err) {
-      const cause = err.cause?.message || err.cause?.code || '';
-      console.warn(`[Metadata] Nyaa RSS error for "${nq}":`, err.message, cause ? `(${cause})` : '');
-    }
-  });
-
-  await Promise.allSettled([...dmhyPromises, ...nyaaPromises]);
+  await Promise.allSettled([...toshoPromises, ...nyaaPromises, ...dmhyPromises]);
 
   // Apply Language Filter if requested
   let filtered = results;
