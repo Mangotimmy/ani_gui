@@ -179,6 +179,43 @@ export default function VideoPlayer({
   const [showExternalMenu, setShowExternalMenu] = useState(false);
   const externalMenuRef = useRef(null);
 
+  // Screen Size & Orientation Auto-Detection
+  const [screenInfo, setScreenInfo] = useState(() => {
+    if (typeof window === 'undefined') return { width: 1920, height: 1080, isLandscape: true, isMobile: false, isSmallScreen: false };
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const mobileUA = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    return {
+      width: w,
+      height: h,
+      isLandscape: w > h,
+      isMobile: mobileUA || w < 768,
+      isSmallScreen: w < 640
+    };
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const mobileUA = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      setScreenInfo({
+        width: w,
+        height: h,
+        isLandscape: w > h,
+        isMobile: mobileUA || w < 768,
+        isSmallScreen: w < 640
+      });
+    };
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
+  }, []);
+
   // Debug overlay & hidden options
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [showHiddenOptions, setShowHiddenOptions] = useState(false);
@@ -187,8 +224,25 @@ export default function VideoPlayer({
   const [debugStats, setDebugStats] = useState({});
   const debugIntervalRef = useRef(null);
 
+  const getClampedMenuPos = (rawX, rawY) => {
+    const menuWidth = 220;
+    const menuHeight = 320;
+    const winW = typeof window !== 'undefined' ? window.innerWidth : 1920;
+    const winH = typeof window !== 'undefined' ? window.innerHeight : 1080;
+    const x = Math.min(Math.max(12, rawX), winW - menuWidth - 12);
+    const y = (rawY + menuHeight + 12 > winH)
+      ? Math.max(12, rawY - menuHeight - 8)
+      : Math.min(rawY, winH - menuHeight - 12);
+    return { x, y };
+  };
+
   // Touch screen gestures & Double-Tap ripple state
   const [seekRipple, setSeekRipple] = useState(null); // { type, text, side }
+  const seekRippleTimeoutRef = useRef(null);
+  const durationRef = useRef(duration);
+  useEffect(() => {
+    durationRef.current = duration;
+  }, [duration]);
   const lastTapTimeRef = useRef(0);
   const singleTapTimerRef = useRef(null);
   const longPressTimerRef = useRef(null);
@@ -946,37 +1000,72 @@ export default function VideoPlayer({
     setShowLinkModal(false);
   };
 
-  // Controls Visibility Timeout
+  // Controls Visibility Timeout (10 seconds of inactivity)
   const handleMouseMove = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => {
-      if (isPlaying && !showLinkModal && !showQualityMenu) {
+      if (isPlaying && !showLinkModal && !showQualityMenu && !showContextMenu && !showSubtitlesMenu && !showEpisodeDrawer && !showExternalMenu) {
         setShowControls(false);
       }
-    }, 3000);
+    }, 10000);
+  };
+
+  // Synchronous relative seek with instant scrubber bar & knob follow
+  const seekRelative = (seconds) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const maxDur = durationRef.current || video.duration || 0;
+    const current = video.currentTime;
+    const target = Math.max(0, maxDur > 0 ? Math.min(maxDur, current + seconds) : Math.max(0, current + seconds));
+    
+    video.currentTime = target;
+    setCurrentTime(target);
+    handleMouseMove();
+
+    const sign = seconds > 0 ? `+${seconds}s` : `${seconds}s`;
+    setSeekRipple({
+      type: seconds < 0 ? 'rewind' : 'forward',
+      text: sign,
+      side: seconds < 0 ? 'left' : 'right'
+    });
+    if (seekRippleTimeoutRef.current) clearTimeout(seekRippleTimeoutRef.current);
+    seekRippleTimeoutRef.current = setTimeout(() => {
+      setSeekRipple(null);
+    }, 700);
   };
 
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.target.tagName === 'INPUT') return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       const video = videoRef.current;
       if (!video) return;
 
       switch (e.key) {
         case ' ':
         case 'k':
+        case 'K':
           e.preventDefault();
           togglePlay();
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          video.currentTime = Math.max(0, video.currentTime - 5);
+          seekRelative(e.shiftKey ? -10 : -5);
           break;
         case 'ArrowRight':
           e.preventDefault();
-          video.currentTime = Math.min(video.duration, video.currentTime + 5);
+          seekRelative(e.shiftKey ? 10 : 5);
+          break;
+        case 'j':
+        case 'J':
+          e.preventDefault();
+          seekRelative(-10);
+          break;
+        case 'l':
+        case 'L':
+          e.preventDefault();
+          seekRelative(10);
           break;
         case 'ArrowUp':
           e.preventDefault();
@@ -1062,9 +1151,12 @@ export default function VideoPlayer({
     const touchX = touch.clientX;
     const touchY = touch.clientY;
 
+    // Wake up controls and reset 10s inactivity timer
+    handleMouseMove();
+
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
     longPressTimerRef.current = setTimeout(() => {
-      setContextMenuPos({ x: touchX, y: touchY });
+      setContextMenuPos(getClampedMenuPos(touchX, touchY));
       setShowContextMenu(true);
     }, 550);
   };
@@ -1101,31 +1193,31 @@ export default function VideoPlayer({
 
       if (widthRatio < 0.35) {
         // Double tap left: Seek backward 10s
-        if (videoRef.current) {
-          videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
-          setSeekRipple({ type: 'rewind', text: '-10s', side: 'left' });
-          setTimeout(() => setSeekRipple(null), 700);
-        }
+        seekRelative(-10);
       } else if (widthRatio > 0.65) {
         // Double tap right: Seek forward 10s
-        if (videoRef.current) {
-          videoRef.current.currentTime = Math.min(videoRef.current.duration || 1000, videoRef.current.currentTime + 10);
-          setSeekRipple({ type: 'forward', text: '+10s', side: 'right' });
-          setTimeout(() => setSeekRipple(null), 700);
-        }
+        seekRelative(10);
       } else {
         // Double tap center: Toggle play/pause
         togglePlay();
         setSeekRipple({ type: isPlaying ? 'pause' : 'play', text: isPlaying ? '暫停' : '播放', side: 'center' });
-        setTimeout(() => setSeekRipple(null), 700);
+        if (seekRippleTimeoutRef.current) clearTimeout(seekRippleTimeoutRef.current);
+        seekRippleTimeoutRef.current = setTimeout(() => setSeekRipple(null), 700);
       }
+      handleMouseMove();
       lastTapTimeRef.current = 0;
     } else {
       // Single tap: toggle controls after 260ms delay
       lastTapTimeRef.current = now;
       if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current);
       singleTapTimerRef.current = setTimeout(() => {
-        setShowControls(prev => !prev);
+        setShowControls(prev => {
+          const next = !prev;
+          if (next) {
+            handleMouseMove();
+          }
+          return next;
+        });
         singleTapTimerRef.current = null;
       }, 260);
     }
@@ -1267,10 +1359,10 @@ export default function VideoPlayer({
       onTouchEnd={handleTouchEnd}
       onContextMenu={(e) => {
         e.preventDefault();
-        setContextMenuPos({ x: e.clientX, y: e.clientY });
+        setContextMenuPos(getClampedMenuPos(e.clientX, e.clientY));
         setShowContextMenu(true);
       }}
-      className="fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden touch-manipulation"
+      className="fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden touch-manipulation w-full h-[100dvh]"
     >
       {/* ─── Official Trailer (PV) Playback Mode ─── */}
       {isPlayingTrailer && hasTrailer && (
@@ -1486,7 +1578,7 @@ export default function VideoPlayer({
 
           {/* Playback rate */}
           <div className="mb-3">
-            <label className="text-[11px] font-bold text-zinc-400 mb-1 block">播放速率 Playback Rate</label>
+            <span className="text-[11px] font-bold text-zinc-400 mb-1 block">播放速率 Playback Rate</span>
             <div className="flex flex-wrap gap-1.5">
               {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(rate => (
                 <button
@@ -1502,12 +1594,12 @@ export default function VideoPlayer({
 
           {/* Seek precision */}
           <div className="mb-3">
-            <label className="text-[11px] font-bold text-zinc-400 mb-1 block">精準跳轉 Precision Seek</label>
+            <span className="text-[11px] font-bold text-zinc-400 mb-1 block">精準跳轉 Precision Seek</span>
             <div className="flex gap-2">
               {[-30, -10, -5, 5, 10, 30].map(sec => (
                 <button
                   key={sec}
-                  onClick={() => { if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime + sec); }}
+                  onClick={() => seekRelative(sec)}
                   className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-colors ${sec < 0 ? 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-blue-600/20 hover:border-blue-500/50' : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-amber-600/20 hover:border-amber-500/50'}`}
                 >
                   {sec > 0 ? `+${sec}s` : `${sec}s`}
@@ -1518,9 +1610,12 @@ export default function VideoPlayer({
 
           {/* Volume fine control */}
           <div className="mb-3">
-            <label className="text-[11px] font-bold text-zinc-400 mb-1.5 block">音量 Volume (精準)</label>
+            <label htmlFor="player-volume-fine-input" className="text-[11px] font-bold text-zinc-400 mb-1.5 block">音量 Volume (精準)</label>
             <div className="flex items-center gap-2">
               <input
+                id="player-volume-fine-input"
+                name="volumeFine"
+                aria-label="音量 Volume (精準)"
                 type="range" min={0} max={1} step={0.01}
                 defaultValue={volume}
                 onChange={e => {
@@ -1809,12 +1904,16 @@ export default function VideoPlayer({
 
             <form onSubmit={handleApplyCustomLink} className="space-y-4">
               <div>
-                <label className="text-xs font-semibold text-zinc-300 block mb-1.5">
+                <label htmlFor="player-custom-stream-url" className="text-xs font-semibold text-zinc-300 block mb-1.5">
                   Stream URL (.m3u8)
                 </label>
                 <div className="flex items-center gap-2">
                   <input
+                    id="player-custom-stream-url"
+                    name="customStreamUrl"
+                    aria-label="Stream URL (.m3u8)"
                     type="text"
+                    autoComplete="off"
                     value={customInputUrl}
                     onChange={(e) => setCustomInputUrl(e.target.value)}
                     placeholder="https://.../master.m3u8"
@@ -1857,7 +1956,14 @@ export default function VideoPlayer({
         showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}>
         {/* Top Header Bar */}
-        <div className="p-4 sm:p-6 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-center justify-between">
+        <div 
+          style={{
+            paddingTop: 'max(1rem, env(safe-area-inset-top, 16px))',
+            paddingLeft: 'max(1rem, env(safe-area-inset-left, 16px))',
+            paddingRight: 'max(1rem, env(safe-area-inset-right, 16px))'
+          }}
+          className="p-3 sm:p-6 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-center justify-between"
+        >
           <div className="flex items-center gap-3">
             <button
               onClick={onClose}
@@ -1900,11 +2006,11 @@ export default function VideoPlayer({
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {/* Quick iGPU Low-Power / AI Upscale mode switcher */}
             <button
               onClick={() => onUpdateGpuSettings?.({ enableUpscale: !gpuSettings?.enableUpscale })}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border shadow-lg ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border shadow-lg shrink-0 ${
                 gpuSettings?.enableUpscale
                   ? 'bg-amber-600/30 text-amber-300 border-amber-500/50 hover:bg-amber-600/40'
                   : 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50 hover:bg-emerald-600/40'
@@ -1912,13 +2018,13 @@ export default function VideoPlayer({
               title={gpuSettings?.enableUpscale ? 'AI 升頻中 (點擊切換為 iGPU 省電模式)' : 'iGPU 省電模式 (點擊開啟 AI 升頻)'}
             >
               {gpuSettings?.enableUpscale ? <Sparkles className="w-3.5 h-3.5 text-amber-400" /> : <Zap className="w-3.5 h-3.5 text-emerald-400" />}
-              <span>{gpuSettings?.enableUpscale ? 'AI 升頻' : '⚡ iGPU 模式'}</span>
+              <span className="hidden sm:inline">{gpuSettings?.enableUpscale ? 'AI 升頻' : '⚡ iGPU 模式'}</span>
             </button>
 
             {/* Copy M3U8 Link Button */}
             <button
               onClick={handleCopyLink}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border shadow-lg ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border shadow-lg shrink-0 ${
                 copiedLink 
                   ? 'bg-emerald-600/30 text-emerald-400 border-emerald-500/50' 
                   : 'bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700'
@@ -1926,27 +2032,27 @@ export default function VideoPlayer({
               title={t('copyM3u8')}
             >
               {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copiedLink ? (t('copiedM3u8') || 'Copied M3U8') : (t('copyM3u8') || 'Copy M3U8')}</span>
+              <span className="hidden sm:inline">{copiedLink ? (t('copiedM3u8') || 'Copied M3U8') : (t('copyM3u8') || 'Copy M3U8')}</span>
             </button>
 
             {/* Inspect / Change Stream Link */}
             <button
               onClick={() => setShowLinkModal(true)}
-              className="p-2 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 transition-colors"
+              className="p-2 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 transition-colors shrink-0"
               title={t('inspectStream')}
             >
               <Link2 className="w-4 h-4" />
             </button>
 
             {/* External Players Dropdown / Launch */}
-            <div className="relative" ref={externalMenuRef}>
+            <div className="relative shrink-0" ref={externalMenuRef}>
               <button
                 onClick={() => setShowExternalMenu(!showExternalMenu)}
                 className="flex items-center gap-1.5 bg-zinc-800/90 hover:bg-zinc-700 text-sky-400 hover:text-sky-300 px-3 py-1.5 rounded-full border border-zinc-700 text-xs font-bold transition-all shadow-lg"
                 title={platform.isMobile ? "Open in Mobile Player (VLC / Infuse)" : "External Players"}
               >
                 {platform.isMobile ? <Smartphone className="w-3.5 h-3.5" /> : <ExternalLink className="w-3.5 h-3.5" />}
-                <span>{platform.isMobile ? (platform.isIOS || platform.isIPad ? 'Infuse / VLC' : 'VLC / App') : 'External Player'}</span>
+                <span className="hidden md:inline">{platform.isMobile ? (platform.isIOS || platform.isIPad ? 'Infuse / VLC' : 'VLC / App') : 'External Player'}</span>
               </button>
 
               {showExternalMenu && (
@@ -1984,10 +2090,10 @@ export default function VideoPlayer({
               onClick={(e) => {
                 e.stopPropagation();
                 const rect = e.currentTarget.getBoundingClientRect();
-                setContextMenuPos({ x: rect.left, y: rect.bottom + 8 });
+                setContextMenuPos(getClampedMenuPos(rect.right - 220, rect.bottom + 8));
                 setShowContextMenu(prev => !prev);
               }}
-              className="p-2 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 transition-colors shadow-lg"
+              className="p-2 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 transition-colors shadow-lg shrink-0"
               title="播放器選項 / Player Options"
             >
               <MoreVertical className="w-4 h-4" />
@@ -1997,11 +2103,11 @@ export default function VideoPlayer({
             {platform.supportsLocalMpv && (
               <button
                 onClick={() => onLaunchMpv(anime, episode, audioMode, rawStreamUrl || streamUrl)}
-                className="flex items-center gap-2 bg-zinc-800/90 hover:bg-zinc-700 text-emerald-400 hover:text-emerald-300 px-3.5 py-1.5 rounded-full border border-zinc-700 text-xs font-bold transition-all shadow-lg hover:scale-105"
+                className="flex items-center gap-2 bg-zinc-800/90 hover:bg-zinc-700 text-emerald-400 hover:text-emerald-300 px-3.5 py-1.5 rounded-full border border-zinc-700 text-xs font-bold transition-all shadow-lg hover:scale-105 shrink-0"
                 title={t('playInMpv')}
               >
                 <MonitorPlay className="w-4 h-4" />
-                <span>{t('playInMpv') || 'Play in MPV'}</span>
+                <span className="hidden sm:inline">{t('playInMpv') || 'Play in MPV'}</span>
               </button>
             )}
           </div>
@@ -2011,7 +2117,14 @@ export default function VideoPlayer({
         <div className="flex-1 flex items-center justify-center" onClick={togglePlay} />
 
         {/* Bottom Control Bar */}
-        <div className="p-4 sm:p-6 bg-gradient-to-t from-black/95 via-black/60 to-transparent">
+        <div 
+          style={{
+            paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 16px))',
+            paddingLeft: 'max(1rem, env(safe-area-inset-left, 16px))',
+            paddingRight: 'max(1rem, env(safe-area-inset-right, 16px))'
+          }}
+          className="p-3 sm:p-6 bg-gradient-to-t from-black/95 via-black/60 to-transparent"
+        >
           {/* Interactive Custom Seekbar with Buffer & Live Thumbnail Tooltip */}
           <div className="relative mb-3 flex items-center gap-3 select-none">
             <span className="text-xs text-zinc-300 font-mono w-12 text-right shrink-0">
@@ -2054,7 +2167,7 @@ export default function VideoPlayer({
                         style={{ aspectRatio: '16/9' }}
                         onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         className="absolute inset-0 w-full h-full object-cover opacity-70 filter blur-[0.5px]"
-                        loading="eager"
+                        loading="lazy"
                       />
                     )}
                     <video
@@ -2125,21 +2238,17 @@ export default function VideoPlayer({
               </button>
 
               <button
-                onClick={() => {
-                  if (videoRef.current) videoRef.current.currentTime -= 10;
-                }}
+                onClick={() => seekRelative(-10)}
                 className="p-2 rounded-full hover:bg-white/20 text-zinc-300 hover:text-white transition-colors"
-                title="Rewind 10s"
+                title="Rewind 10s (J / Left)"
               >
                 <RotateCcw className="w-5 h-5" />
               </button>
 
               <button
-                onClick={() => {
-                  if (videoRef.current) videoRef.current.currentTime += 10;
-                }}
+                onClick={() => seekRelative(10)}
                 className="p-2 rounded-full hover:bg-white/20 text-zinc-300 hover:text-white transition-colors"
-                title="Fast Forward 10s"
+                title="Fast Forward 10s (L / Right)"
               >
                 <RotateCw className="w-5 h-5" />
               </button>
@@ -2154,6 +2263,9 @@ export default function VideoPlayer({
                   {isMuted || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
                 </button>
                 <input
+                  id="player-volume-slider"
+                  name="playerVolume"
+                  aria-label="音量調整 Volume Slider"
                   type="range"
                   min={0}
                   max={1}
@@ -2293,6 +2405,9 @@ export default function VideoPlayer({
                         <span>{t('importSubtitle')}</span>
                       </button>
                       <input
+                        id="player-subtitle-file-input"
+                        name="subtitleFile"
+                        aria-label="匯入字幕檔案"
                         ref={fileInputRef}
                         type="file"
                         accept=".vtt,.srt,.ass,.ssa"

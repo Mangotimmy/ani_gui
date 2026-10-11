@@ -18,6 +18,8 @@ build/
 
 # Runtime & User Data
 server/data/
+data/
+*.pem
 downloads/
 Anime/
 *.log

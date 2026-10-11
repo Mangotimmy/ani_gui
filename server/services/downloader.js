@@ -26,12 +26,28 @@ class DownloadManager {
     }
   }
 
+  ensureDirSafe(dir) {
+    try {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      return dir;
+    } catch (err) {
+      console.warn(`[Downloader] Failed to create directory ${dir}:`, err.message);
+      const fallbackDir = path.join(os.tmpdir(), 'aniflix_downloads');
+      try {
+        if (!fs.existsSync(fallbackDir)) {
+          fs.mkdirSync(fallbackDir, { recursive: true });
+        }
+        return fallbackDir;
+      } catch {}
+      return dir;
+    }
+  }
+
   setDownloadDir(dir) {
     if (dir && typeof dir === 'string') {
-      this.downloadDir = dir;
-      if (!fs.existsSync(this.downloadDir)) {
-        fs.mkdirSync(this.downloadDir, { recursive: true });
-      }
+      this.downloadDir = this.ensureDirSafe(dir);
     }
     return this.downloadDir;
   }
@@ -66,10 +82,8 @@ class DownloadManager {
   queueDownloads({ animeTitle, episodeNumbers, quality = 'best', audio = 'sub', streamUrls = {} }) {
     const queuedTasks = [];
     const sanitizedTitle = this.sanitizeFilename(animeTitle);
-    const animeDir = path.join(this.downloadDir, sanitizedTitle);
-    if (!fs.existsSync(animeDir)) {
-      fs.mkdirSync(animeDir, { recursive: true });
-    }
+    const targetBaseDir = this.ensureDirSafe(this.downloadDir);
+    const animeDir = this.ensureDirSafe(path.join(targetBaseDir, sanitizedTitle));
 
     for (const ep of episodeNumbers) {
       const id = `${sanitizedTitle}-E${ep}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;

@@ -5,7 +5,7 @@
 # -------------------------------------------------------------------
 
 # Stage 1: Build Frontend Assets
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -16,12 +16,15 @@ COPY . .
 RUN npm run build
 
 # Stage 2: Production Container
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 
-# Install media extraction dependencies: ffmpeg, aria2c, yt-dlp, python3, and certificates
+# Install media extraction dependencies: ffmpeg, aria2c, mpv, git, openssl, yt-dlp, python3, and certificates
 RUN apk add --no-cache \
     ffmpeg \
     aria2 \
+    mpv \
+    git \
+    openssl \
     python3 \
     py3-pip \
     curl \
@@ -34,6 +37,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV ENABLE_HTTPS=true
+ENV HTTPS_PORT=3443
 ENV ANIFLIX_DATA_DIR=/data
 ENV ANIFLIX_DOWNLOADS_DIR=/downloads
 
@@ -52,7 +57,7 @@ RUN mkdir -p /downloads /data && chown -R node:node /downloads /data /app
 
 VOLUME ["/downloads", "/data"]
 
-EXPOSE 3000
+EXPOSE 3000 3443
 
 USER node
 

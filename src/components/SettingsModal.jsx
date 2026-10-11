@@ -18,6 +18,7 @@ const I18N = {
     title: '系統設定與環境管理',
     tabContent: '內容偏好與分級',
     tabArchitecture: '連線架構與 Docker (PowerShell)',
+    tabArchitectureDocker: '組件管理與 Docker 環境',
     tabGpu: 'GPU 與播放效能',
     tabPlugins: '組件管理與更新',
     tabDownloads: '下載儲存路徑',
@@ -72,6 +73,7 @@ const I18N = {
     title: '系统设置与环境管理',
     tabContent: '内容偏好与分级',
     tabArchitecture: '连接架构与 Docker (PowerShell)',
+    tabArchitectureDocker: '组件管理与 Docker 环境',
     tabGpu: 'GPU 与播放性能',
     tabPlugins: '组件管理与更新',
     tabDownloads: '下载存储路径',
@@ -126,6 +128,7 @@ const I18N = {
     title: '設定と動作環境',
     tabContent: 'コンテンツと安全設定',
     tabArchitecture: '接続構成と Docker (PowerShell)',
+    tabArchitectureDocker: 'コンポーネント管理と Docker 環境',
     tabGpu: 'GPU と画質設定',
     tabPlugins: 'プラグインと更新',
     tabDownloads: 'ダウンロード保存先',
@@ -180,6 +183,7 @@ const I18N = {
     title: 'Settings & Environment',
     tabContent: 'Content & Safety',
     tabArchitecture: 'Architecture & Docker (PowerShell)',
+    tabArchitectureDocker: 'Components & Docker Environment',
     tabGpu: 'GPU & Playback',
     tabPlugins: 'Plugins & Auto-Updater',
     tabDownloads: 'Downloader Storage',
@@ -744,7 +748,7 @@ export default function SettingsModal({
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>{txt.tabArchitecture}</span>
+            <span>{(envStatus?.isContainer || serverInfo?.isContainer) ? (txt.tabArchitectureDocker || '組件管理與 Docker 環境') : txt.tabArchitecture}</span>
           </button>
 
           {/* Only render GPU & Performance profile tab in Electron Desktop app */}
@@ -1597,6 +1601,7 @@ export default function SettingsModal({
                   id="downloadDirInput"
                   name="downloadDir"
                   type="text"
+                  autoComplete="off"
                   value={downloadDir}
                   onChange={(e) => setDownloadDir(e.target.value)}
                   placeholder="C:\Users\...\Downloads\Anime 或 /downloads"
@@ -1841,10 +1846,13 @@ export default function SettingsModal({
                 支援匯入本站導出的 JSON 或 XML 格式備份檔，自動還原或合併個人收藏與觀看紀錄。
               </p>
               <input 
+                id="settings-backup-file-import"
+                name="backupFile"
                 type="file" 
                 ref={fileImportRef} 
                 onChange={handleFileImport} 
                 accept=".json,.xml" 
+                aria-label="匯入備份檔案"
                 className="hidden" 
               />
               <button

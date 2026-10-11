@@ -7,6 +7,7 @@ import DownloadManager from './components/DownloadManager';
 import SettingsModal from './components/SettingsModal';
 import SetupWizardModal from './components/SetupWizardModal';
 import DownloadedFilesModal from './components/DownloadedFilesModal';
+import UserProfileModal from './components/UserProfileModal';
 import AnimeCard from './components/AnimeCard';
 import MarqueeTicker from './components/animata/MarqueeTicker';
 import { getPlatformInfo } from './utils/platform';
@@ -230,6 +231,67 @@ function hasHomeCache() {
     [watchHistory, filterAnimeList]
   );
 
+  // User Profile & Cross-Device Account State
+  const [isUserProfileOpen, setIsUserProfileOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const stored = localStorage.getItem('aniflix_current_user');
+      return stored ? JSON.parse(stored) : { username: 'Default', displayName: 'Default', avatar: 'cat' };
+    } catch {
+      return { username: 'Default', displayName: 'Default', avatar: 'cat' };
+    }
+  });
+
+  // Switch or Login User Handler
+  const handleSwitchUser = useCallback((userObj) => {
+    if (!userObj || !userObj.username) return;
+    setCurrentUser(userObj);
+    try {
+      localStorage.setItem('aniflix_current_user', JSON.stringify(userObj));
+    } catch {}
+
+    if (userObj.data) {
+      if (Array.isArray(userObj.data.favorites)) {
+        setFavorites(userObj.data.favorites);
+        try {
+          localStorage.setItem('aniflix_favorites', JSON.stringify(userObj.data.favorites));
+        } catch {}
+      }
+      if (Array.isArray(userObj.data.watchHistory)) {
+        setWatchHistory(userObj.data.watchHistory);
+        try {
+          localStorage.setItem('aniflix_watch_history', JSON.stringify(userObj.data.watchHistory));
+        } catch {}
+      }
+    }
+  }, []);
+
+  // Sync user data to server with 1s debounce whenever favorites or watchHistory changes
+  const isInitialUserSyncRef = useRef(true);
+  useEffect(() => {
+    if (isInitialUserSyncRef.current) {
+      isInitialUserSyncRef.current = false;
+      return;
+    }
+    if (!currentUser || !currentUser.username) return;
+
+    const timer = setTimeout(() => {
+      fetch('/api/users/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: currentUser.username,
+          favorites,
+          watchHistory
+        })
+      }).catch((err) => {
+        console.warn('Background user profile sync warning:', err);
+      });
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [favorites, watchHistory, currentUser]);
+
   // Modals & Overlays
   const [selectedAnime, setSelectedAnime] = useState(null);
   const [activePlayer, setActivePlayer] = useState(null); // { anime, episode, audioMode }
@@ -338,11 +400,11 @@ function hasHomeCache() {
 
     loadInitialData();
 
-    // Check environment readiness
+    // Check environment readiness (suppressed in Docker containers)
     fetch('/api/environment/status')
       .then(r => r.json())
       .then(d => {
-        if (d.success && !d.ready) {
+        if (d.success && !d.ready && !d.isContainer) {
           setIsSetupWizardOpen(true);
         }
       })
@@ -459,6 +521,10 @@ function hasHomeCache() {
       } catch (err) {
         console.error('SSE parse error:', err);
       }
+    };
+
+    eventSource.onerror = (err) => {
+      console.warn('SSE connection notice (auto-reconnecting):', err?.type || err);
     };
 
     // Load initial settings
@@ -796,6 +862,8 @@ function hasHomeCache() {
         activeDownloadsCount={activeDownloadsCount}
         onOpenDownloads={() => setIsDownloadsOpen(true)}
         onOpenSettings={() => handleOpenSettings('content')}
+        onOpenUserProfile={() => setIsUserProfileOpen(true)}
+        currentUser={currentUser}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         favoritesCount={favorites.length}
@@ -976,8 +1044,13 @@ function hasHomeCache() {
               {/* Sort Select */}
               <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 self-start sm:self-auto">
                 <Filter className="w-3.5 h-3.5 text-zinc-400" />
-                <span className="text-xs text-zinc-400 font-medium">{t('filterSort')}</span>
+                <label htmlFor="catalog-sort-select" className="text-xs text-zinc-400 font-medium cursor-pointer">
+                  {t('filterSort')}
+                </label>
                 <select
+                  id="catalog-sort-select"
+                  name="catalogSort"
+                  aria-label={t('filterSort') || '排序方式'}
                   value={catalogSort}
                   onChange={(e) => setCatalogSort(e.target.value)}
                   className="bg-transparent text-xs text-white font-semibold focus:outline-none cursor-pointer"
@@ -1014,13 +1087,16 @@ function hasHomeCache() {
 
               {/* Year Selector with Dropdown */}
               <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-                <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider shrink-0 mr-1">
+                <label htmlFor="catalog-year-select" className="text-xs font-bold text-zinc-400 uppercase tracking-wider shrink-0 mr-1 cursor-pointer">
                   {t('filterYear')}
-                </span>
+                </label>
 
                 {/* Full Year Dropdown Picker (1970 - 2026 + ALL) */}
                 <div className="flex items-center gap-1.5 bg-zinc-800/90 border border-zinc-700 px-2.5 py-1 rounded-full shrink-0">
                   <select
+                    id="catalog-year-select"
+                    name="catalogYear"
+                    aria-label={t('filterYear') || '年份篩選'}
                     value={catalogYear}
                     onChange={(e) => setCatalogYear(e.target.value === 'ALL' ? 'ALL' : parseInt(e.target.value))}
                     className="bg-transparent text-xs text-amber-400 font-bold focus:outline-none cursor-pointer"
@@ -1234,16 +1310,32 @@ function hasHomeCache() {
         ) : (
           /* Normal Netflix Browsing Rows */
           <>
-            {/* Top Featured Hero Banner */}
-            {activeTab === 'home' && featuredAnime && (
-              <HeroBanner
-                anime={featuredAnime}
-                currentLang={currentLang}
-                t={t}
-                onPlay={handlePlay}
-                onDownload={handleOpenBatchDownload}
-                onMoreInfo={handleMoreInfo}
-              />
+            {/* Top Featured Hero Banner (with zero-CLS skeleton placeholder) */}
+            {activeTab === 'home' && (
+              featuredAnime ? (
+                <HeroBanner
+                  anime={featuredAnime}
+                  currentLang={currentLang}
+                  t={t}
+                  onPlay={handlePlay}
+                  onDownload={handleOpenBatchDownload}
+                  onMoreInfo={handleMoreInfo}
+                />
+              ) : (
+                <div className="relative w-full h-[76vh] min-h-[580px] max-h-[820px] select-none overflow-hidden bg-gradient-to-b from-zinc-950 via-zinc-900/60 to-[#141414] flex flex-col justify-end pt-20 pb-16 sm:pb-20 md:pb-24 px-4 md:px-12">
+                  <div className="max-w-xl space-y-4 animate-pulse">
+                    <div className="h-5 w-28 bg-zinc-800/80 rounded-full" />
+                    <div className="h-10 w-72 sm:w-96 bg-zinc-800/90 rounded-xl" />
+                    <div className="h-14 w-full max-w-md bg-zinc-800/40 rounded-xl hidden sm:block" />
+                    <div className="flex gap-3 pt-2">
+                      <div className="h-10 w-28 bg-zinc-800/90 rounded-xl" />
+                      <div className="h-10 w-28 bg-zinc-800/50 rounded-xl" />
+                    </div>
+                  </div>
+                  {/* Bottom fade gradient */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/70 to-transparent pointer-events-none" />
+                </div>
+              )
             )}
 
             {/* Loading Indicator */}
@@ -1525,6 +1617,17 @@ function hasHomeCache() {
         serverInfo={serverInfo}
         trendingCount={filteredTrending.length}
         activeDownloadsCount={downloadTasks.length}
+      />
+
+      {/* User Profile & Account Switcher Modal */}
+      <UserProfileModal
+        isOpen={isUserProfileOpen}
+        onClose={() => setIsUserProfileOpen(false)}
+        currentUser={currentUser}
+        onSwitchUser={handleSwitchUser}
+        currentLang={currentLang}
+        favoritesCount={favorites.length}
+        historyCount={watchHistory.length}
       />
 
       {/* Downloaded Anime Files Browser Modal (Mobile & Web) */}

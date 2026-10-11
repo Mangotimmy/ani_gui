@@ -133,21 +133,25 @@ export function getEnvironmentStatus() {
       }
     }
 
+    const isCritical = (isContainer && tool.name === 'mpv') ? false : tool.critical;
+
     results[tool.name] = {
       name: tool.name,
       installed: exists,
       path: exists ? binPath : null,
       version: version || (exists ? 'Installed' : 'Missing'),
-      critical: tool.critical
+      critical: isCritical
     };
 
-    if (tool.critical && !exists) {
+    if (isCritical && !exists) {
       criticalMissingCount++;
     }
   }
 
   const allInstalled = Object.values(results).every(t => t.installed);
-  const ready = criticalMissingCount === 0;
+  const ready = isContainer
+    ? Boolean(results['yt-dlp']?.installed && results['ffmpeg']?.installed)
+    : criticalMissingCount === 0;
 
   return {
     ready,
@@ -222,6 +226,22 @@ if ($bash) {
  */
 export function installAllPlugins(onProgress) {
   return new Promise((resolve, reject) => {
+    if (process.platform !== 'win32' || isContainerEnvironment()) {
+      onProgress('📦 偵測到 Linux / Docker 容器環境，正在檢查核心串流組件...\n');
+      const proc = spawn('sh', ['-c', 'which yt-dlp ffmpeg mpv git 2>&1; yt-dlp -U 2>&1 || true']);
+      proc.stdout.on('data', data => onProgress(data.toString()));
+      proc.stderr.on('data', data => onProgress(data.toString()));
+      proc.on('close', code => {
+        onProgress(`\n✅ 容器環境組件已就緒 (狀態碼: ${code})。\n`);
+        resolve({ success: true, code });
+      });
+      proc.on('error', err => {
+        onProgress(`\n⚠️ 容器命令執行錯誤: ${err.message}\n`);
+        resolve({ success: false, error: err.message });
+      });
+      return;
+    }
+
     onProgress('🔍 Checking PowerShell environment & Scoop installation...\n');
 
     const home = os.homedir();
@@ -295,6 +315,22 @@ Write-Host ">>> Setup completed successfully!"
  */
 export function updateAllPlugins(onProgress) {
   return new Promise((resolve, reject) => {
+    if (process.platform !== 'win32' || isContainerEnvironment()) {
+      onProgress('🔄 正在更新 Docker / Linux 容器內的串流組件 (yt-dlp)...\n');
+      const proc = spawn('sh', ['-c', 'yt-dlp -U 2>&1 || true']);
+      proc.stdout.on('data', (data) => onProgress(data.toString()));
+      proc.stderr.on('data', (data) => onProgress(data.toString()));
+      proc.on('close', (code) => {
+        onProgress(`\n✅ 容器組件更新完成 (狀態碼: ${code})。\n`);
+        resolve({ success: true });
+      });
+      proc.on('error', (err) => {
+        onProgress(`\n⚠️ 容器更新命令執行錯誤: ${err.message}\n`);
+        resolve({ success: false, error: err.message });
+      });
+      return;
+    }
+
     onProgress('🔄 Updating video plugins to the latest releases...\n');
 
     const home = os.homedir();

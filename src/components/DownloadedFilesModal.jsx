@@ -119,10 +119,14 @@ export default function DownloadedFilesModal({
             <div className="relative flex items-center">
               <Search className="w-4 h-4 text-zinc-500 absolute left-3 pointer-events-none" />
               <input
+                id="downloaded-files-search-input"
+                name="downloadedSearchQuery"
                 type="text"
+                autoComplete="off"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="搜尋已下載的動畫名稱或集數..."
+                aria-label="搜尋已下載的動畫名稱或集數"
                 className="w-full bg-zinc-800/60 border border-zinc-700/60 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#E50914] transition-colors"
               />
               {searchQuery && (

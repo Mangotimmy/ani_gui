@@ -432,7 +432,7 @@ export default function DetailModal({
                 loading="lazy"
                 decoding="async"
                 style={{ aspectRatio: '16/9' }}
-                className="w-full h-full object-cover object-center"
+                className="w-full h-auto aspect-[16/9] object-cover object-center"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-[#141418] via-[#141418]/60 to-transparent" />
               <div className="absolute inset-0 bg-gradient-to-r from-[#141418] via-transparent to-transparent" />
@@ -587,23 +587,23 @@ export default function DetailModal({
                 {anime.averageScore && (
                   <span className="text-emerald-400 flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
                     <Star className="w-3.5 h-3.5 fill-emerald-400" />
-                    {anime.averageScore}% Match
+                    {anime.averageScore}% {currentLang.startsWith('zh') ? '契合度' : currentLang === 'ja' ? '一致' : 'Match'}
                   </span>
                 )}
                 {anime.seasonYear && <span className="text-zinc-400">{anime.seasonYear}</span>}
                 {anime.startDate?.year && (
                   <span className="text-indigo-400 flex items-center gap-1 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-500/30">
                     <Calendar className="w-3.5 h-3.5" />
-                    Premieres {anime.startDate.year}{anime.startDate.month ? `-${String(anime.startDate.month).padStart(2, '0')}` : ''}
+                    {currentLang.startsWith('zh') ? '首播於' : currentLang === 'ja' ? '放送開始' : 'Premieres'} {anime.startDate.year}{anime.startDate.month ? `-${String(anime.startDate.month).padStart(2, '0')}` : ''}
                   </span>
                 )}
                 <span className="text-zinc-500">•</span>
                 <span className="text-zinc-300 font-medium">
                   {uploadedEpisodes.length > 0 
-                    ? `${uploadedEpisodes.length} Released / ${totalScheduled} Planned` 
+                    ? (currentLang.startsWith('zh') ? `已發布 ${uploadedEpisodes.length} 集 / 全 ${totalScheduled} 集` : currentLang === 'ja' ? `${uploadedEpisodes.length} 話配信中 / 全 ${totalScheduled} 話` : `${uploadedEpisodes.length} Released / ${totalScheduled} Planned`)
                     : isUnreleased 
-                    ? `0 Released / ${totalScheduled} Planned` 
-                    : `${totalScheduled} Episodes`}
+                    ? (currentLang.startsWith('zh') ? `即將開播 / 預計全 ${totalScheduled} 集` : currentLang === 'ja' ? `近日公開 / 全 ${totalScheduled} 話予定` : `0 Released / ${totalScheduled} Planned`)
+                    : (currentLang.startsWith('zh') ? `全 ${totalScheduled} 集` : currentLang === 'ja' ? `全 ${totalScheduled} 話` : `${totalScheduled} Episodes`)}
                 </span>
                 {anime.status && (
                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
@@ -613,7 +613,18 @@ export default function DetailModal({
                       ? 'bg-indigo-950/80 text-indigo-400 border border-indigo-600/30'
                       : 'bg-zinc-800 text-zinc-300'
                   }`}>
-                    {anime.status === 'NOT_YET_RELEASED' ? 'COMING SOON' : anime.status}
+                    {(() => {
+                      if (anime.status === 'NOT_YET_RELEASED') {
+                        return currentLang.startsWith('zh') ? '即將上線' : currentLang === 'ja' ? '近日公開' : 'COMING SOON';
+                      }
+                      if (anime.status === 'RELEASING') {
+                        return currentLang.startsWith('zh') ? '連載中' : currentLang === 'ja' ? '放送中' : 'RELEASING';
+                      }
+                      if (anime.status === 'FINISHED') {
+                        return currentLang.startsWith('zh') ? '已完結' : currentLang === 'ja' ? '完結' : 'FINISHED';
+                      }
+                      return anime.status;
+                    })()}
                   </span>
                 )}
               </div>
@@ -631,7 +642,7 @@ export default function DetailModal({
                           synopsisLang === 'zh' ? 'bg-[#E50914] text-white shadow' : 'text-zinc-400 hover:text-white'
                         }`}
                       >
-                        繁體中文
+                        {currentLang === 'zh-CN' ? '简体中文' : currentLang === 'ja' ? '日本語' : '繁體中文'}
                       </button>
                       <button
                         onClick={() => setSynopsisLang('orig')}
@@ -639,7 +650,7 @@ export default function DetailModal({
                           synopsisLang === 'orig' ? 'bg-[#E50914] text-white shadow' : 'text-zinc-400 hover:text-white'
                         }`}
                       >
-                        English
+                        {currentLang.startsWith('zh') ? '英文原文' : currentLang === 'ja' ? '英語 (原文)' : 'English'}
                       </button>
                     </div>
                   )}
@@ -984,7 +995,7 @@ export default function DetailModal({
                             loading="lazy"
                             decoding="async"
                             style={{ aspectRatio: '16/9' }}
-                            className="w-full h-full object-cover group-hover/pv:scale-105 transition-transform duration-300"
+                            className="w-full h-auto aspect-[16/9] object-cover group-hover/pv:scale-105 transition-transform duration-300"
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center bg-zinc-950">
@@ -1120,10 +1131,14 @@ export default function DetailModal({
                   <div className="relative flex-1">
                     <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
+                      id="detail-custom-torrent-input"
+                      name="customTorrentQuery"
                       type="text"
+                      autoComplete="off"
                       value={customTorrentQuery}
                       onChange={(e) => setCustomTorrentQuery(e.target.value)}
                       placeholder={t('searchTorrentPlaceholder')}
+                      aria-label={t('searchTorrentPlaceholder') || '搜尋種子關鍵字'}
                       className="w-full bg-black/60 border border-zinc-700/80 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors"
                     />
                     {customTorrentQuery && (
@@ -1333,7 +1348,7 @@ export default function DetailModal({
                             loading="lazy"
                             decoding="async"
                             style={{ aspectRatio: '2/3' }}
-                            className="w-full h-full object-cover group-hover/sim:scale-110 transition-transform duration-300"
+                            className="w-full h-auto aspect-[2/3] object-cover group-hover/sim:scale-110 transition-transform duration-300"
                           />
                         )}
                         {sim.averageScore && (

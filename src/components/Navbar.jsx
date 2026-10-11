@@ -30,6 +30,8 @@ function Navbar({
   activeDownloadsCount, 
   onOpenDownloads,
   onOpenSettings,
+  onOpenUserProfile,
+  currentUser,
   activeTab,
   setActiveTab,
   favoritesCount = 0,
@@ -389,12 +391,16 @@ function Navbar({
             />
             {(isSearchOpen || searchQuery) && (
               <input
+                id="navbar-search-input"
+                name="searchQuery"
                 type="text"
+                autoComplete="off"
                 value={searchQuery}
                 onChange={(e) => onSearch(e.target.value)}
                 onFocus={() => setShowHistoryDropdown(true)}
                 onKeyDown={handleKeyDown}
                 placeholder={t('searchPlaceholder')}
+                aria-label={t('searchPlaceholder') || '搜尋動漫'}
                 autoFocus
                 className="w-full bg-transparent text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none ml-2 font-medium"
               />
@@ -659,6 +665,21 @@ function Navbar({
             </div>
           )}
         </div>
+
+        {/* User Profile Switcher Button */}
+        <button
+          type="button"
+          onClick={onOpenUserProfile}
+          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.08] hover:border-white/20 text-zinc-200 hover:text-white text-xs font-semibold transition-all shadow-sm group motion-safe:active:scale-95"
+          title={`使用者帳號 (${currentUser?.displayName || currentUser?.username || 'Default'})`}
+        >
+          <span className="text-sm">
+            {currentUser?.avatar === 'fox' ? '🦊' : currentUser?.avatar === 'ninja' ? '🥷' : currentUser?.avatar === 'robot' ? '🤖' : currentUser?.avatar === 'ghost' ? '👻' : currentUser?.avatar === 'dragon' ? '🐲' : currentUser?.avatar === 'star' ? '⭐' : '🐱'}
+          </span>
+          <span className="max-w-[70px] sm:max-w-[100px] truncate hidden sm:inline">
+            {currentUser?.displayName || currentUser?.username || '用戶'}
+          </span>
+        </button>
 
         {/* Settings & Plugins Button */}
         <button

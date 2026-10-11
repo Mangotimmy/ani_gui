@@ -35,8 +35,12 @@ import { findLocalSubtitles, assToVtt, srtToVtt } from './services/localSubtitle
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import http from 'node:http';
+import https from 'node:https';
 import { exec, execFile } from 'child_process';
 import { fileURLToPath } from 'url';
+import { getOrCreateSslCertificates } from './services/ssl.js';
+import { listUsers, getUser, saveUser, deleteUser } from './services/userService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -411,12 +415,26 @@ app.post('/api/play/mpv', (req, res) => {
 // --- Downloader Routes ---
 
 app.get('/api/downloads/events', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Crucial for Synology DSM Nginx / Reverse Proxy!
   res.flushHeaders();
 
   downloadManager.addSubscriber(res);
+
+  // Keep-alive heartbeat comment every 15 seconds to prevent Synology HTTP/2 stream reset
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      clearInterval(heartbeat);
+    }
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+  });
 });
 
 app.get('/api/downloads', (req, res) => {
@@ -428,20 +446,25 @@ app.get('/api/downloads', (req, res) => {
 });
 
 app.post('/api/downloads/queue', (req, res) => {
-  const { animeTitle, episodeNumbers, quality, audio, streamUrls } = req.body;
-  if (!animeTitle || !Array.isArray(episodeNumbers) || episodeNumbers.length === 0) {
-    return res.status(400).json({ success: false, error: 'animeTitle and episodeNumbers array are required' });
+  try {
+    const { animeTitle, episodeNumbers, quality, audio, streamUrls } = req.body || {};
+    if (!animeTitle || !Array.isArray(episodeNumbers) || episodeNumbers.length === 0) {
+      return res.status(400).json({ success: false, error: 'animeTitle and episodeNumbers array are required' });
+    }
+
+    const tasks = downloadManager.queueDownloads({
+      animeTitle,
+      episodeNumbers,
+      quality: quality || 'best',
+      audio: audio || 'sub',
+      streamUrls: streamUrls || {}
+    });
+
+    res.json({ success: true, queuedCount: tasks.length, tasks });
+  } catch (err) {
+    console.error('[Downloads] Error queueing download:', err);
+    res.status(200).json({ success: false, error: err.message || 'Failed to queue downloads' });
   }
-
-  const tasks = downloadManager.queueDownloads({
-    animeTitle,
-    episodeNumbers,
-    quality: quality || 'best',
-    audio: audio || 'sub',
-    streamUrls: streamUrls || {}
-  });
-
-  res.json({ success: true, queuedCount: tasks.length, tasks });
 });
 
 app.post('/api/downloads/cancel', (req, res) => {
@@ -597,6 +620,70 @@ app.delete('/api/downloads/file', (req, res) => {
     } else {
       res.status(404).json({ success: false, error: 'File not found' });
     }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- User Profile & Multi-User Synchronization Routes ---
+
+app.get('/api/users', (req, res) => {
+  try {
+    const users = listUsers();
+    res.json({ success: true, users });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message, users: [] });
+  }
+});
+
+app.get('/api/users/:username', (req, res) => {
+  try {
+    const user = getUser(req.params.username);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/users/login', (req, res) => {
+  try {
+    const { username } = req.body || {};
+    if (!username || typeof username !== 'string' || !username.trim()) {
+      return res.status(400).json({ success: false, error: 'Username is required' });
+    }
+    const user = getUser(username.trim());
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/users/sync', (req, res) => {
+  try {
+    const { username, favorites, watchHistory, settings, avatar, displayName } = req.body || {};
+    if (!username || typeof username !== 'string' || !username.trim()) {
+      return res.status(400).json({ success: false, error: 'Username is required' });
+    }
+    const saved = saveUser(username.trim(), {
+      favorites,
+      watchHistory,
+      settings,
+      avatar,
+      displayName
+    });
+    res.json({ success: Boolean(saved), user: saved });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/users/:username', (req, res) => {
+  try {
+    const success = deleteUser(req.params.username);
+    res.json({ success });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -897,8 +984,42 @@ app.get('*', (req, res, next) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
-// Start Express server
-app.listen(PORT, () => {
-  console.log(`🎬 AniFlix server running on http://localhost:${PORT}`);
-});
+// Start Express & HTTPS servers
+const isContainer = isContainerEnvironment();
+const ENABLE_HTTPS = process.env.ENABLE_HTTPS === 'true' || isContainer;
+const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '3443', 10);
+
+let sslConfig = null;
+if (ENABLE_HTTPS) {
+  sslConfig = getOrCreateSslCertificates(USER_DATA_DIR);
+}
+
+if (sslConfig && sslConfig.cert && sslConfig.key) {
+  const httpsServer = https.createServer({ key: sslConfig.key, cert: sslConfig.cert }, app);
+  httpsServer.listen(HTTPS_PORT, () => {
+    console.log(`🔒 AniFlix Secure HTTPS server running on https://localhost:${HTTPS_PORT}`);
+    if (sslConfig.isSelfSigned) {
+      console.log(`   (Using auto-generated self-signed SSL certificate from ${sslConfig.certPath})`);
+    }
+  });
+
+  // Start HTTP redirect server on standard PORT (e.g. 3000)
+  const redirectApp = express();
+  redirectApp.use((req, res) => {
+    const host = req.headers.host ? req.headers.host.split(':')[0] : 'localhost';
+    const portSuffix = (HTTPS_PORT === 443) ? '' : `:${HTTPS_PORT}`;
+    res.redirect(301, `https://${host}${portSuffix}${req.url}`);
+  });
+
+  const httpServer = http.createServer(redirectApp);
+  httpServer.listen(PORT, () => {
+    console.log(`🌐 AniFlix HTTP redirect server running on http://localhost:${PORT} (-> https://localhost:${HTTPS_PORT})`);
+  });
+} else {
+  // Standard HTTP server (local development on Windows/Desktop)
+  const httpServer = http.createServer(app);
+  httpServer.listen(PORT, () => {
+    console.log(`🎬 AniFlix server running on http://localhost:${PORT}`);
+  });
+}
 

@@ -50,7 +50,7 @@ function AnimeCard({
           onError={(e) => {
             e.currentTarget.style.opacity = '0.3';
           }}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          className="w-full h-auto aspect-[2/3] object-cover transition-transform duration-500 group-hover:scale-105"
         />
 
         {/* Favorite Heart Badge Top Left */}

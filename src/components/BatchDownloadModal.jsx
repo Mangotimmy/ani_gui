@@ -86,14 +86,18 @@ export default function BatchDownloadModal({
         <form onSubmit={handleSubmit} className="mt-5 space-y-5">
           {/* Episode Range Input */}
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+            <label htmlFor="batch-download-episode-range" className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
               Episode Range (e.g. 1-12, 1-24, or 1, 3, 5):
             </label>
             <input
+              id="batch-download-episode-range"
+              name="episodeRange"
               type="text"
+              autoComplete="off"
               value={rangeInput}
               onChange={(e) => setRangeInput(e.target.value)}
               placeholder="e.g. 1-12"
+              aria-label="Episode Range"
               className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#E50914] transition-colors"
             />
 
@@ -129,10 +133,13 @@ export default function BatchDownloadModal({
           <div className="grid grid-cols-2 gap-4">
             {/* Video Quality */}
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+              <label htmlFor="batch-download-quality-select" className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
                 Quality:
               </label>
               <select
+                id="batch-download-quality-select"
+                name="quality"
+                aria-label="Quality"
                 value={quality}
                 onChange={(e) => setQuality(e.target.value)}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#E50914]"
@@ -147,9 +154,9 @@ export default function BatchDownloadModal({
 
             {/* Audio Mode */}
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+              <span className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
                 Audio:
-              </label>
+              </span>
               <div className="flex rounded-lg bg-zinc-900 p-1 border border-zinc-700">
                 <button
                   type="button"

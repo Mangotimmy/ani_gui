@@ -463,55 +463,121 @@ const t2cn = OpenCC.Converter ? OpenCC.Converter({ from: 'tw', to: 'cn' }) : (s 
 const chineseInfoCache = new BoundedCache(500, 24 * 60 * 60 * 1000);
 
 /**
- * Free text translation helper with OpenCC post-processing
+ * Free text translation helper with Google Translate & MyMemory fallback and OpenCC post-processing.
+ * Never leaks error messages (e.g. QUERY LENGTH LIMIT EXCEEDED).
  */
-async function translateText(text, targetLang = 'zh-TW') {
+export async function translateText(text, targetLang = 'zh-TW') {
   if (!text || !text.trim()) return '';
-  const clean = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const clean = text
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;|&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!clean) return '';
-  try {
-    const langpair = targetLang === 'zh-CN' ? 'en|zh-CN' : 'en|zh-TW';
-    const isJapanese = /[\u3040-\u309F\u30A0-\u30FF]/.test(clean);
-    const pair = isJapanese ? (targetLang === 'zh-CN' ? 'ja|zh-CN' : 'ja|zh-TW') : langpair;
 
-    // Split text into chunks if too long
-    const sentences = clean.match(/[^.!?\n]+[.!?\n]+/g) || [clean];
-    let chunks = [];
+  const gLang = targetLang === 'zh-CN' ? 'zh-CN' : targetLang === 'ja' ? 'ja' : 'zh-TW';
+
+  // Helper to test if a string looks like an error message
+  const isErrorText = (str) => {
+    if (!str || typeof str !== 'string') return true;
+    const s = str.toUpperCase();
+    return (
+      s.includes('QUERY LENGTH LIMIT EXCEEDED') ||
+      s.includes('MYMEMORY WARNING') ||
+      s.includes('ALL AVAILABLE FREE TRANSLATIONS') ||
+      s.includes('INVALID KEY') ||
+      s.includes('DAILY LIMIT REACHED')
+    );
+  };
+
+  // 1. Primary Engine: Google Translate API (Handles up to 4000+ chars, zero query limits)
+  try {
+    const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${gLang}&dt=t&q=${encodeURIComponent(clean.slice(0, 3500))}`;
+    const res = await fetch(gUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      },
+      signal: AbortSignal.timeout(6000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data?.[0])) {
+        const fullTranslated = data[0].map(item => item[0] || '').join('').trim();
+        if (fullTranslated && !isErrorText(fullTranslated)) {
+          if (targetLang === 'zh-TW') return s2tw(fullTranslated);
+          if (targetLang === 'zh-CN') return t2cn(fullTranslated);
+          return fullTranslated;
+        }
+      }
+    }
+  } catch (err) {
+    // Fall through to MyMemory fallback
+  }
+
+  // 2. Secondary Engine: MyMemory API with strict CJK sentence chunking (<= 300 chars)
+  try {
+    const isJapanese = /[\u3040-\u309F\u30A0-\u30FF]/.test(clean);
+    const pair = isJapanese 
+      ? (targetLang === 'zh-CN' ? 'ja|zh-CN' : 'ja|zh-TW') 
+      : (targetLang === 'zh-CN' ? 'en|zh-CN' : 'en|zh-TW');
+
+    // Split on CJK punctuation (。！？) or English (.!?) or newlines
+    const rawSentences = clean.match(/[^。！？.!?\n\r]+[。！？.!?\n\r]*/g) || [clean];
+    const chunks = [];
     let currentChunk = '';
-    for (const s of sentences) {
-      if ((currentChunk + ' ' + s).length > 400) {
-        if (currentChunk) chunks.push(currentChunk.trim());
-        currentChunk = s;
-      } else {
-        currentChunk = (currentChunk ? currentChunk + ' ' : '') + s;
+
+    for (const s of rawSentences) {
+      // If a single sentence exceeds 300 characters, hard-slice it
+      const parts = s.length > 300 ? s.match(/.{1,300}/g) || [s] : [s];
+      for (const p of parts) {
+        if ((currentChunk + ' ' + p).length > 300) {
+          if (currentChunk) chunks.push(currentChunk.trim());
+          currentChunk = p;
+        } else {
+          currentChunk = (currentChunk ? currentChunk + ' ' : '') + p;
+        }
       }
     }
     if (currentChunk) chunks.push(currentChunk.trim());
-    chunks = chunks.slice(0, 4); // limit to top chunks
 
-    const translatedParts = await Promise.all(chunks.map(async (chunk) => {
+    // Limit to top 6 chunks to avoid timeout
+    const limitedChunks = chunks.slice(0, 6);
+
+    const translatedParts = await Promise.all(limitedChunks.map(async (chunk) => {
       try {
         const mmUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=${pair}`;
         const res = await fetch(mmUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AniFlix/1.0' }
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AniFlix/1.0' },
+          signal: AbortSignal.timeout(4000)
         });
         if (!res.ok) return chunk;
         const data = await res.json();
-        return data?.responseData?.translatedText || chunk;
+        const transText = data?.responseData?.translatedText;
+        if (transText && !isErrorText(transText)) {
+          return transText;
+        }
+        return chunk;
       } catch {
         return chunk;
       }
     }));
 
     let fullTranslated = translatedParts.join(' ').trim();
-    if (targetLang === 'zh-TW') {
-      return s2tw(fullTranslated);
-    } else {
-      return t2cn(fullTranslated);
+    if (fullTranslated && !isErrorText(fullTranslated)) {
+      if (targetLang === 'zh-TW') return s2tw(fullTranslated);
+      if (targetLang === 'zh-CN') return t2cn(fullTranslated);
+      return fullTranslated;
     }
-  } catch {
-    return clean;
+  } catch (err) {
+    // ignore
   }
+
+  // 3. Fallback: Return original clean text (never leak error messages!)
+  return clean;
 }
 
 export async function getAnimeChineseInfo(animeId, { romaji = '', native = '', english = '', description = '' } = {}, targetLang = 'zh-TW') {
