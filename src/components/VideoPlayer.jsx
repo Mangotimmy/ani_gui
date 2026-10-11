@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { 
   X, Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, 
@@ -205,6 +205,17 @@ export default function VideoPlayer({
   const [bufferedEnd, setBufferedEnd] = useState(0);
   const lastScrubPreviewTimeRef = useRef(0);
   const scrubThrottleTimerRef = useRef(null);
+
+  // Reliably extract preview poster artwork (supports banner, image, or AniList coverImage object)
+  const previewPosterUrl = useMemo(() => {
+    if (typeof anime?.bannerImage === 'string' && anime.bannerImage) return anime.bannerImage;
+    if (typeof anime?.image === 'string' && anime.image) return anime.image;
+    if (typeof anime?.coverImage === 'string' && anime.coverImage) return anime.coverImage;
+    if (anime?.coverImage?.extraLarge) return anime.coverImage.extraLarge;
+    if (anime?.coverImage?.large) return anime.coverImage.large;
+    if (anime?.coverImage?.medium) return anime.coverImage.medium;
+    return '';
+  }, [anime]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -687,6 +698,8 @@ export default function VideoPlayer({
 
       hls.on(Hls.Events.BUFFER_STALLED, () => setIsBuffering(true));
       hls.on(Hls.Events.BUFFER_APPENDED, () => setIsBuffering(false));
+      hls.on(Hls.Events.FRAG_BUFFERED, () => setIsBuffering(false));
+      hls.on(Hls.Events.FRAG_LOADED, () => setIsBuffering(false));
 
       hls.on(Hls.Events.ERROR, (event, data) => {
         if (data.details === 'bufferStalledError') {
@@ -1253,7 +1266,11 @@ export default function VideoPlayer({
         onEnded={handleVideoEnded}
         onWaiting={() => setIsBuffering(true)}
         onPlaying={() => { setIsBuffering(false); setIsPlaying(true); }}
-        onPause={() => setIsPlaying(false)}
+        onPause={() => { setIsPlaying(false); setIsBuffering(false); }}
+        onCanPlay={() => setIsBuffering(false)}
+        onCanPlayThrough={() => setIsBuffering(false)}
+        onSeeked={() => setIsBuffering(false)}
+        onLoadedData={() => setIsBuffering(false)}
       >
         {subtitles.map((sub, idx) => (
           <track
@@ -1689,13 +1706,17 @@ export default function VideoPlayer({
       )}
 
       {/* Center Buffering Spinner */}
-      {isBuffering && !errorMessage && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+      {isBuffering && !errorMessage && (isPlaying || !videoRef.current || (videoRef.current && videoRef.current.readyState < 2 && currentTime === 0)) && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
           <div className={`flex flex-col items-center gap-3 ${
             gpuSettings?.enableBackdropBlur ? 'bg-black/40 backdrop-blur-sm' : 'bg-zinc-900/90'
-          } p-4 rounded-2xl`}>
-            <Loader2 className="w-12 h-12 text-[#E50914] animate-spin drop-shadow-xl" />
-            <span className="text-xs font-semibold text-zinc-300 tracking-wider uppercase">Loading HLS Stream...</span>
+          } p-4 rounded-2xl ring-1 ring-white/10 shadow-2xl`}>
+            <Loader2 className="w-10 h-10 text-[#E50914] animate-spin drop-shadow-xl" />
+            <span className="text-xs font-semibold text-zinc-300 tracking-wider uppercase">
+              {currentTime > 0 || (videoRef.current && videoRef.current.readyState >= 2)
+                ? 'Buffering...'
+                : 'Loading HLS Stream...'}
+            </span>
           </div>
         </div>
       )}
@@ -1945,53 +1966,58 @@ export default function VideoPlayer({
               className="relative flex-1 h-7 flex items-center cursor-pointer group/seek touch-none"
             >
               {/* Floating Scrubber Preview Tooltip Bubble */}
-              {(isHoveringSeekbar || isScrubbing) && hoverTime !== null && (
-                <div 
-                  style={{ 
-                    left: `${Math.max(60, Math.min(hoverPixelX, (seekbarRef.current?.clientWidth || 300) - 60))}px`,
-                    transform: 'translateX(-50%)'
-                  }}
-                  className="absolute bottom-9 z-50 pointer-events-none flex flex-col items-center animate-in fade-in duration-100"
-                >
-                  <div className="bg-[#121216]/95 border border-zinc-700/80 rounded-2xl shadow-2xl p-1.5 backdrop-blur-xl flex flex-col items-center ring-1 ring-white/10">
-                    {/* Thumbnail Preview Card with Poster Fallback */}
-                    <div className="w-32 sm:w-36 h-20 bg-zinc-950 rounded-xl overflow-hidden relative border border-zinc-800 flex items-center justify-center">
-                      {/* Poster / Cover Image Fallback (Ensures it is never a black screen) */}
-                      {(anime?.image || anime?.coverImage) && (
-                        <img
-                          src={anime?.image || anime?.coverImage}
-                          alt="Thumbnail Preview"
-                          className="absolute inset-0 w-full h-full object-cover opacity-70 filter blur-[0.5px]"
-                          loading="eager"
-                        />
-                      )}
-                      <video
-                        ref={previewVideoRef}
-                        muted
-                        playsInline
-                        preload="auto"
-                        className={`w-full h-full object-cover relative z-10 transition-opacity duration-200 ${
-                          previewReady ? 'opacity-100' : 'opacity-0'
-                        }`}
-                        onCanPlay={() => setPreviewReady(true)}
-                        onLoadedData={() => setPreviewReady(true)}
+              <div 
+                style={{ 
+                  left: `${Math.max(60, Math.min(hoverPixelX, (seekbarRef.current?.clientWidth || 300) - 60))}px`,
+                  transform: 'translateX(-50%)'
+                }}
+                className={`absolute bottom-9 z-50 pointer-events-none flex flex-col items-center transition-all duration-150 ${
+                  (isHoveringSeekbar || isScrubbing) && hoverTime !== null
+                    ? 'opacity-100 scale-100 visible'
+                    : 'opacity-0 scale-95 invisible'
+                }`}
+              >
+                <div className="bg-[#121216]/95 border border-zinc-700/80 rounded-2xl shadow-2xl p-1.5 backdrop-blur-xl flex flex-col items-center ring-1 ring-white/10">
+                  {/* Thumbnail Preview Card with Poster Fallback */}
+                  <div className="w-32 sm:w-36 h-20 bg-zinc-950 rounded-xl overflow-hidden relative border border-zinc-800 flex items-center justify-center">
+                    {/* Poster / Cover Image Fallback (Ensures it is never a broken screen or broken image) */}
+                    {previewPosterUrl && (
+                      <img
+                        src={previewPosterUrl}
+                        alt=""
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        className="absolute inset-0 w-full h-full object-cover opacity-70 filter blur-[0.5px]"
+                        loading="eager"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 pointer-events-none z-20" />
-                      <span className="absolute bottom-1 right-1.5 text-[9px] font-mono font-bold bg-black/80 px-1.5 py-0.5 rounded text-zinc-200 z-30 shadow">
-                        {Math.round(hoverPercent)}%
-                      </span>
-                    </div>
-
-                    {/* Timestamp Tooltip */}
-                    <div className="mt-1.5 px-2 py-0.5 rounded-md bg-zinc-800/90 text-white font-mono text-[11px] font-bold">
-                      {formatTime(hoverTime)}
-                    </div>
+                    )}
+                    <video
+                      ref={previewVideoRef}
+                      muted
+                      playsInline
+                      preload="auto"
+                      className={`w-full h-full object-cover relative z-10 transition-opacity duration-150 ${
+                        previewReady ? 'opacity-100' : 'opacity-0'
+                      }`}
+                      onCanPlay={() => setPreviewReady(true)}
+                      onLoadedData={() => setPreviewReady(true)}
+                      onSeeked={() => setPreviewReady(true)}
+                      onTimeUpdate={() => setPreviewReady(true)}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 pointer-events-none z-20" />
+                    <span className="absolute bottom-1 right-1.5 text-[9px] font-mono font-bold bg-black/80 px-1.5 py-0.5 rounded text-zinc-200 z-30 shadow">
+                      {Math.round(hoverPercent)}%
+                    </span>
                   </div>
 
-                  {/* Downward Arrow */}
-                  <div className="w-2.5 h-2.5 bg-[#121216] border-r border-b border-zinc-700 transform rotate-45 -mt-1.5" />
+                  {/* Timestamp Tooltip */}
+                  <div className="mt-1.5 px-2 py-0.5 rounded-md bg-zinc-800/90 text-white font-mono text-[11px] font-bold">
+                    {formatTime(hoverTime || 0)}
+                  </div>
                 </div>
-              )}
+
+                {/* Downward Arrow */}
+                <div className="w-2.5 h-2.5 bg-[#121216] border-r border-b border-zinc-700 transform rotate-45 -mt-1.5" />
+              </div>
 
               {/* Track Background */}
               <div className="w-full h-1.5 group-hover/seek:h-2.5 bg-zinc-700/80 rounded-full overflow-hidden transition-all relative">

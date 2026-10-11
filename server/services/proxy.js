@@ -69,7 +69,8 @@ export async function handleProxyStream(req, res) {
         res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Accept');
         res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
-        res.setHeader('Content-Type', 'video/mp2t');
+        const isFmp4 = targetUrl.includes('.mp4') || targetUrl.includes('.m4s');
+        res.setHeader('Content-Type', isFmp4 ? 'video/mp4' : 'video/mp2t');
         res.setHeader('Accept-Ranges', 'bytes');
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         res.setHeader('X-Cache-Status', 'HIT');
