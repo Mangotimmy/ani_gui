@@ -52,8 +52,8 @@ function AnimeCarousel({
 
   return (
     <div 
-      className="relative py-4 px-4 md:px-12 group/row"
-      style={{ contentVisibility: 'auto', containIntrinsicSize: '100% 340px' }}
+      className="relative py-4 px-4 md:px-12 group/row min-h-[360px]"
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '100% 370px' }}
     >
       {/* Category Row Title */}
       <div className="flex items-center justify-between mb-3">

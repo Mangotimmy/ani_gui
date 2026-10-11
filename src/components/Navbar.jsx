@@ -230,6 +230,11 @@ function Navbar({
             <img 
               src="/icon.png" 
               alt="AniFlix Logo" 
+              width="32"
+              height="32"
+              loading="eager"
+              decoding="async"
+              style={{ aspectRatio: '1/1' }}
               className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl shadow-md shadow-red-600/20 group-hover:scale-105 group-hover:shadow-red-600/40 transition-all object-cover ring-1 ring-white/10" 
             />
           </div>
@@ -583,6 +588,11 @@ function Navbar({
                               <img
                                 src={iconUrl}
                                 alt=""
+                                width="36"
+                                height="48"
+                                loading="lazy"
+                                decoding="async"
+                                style={{ aspectRatio: '3/4' }}
                                 onError={(e) => {
                                   e.currentTarget.style.display = 'none';
                                   const fallback = e.currentTarget.nextElementSibling;

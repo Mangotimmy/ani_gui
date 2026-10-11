@@ -427,6 +427,11 @@ export default function DetailModal({
               <img
                 src={backdrop}
                 alt={title}
+                width="1280"
+                height="720"
+                loading="lazy"
+                decoding="async"
+                style={{ aspectRatio: '16/9' }}
                 className="w-full h-full object-cover object-center"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-[#141418] via-[#141418]/60 to-transparent" />
@@ -974,6 +979,11 @@ export default function DetailModal({
                           <img
                             src={toCachedImageUrl(tr.thumbnail)}
                             alt={tr.title}
+                            width="480"
+                            height="270"
+                            loading="lazy"
+                            decoding="async"
+                            style={{ aspectRatio: '16/9' }}
                             className="w-full h-full object-cover group-hover/pv:scale-105 transition-transform duration-300"
                           />
                         ) : (
@@ -1318,6 +1328,11 @@ export default function DetailModal({
                           <img
                             src={simCover}
                             alt={simTitle}
+                            width="200"
+                            height="300"
+                            loading="lazy"
+                            decoding="async"
+                            style={{ aspectRatio: '2/3' }}
                             className="w-full h-full object-cover group-hover/sim:scale-110 transition-transform duration-300"
                           />
                         )}

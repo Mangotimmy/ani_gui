@@ -2048,6 +2048,10 @@ export default function VideoPlayer({
                       <img
                         src={previewPosterUrl}
                         alt=""
+                        width="144"
+                        height="80"
+                        decoding="async"
+                        style={{ aspectRatio: '16/9' }}
                         onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         className="absolute inset-0 w-full h-full object-cover opacity-70 filter blur-[0.5px]"
                         loading="eager"

@@ -105,6 +105,12 @@ export default function HeroBanner({
         <img
           src={backdrop}
           alt={title}
+          fetchPriority="high"
+          loading="eager"
+          decoding="async"
+          width="1920"
+          height="800"
+          style={{ aspectRatio: '16/7' }}
           className="w-full h-full object-cover object-center"
         />
         {/* Gradients: bottom fade + left side fade */}
