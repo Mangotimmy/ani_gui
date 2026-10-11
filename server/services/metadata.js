@@ -5,14 +5,17 @@ import { enrichWithChineseTitles } from './chineseTitleService.js';
 import { BoundedCache } from './cache.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 async function anilistQuery(query, variables = {}) {
   try {
     const res = await fetch(ANILIST_URL, {
       method: 'POST',
+      signal: AbortSignal.timeout(8000),
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
+        'User-Agent': BROWSER_UA
       },
       body: JSON.stringify({ query, variables })
     });
@@ -26,7 +29,8 @@ async function anilistQuery(query, variables = {}) {
     return json.data;
   } catch (err) {
     if (!err.message?.includes('404')) {
-      console.warn('AniList fetch notice:', err.message);
+      const cause = err.cause?.message || err.cause?.code || '';
+      console.warn('AniList fetch notice:', err.message, cause ? `(${cause})` : '');
     }
     return null;
   }
@@ -762,8 +766,8 @@ export async function searchTorrents(query, filterLang = 'all', hideR18 = true) 
     try {
       const dmhyUrl = `https://share.dmhy.org/topics/rss/rss.xml?keyword=${encodeURIComponent(dq)}`;
       const res = await fetch(dmhyUrl, {
-        signal: AbortSignal.timeout(8000),
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AniFlix/1.0' }
+        signal: AbortSignal.timeout(5000),
+        headers: { 'User-Agent': BROWSER_UA }
       });
       if (!res.ok) return;
       const text = await res.text();
@@ -815,7 +819,8 @@ export async function searchTorrents(query, filterLang = 'all', hideR18 = true) 
         });
       }
     } catch (err) {
-      console.warn(`[Metadata] DMHY RSS error for "${dq}":`, err.message);
+      const cause = err.cause?.message || err.cause?.code || '';
+      console.warn(`[Metadata] DMHY RSS error for "${dq}":`, err.message, cause ? `(${cause})` : '');
     }
   });
 
@@ -825,7 +830,7 @@ export async function searchTorrents(query, filterLang = 'all', hideR18 = true) 
       const nyaaUrl = `https://nyaa.si/?page=rss&c=1_0&q=${encodeURIComponent(nq)}`;
       const res = await fetch(nyaaUrl, {
         signal: AbortSignal.timeout(8000),
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AniFlix/1.0' }
+        headers: { 'User-Agent': BROWSER_UA }
       });
       if (!res.ok) return;
       const text = await res.text();
@@ -877,7 +882,8 @@ export async function searchTorrents(query, filterLang = 'all', hideR18 = true) 
         });
       }
     } catch (err) {
-      console.warn(`[Metadata] Nyaa RSS error for "${nq}":`, err.message);
+      const cause = err.cause?.message || err.cause?.code || '';
+      console.warn(`[Metadata] Nyaa RSS error for "${nq}":`, err.message, cause ? `(${cause})` : '');
     }
   });
 
