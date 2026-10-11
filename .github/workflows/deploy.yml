@@ -34,5 +34,5 @@ jobs:
         push: true
         # 請將「你的帳號」與「你的儲存庫名稱」替換為 Docker Hub 上的實際名稱
         tags: |
-          ${{ secrets.DOCKER_USERNAME }}/your-repo-name:latest
-          ${{ secrets.DOCKER_USERNAME }}/your-repo-name:${{ github.sha }}
+          ${{ secrets.DOCKER_USERNAME }}/mangoau:latest
+          ${{ secrets.DOCKER_USERNAME }}/aniflex:${{ github.sha }}
