@@ -19,7 +19,7 @@ const VideoPlayer = React.lazy(() => import('./components/VideoPlayer'));
 import { 
   Flame, Star, Trophy, Swords, Sparkles, Loader2, 
   Search, Heart, Calendar, History, Trash2, Clock, Play,
-  Compass, Filter, Layers, ChevronDown
+  Compass, Filter, Layers, ChevronDown, Building2
 } from 'lucide-react';
 import { getSavedLanguage, saveLanguage, createTranslator } from './utils/i18n';
 import { 
@@ -165,6 +165,7 @@ function hasHomeCache() {
   const [thisSeasonAnimes, setThisSeasonAnimes] = useState(() => getHomeCache('thisSeasonAnimes'));
   const [catalogYear, setCatalogYear] = useState(CURRENT_YEAR);
   const [catalogSeason, setCatalogSeason] = useState('ALL');
+  const [catalogStudio, setCatalogStudio] = useState('ALL');
   const [catalogSort, setCatalogSort] = useState('POPULARITY_DESC');
   const [catalogAnimes, setCatalogAnimes] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -461,12 +462,13 @@ function hasHomeCache() {
   }, [favorites, watchHistory]);
 
   // 3. Catalog Fetching Handler
-  const loadCatalogData = async (year, season, sort, page = 1, append = false) => {
+  const loadCatalogData = async (year, season, sort, page = 1, append = false, studio = catalogStudio) => {
     setCatalogLoading(true);
     try {
       const sParam = season && season !== 'ALL' ? `&season=${season}` : '';
       const adultParam = `&isAdult=${!hideR18}`;
-      const url = `/api/catalog?year=${year}${sParam}&sort=${sort}&page=${page}&perPage=50${adultParam}`;
+      const studioParam = studio && studio !== 'ALL' ? `&studio=${encodeURIComponent(studio)}` : '';
+      const url = `/api/catalog?year=${year}${sParam}&sort=${sort}&page=${page}&perPage=50${adultParam}${studioParam}`;
       const res = await fetch(url).then(r => r.json());
       if (res.success && Array.isArray(res.media)) {
         if (append) {
@@ -486,9 +488,9 @@ function hasHomeCache() {
 
   useEffect(() => {
     if (activeTab === 'catalog') {
-      loadCatalogData(catalogYear, catalogSeason, catalogSort, 1, false);
+      loadCatalogData(catalogYear, catalogSeason, catalogSort, 1, false, catalogStudio);
     }
-  }, [activeTab, catalogYear, catalogSeason, catalogSort, hideR18]);
+  }, [activeTab, catalogYear, catalogSeason, catalogSort, catalogStudio, hideR18]);
 
   // 3. Real-Time Server-Sent Events (SSE) for Downloads
   useEffect(() => {
@@ -1132,16 +1134,16 @@ function hasHomeCache() {
                   {t('filterSeason')}
                 </span>
                 {[
-                  { id: 'ALL', label: t('allSeasons'), emoji: '🌟' },
-                  { id: 'WINTER', label: t('winter'), emoji: '❄️' },
-                  { id: 'SPRING', label: t('spring'), emoji: '🌸' },
-                  { id: 'SUMMER', label: t('summer'), emoji: '☀️' },
-                  { id: 'FALL', label: t('fall'), emoji: '🍁' }
+                  { id: 'ALL', label: t('allSeasons') || '全部季度 (All)', emoji: '🌟' },
+                  { id: 'FALL', label: '10 - 12 月 (秋季新番 / Fall)', emoji: '🍁' },
+                  { id: 'SUMMER', label: '7 - 9 月 (夏季新番 / Summer)', emoji: '☀️' },
+                  { id: 'SPRING', label: '4 - 6 月 (春季新番 / Spring)', emoji: '🌸' },
+                  { id: 'WINTER', label: '1 - 3 月 (冬季新番 / Winter)', emoji: '❄️' }
                 ].map((s) => (
                   <button
                     key={s.id}
                     onClick={() => setCatalogSeason(s.id)}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold shrink-0 transition-all ${
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold shrink-0 transition-colors motion-safe:active:scale-[0.96] ${
                       catalogSeason === s.id
                         ? 'bg-amber-500 text-black shadow-md shadow-amber-500/30 font-bold'
                         : 'bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-white border border-zinc-700/50'
@@ -1149,6 +1151,42 @@ function hasHomeCache() {
                   >
                     <span>{s.emoji}</span>
                     <span>{s.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Studio / Mainfactory Selector */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none mt-2">
+                <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1">
+                  <Building2 className="w-3.5 h-3.5 text-rose-400" />
+                  動畫公司 (Studio)
+                </span>
+                {[
+                  { id: 'ALL', label: '全部動畫製作公司 (All Studios)' },
+                  { id: 'ufotable', label: 'ufotable (幽浮社)' },
+                  { id: 'MAPPA', label: 'MAPPA' },
+                  { id: 'Kyoto Animation', label: 'Kyoto Animation (京阿尼)' },
+                  { id: 'CloverWorks', label: 'CloverWorks' },
+                  { id: 'A-1 Pictures', label: 'A-1 Pictures' },
+                  { id: 'Bones', label: 'Bones (骨頭社)' },
+                  { id: 'WIT Studio', label: 'WIT Studio (霸權社)' },
+                  { id: 'Madhouse', label: 'MADHOUSE' },
+                  { id: 'Production I.G', label: 'Production I.G' },
+                  { id: 'Shaft', label: 'SHAFT' },
+                  { id: 'TRIGGER', label: 'TRIGGER (扳機社)' },
+                  { id: 'Toei Animation', label: 'Toei Animation (東映)' }
+                ].map((st) => (
+                  <button
+                    key={st.id}
+                    onClick={() => setCatalogStudio(st.id)}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold shrink-0 transition-colors motion-safe:active:scale-[0.96] ${
+                      catalogStudio === st.id
+                        ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30 font-bold'
+                        : 'bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-white border border-zinc-700/50'
+                    }`}
+                  >
+                    <span>🏢</span>
+                    <span>{st.label}</span>
                   </button>
                 ))}
               </div>
@@ -1186,9 +1224,9 @@ function hasHomeCache() {
                 {hasMoreCatalog && (
                   <div className="mt-8 mb-12 flex justify-center">
                     <button
-                      onClick={() => loadCatalogData(catalogYear, catalogSeason, catalogSort, catalogPage + 1, true)}
+                      onClick={() => loadCatalogData(catalogYear, catalogSeason, catalogSort, catalogPage + 1, true, catalogStudio)}
                       disabled={catalogLoading}
-                      className="px-6 py-2.5 rounded-full bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-xs border border-zinc-700 flex items-center gap-2 transition-all disabled:opacity-50"
+                      className="px-6 py-2.5 rounded-full bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-xs border border-zinc-700 flex items-center gap-2 transition-colors motion-safe:active:scale-[0.96] disabled:opacity-50"
                     >
                       {catalogLoading ? <Loader2 className="w-4 h-4 animate-spin text-amber-400" /> : <Layers className="w-4 h-4 text-amber-400" />}
                       <span>{catalogLoading ? 'Loading more...' : t('loadMore')}</span>

@@ -97,6 +97,10 @@ export async function handleProxyStream(req, res) {
       'Accept': '*/*'
     };
 
+    if (req.query.cookies) {
+      headers['Cookie'] = req.query.cookies;
+    }
+
     if (req.headers.range) {
       headers['Range'] = req.headers.range;
     }
@@ -147,7 +151,9 @@ export async function handleProxyStream(req, res) {
     }
 
     // 3. Video Segments (MPEG-TS, MP4, etc.)
-    if (targetUrl.includes('.ts') || targetUrl.includes('.jpg') || contentType.includes('video') || contentType.includes('octet-stream')) {
+    if (targetUrl.includes('.mp4') || contentType.includes('video/mp4') || contentType.includes('mp4')) {
+      res.setHeader('Content-Type', 'video/mp4');
+    } else if (targetUrl.includes('.ts') || targetUrl.includes('.jpg') || contentType.includes('video') || contentType.includes('octet-stream')) {
       res.setHeader('Content-Type', 'video/mp2t');
     } else {
       res.setHeader('Content-Type', contentType || 'application/octet-stream');
@@ -164,47 +170,62 @@ export async function handleProxyStream(req, res) {
     res.setHeader('X-Cache-Status', 'MISS');
     res.status(upstreamRes.status);
 
-    // Stream and cache segment simultaneously
+    // Stream and cache segment simultaneously (only cache complete 200 OK responses, not 206 Partial Content)
     const nodeStream = Readable.fromWeb(upstreamRes.body);
+    const shouldCache = upstreamRes.status === 200 && !req.headers.range && !targetUrl.includes('.mp4');
 
-    const cacheFilePath = mediaCache.getSegmentPath(targetUrl);
-    const tempFilePath = `${cacheFilePath}.${Date.now()}.tmp`;
-    const fileWriteStream = fs.createWriteStream(tempFilePath);
+    if (shouldCache) {
+      const cacheFilePath = mediaCache.getSegmentPath(targetUrl);
+      const tempFilePath = `${cacheFilePath}.${Date.now()}.tmp`;
+      const fileWriteStream = fs.createWriteStream(tempFilePath);
 
-    let isAborted = false;
-    req.on('close', () => {
-      if (!res.writableEnded) {
-        isAborted = true;
-      }
-      nodeStream.destroy();
-    });
+      let isAborted = false;
+      req.on('close', () => {
+        if (!res.writableEnded) {
+          isAborted = true;
+        }
+        nodeStream.destroy();
+      });
 
-    fileWriteStream.on('finish', () => {
-      if (!isAborted) {
-        try {
-          fs.renameSync(tempFilePath, cacheFilePath);
-          mediaCache.evictOldSegmentsIfNeeded();
-        } catch {}
-      } else {
+      fileWriteStream.on('finish', () => {
+        if (!isAborted) {
+          try {
+            fs.renameSync(tempFilePath, cacheFilePath);
+            mediaCache.evictOldSegmentsIfNeeded();
+          } catch {}
+        } else {
+          try { if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); } catch {}
+        }
+      });
+
+      fileWriteStream.on('error', () => {
         try { if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); } catch {}
-      }
-    });
+      });
 
-    fileWriteStream.on('error', () => {
-      try { if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); } catch {}
-    });
+      nodeStream.on('error', (err) => {
+        try { if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); } catch {}
+        if (!res.headersSent) {
+          res.status(500).end();
+        }
+      });
 
-    nodeStream.on('error', (err) => {
-      try { if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); } catch {}
-      if (!res.headersSent) {
-        res.status(500).end();
-      }
-    });
+      // Feed client response
+      nodeStream.pipe(res);
+      // Tee to disk cache file
+      nodeStream.pipe(fileWriteStream);
+    } else {
+      req.on('close', () => {
+        nodeStream.destroy();
+      });
 
-    // Feed client response
-    nodeStream.pipe(res);
-    // Tee to disk cache file
-    nodeStream.pipe(fileWriteStream);
+      nodeStream.on('error', (err) => {
+        if (!res.headersSent) {
+          res.status(500).end();
+        }
+      });
+
+      nodeStream.pipe(res);
+    }
 
   } catch (err) {
     console.error(`[Proxy] Failed to proxy stream for ${targetUrl}:`, err.message);

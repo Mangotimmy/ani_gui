@@ -2,6 +2,8 @@
 // Scrapes HiAnime/ZokoAnime streaming endpoints directly without CLI/Bash overhead
 import './dnsFallback.js';
 import { BoundedCache } from './cache.js';
+import { resolveAnime1Stream } from './sources/anime1.js';
+import { resolveFramexStream } from './sources/framextv.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const DEOBFUSCATE_KEY = Buffer.from('otaku-embed-v1', 'utf-8');
@@ -234,14 +236,32 @@ async function extractStream(embedUrl) {
   return streamConfig;
 }
 
-// Main Export: Resolve stream for any anime
-export async function resolveStream({ animeTitle, candidates = [], episode = 1, mode = 'sub', quality = 'best', maxAiredCap = null }) {
+export function buildSourceList(activeId = 'auto') {
+  return [
+    { id: 'auto', name: '自動線路 (Auto Failover)', badge: '推薦', active: activeId === 'auto' },
+    { id: 'anime1', name: 'Anime1.me (1080p MP4 / 原生繁中硬字)', badge: '繁中', active: activeId === 'anime1' },
+    { id: 'framextv', name: 'FramexTV (HD 多伺服器 / VidLink)', badge: '備用', active: activeId === 'framextv' },
+    { id: 'hianime', name: 'HiAnime / Zoko (多畫質 HLS / 多國字幕)', badge: '國際', active: activeId === 'hianime' }
+  ];
+}
+
+// Main Export: Resolve stream for any anime with multi-source support
+export async function resolveStream({ 
+  animeTitle, 
+  candidates = [], 
+  episode = 1, 
+  mode = 'sub', 
+  quality = 'best', 
+  maxAiredCap = null, 
+  source = 'auto',
+  tmdbId = null 
+}) {
   const queryCandidates = [
     ...(Array.isArray(candidates) ? candidates : (typeof candidates === 'string' ? candidates.split(/\|\||\||,/) : [])),
     animeTitle
   ].filter(Boolean);
 
-  console.log(`[StreamResolver] Resolving real stream for [${queryCandidates.join(', ')}] Ep ${episode} (${mode})...`);
+  console.log(`[StreamResolver] Resolving stream for [${queryCandidates.join(', ')}] Ep ${episode} (${mode}, Source: ${source})...`);
 
   if (maxAiredCap !== null && maxAiredCap !== undefined && Number(maxAiredCap) > 0 && Number(episode) > Number(maxAiredCap)) {
     return {
@@ -253,30 +273,62 @@ export async function resolveStream({ animeTitle, candidates = [], episode = 1, 
     };
   }
 
+  // 1. Explicit Anime1 selection
+  if (source === 'anime1') {
+    const a1Res = await resolveAnime1Stream({ title: animeTitle, candidates: queryCandidates, episode });
+    if (a1Res && a1Res.success) {
+      return {
+        ...a1Res,
+        activeSource: 'anime1',
+        availableSources: buildSourceList('anime1')
+      };
+    }
+    // If explicit anime1 was requested but failed, return error
+    return {
+      success: false,
+      activeSource: 'anime1',
+      availableSources: buildSourceList('anime1'),
+      error: a1Res?.error || `Anime1.me 找不到《${animeTitle}》第 ${episode} 集。`
+    };
+  }
+
+  // 2. Explicit FramexTV selection
+  if (source === 'framextv') {
+    const fxRes = await resolveFramexStream({ title: animeTitle, candidates: queryCandidates, episode, tmdbId });
+    if (fxRes && fxRes.success) {
+      return {
+        ...fxRes,
+        activeSource: 'framextv',
+        availableSources: buildSourceList('framextv')
+      };
+    }
+    return {
+      success: false,
+      activeSource: 'framextv',
+      availableSources: buildSourceList('framextv'),
+      error: fxRes?.error || `FramexTV 找不到《${animeTitle}》第 ${episode} 集。`
+    };
+  }
+
+  // 3. HiAnime resolution (used for source === 'hianime' or primary in source === 'auto')
+  let hiAnimeError = null;
   try {
-    // 1. Search anime on HiAnime using candidate queries
     const anime = await searchAnime(queryCandidates);
     console.log(`[StreamResolver] Matched Anime: "${anime.title}" (ID: ${anime.id})`);
 
-    // 2. Map episode number to internal ID
     const epMap = await getEpisodeMap(anime.id);
     const epId = epMap.get(String(episode)) || epMap.values().next().value;
     if (!epId) {
       throw new Error(`Episode ${episode} not found in episode list`);
     }
 
-    // 3. Get server embed
     const serverInfo = await getServerEmbed(epId, mode);
-    console.log(`[StreamResolver] Server: ${serverInfo.serverName} (${serverInfo.mode})`);
-
-    // 4. Deobfuscate stream config
     const streamConfig = await extractStream(serverInfo.embedUrl);
     if (!streamConfig || !streamConfig.src) {
       throw new Error('Stream playlist URL missing in decrypted payload');
     }
 
     console.log(`[StreamResolver] Successfully extracted master M3U8: ${streamConfig.src}`);
-
     const proxiedStreamUrl = `/api/proxy?url=${encodeURIComponent(streamConfig.src)}&referer=${encodeURIComponent(DEFAULT_REFERER)}`;
 
     // Parse subtitles format
@@ -303,14 +355,12 @@ export async function resolveStream({ animeTitle, candidates = [], episode = 1, 
 
     const hasChineseSub = rawSubtitles.some(s => isAnyZh(s.rawLang || s.lang));
 
-    // Sort to place Chinese subtitles at top
     let sortedSubtitles = [...rawSubtitles].sort((a, b) => {
       const aTrad = isTradZh(a.rawLang || a.lang) ? 2 : (isSimpZh(a.rawLang || a.lang) ? 1 : 0);
       const bTrad = isTradZh(b.rawLang || b.lang) ? 2 : (isSimpZh(b.rawLang || b.lang) ? 1 : 0);
       return bTrad - aTrad;
     });
 
-    // If official Chinese tracks exist, mark top Chinese track as default
     if (hasChineseSub) {
       const topZh = sortedSubtitles.find(s => isAnyZh(s.rawLang || s.lang));
       if (topZh) {
@@ -318,7 +368,6 @@ export async function resolveStream({ animeTitle, candidates = [], episode = 1, 
         topZh.default = true;
       }
     } else {
-      // If NO Chinese subtitle track is provided upstream, inject AI translation tracks
       const baseSub = rawSubtitles.find(s => s.default) || rawSubtitles[0];
       if (baseSub && baseSub.url) {
         const zhTwSub = {
@@ -348,6 +397,9 @@ export async function resolveStream({ animeTitle, candidates = [], episode = 1, 
       animeTitle: anime.title,
       episode: Number(episode),
       mode: serverInfo.mode,
+      activeSource: 'hianime',
+      serverName: `${serverInfo.serverName} (Multi-Quality HLS)`,
+      availableSources: buildSourceList('hianime'),
       streamUrl: streamConfig.src,
       proxiedStreamUrl,
       subtitles,
@@ -355,15 +407,45 @@ export async function resolveStream({ animeTitle, candidates = [], episode = 1, 
       referer: DEFAULT_REFERER
     };
   } catch (err) {
-    console.error(`[StreamResolver] Error resolving real stream for "${animeTitle}":`, err.message);
-    return {
-      success: false,
-      error: err.message,
-      animeTitle,
-      episode,
-      mode
-    };
+    hiAnimeError = err.message;
+    console.warn(`[StreamResolver] HiAnime failed: ${err.message}. Checking alternative sources...`);
   }
+
+  // 4. Fallback in 'auto' mode: Try Anime1
+  if (source === 'auto') {
+    try {
+      const a1Res = await resolveAnime1Stream({ title: animeTitle, candidates: queryCandidates, episode });
+      if (a1Res && a1Res.success) {
+        console.log(`[StreamResolver] Auto-fallback to Anime1 succeeded for "${animeTitle}" Ep ${episode}`);
+        return {
+          ...a1Res,
+          activeSource: 'anime1',
+          availableSources: buildSourceList('anime1')
+        };
+      }
+    } catch {}
+
+    // Try FramexTV fallback
+    try {
+      const fxRes = await resolveFramexStream({ title: animeTitle, candidates: queryCandidates, episode, tmdbId });
+      if (fxRes && fxRes.success) {
+        return {
+          ...fxRes,
+          activeSource: 'framextv',
+          availableSources: buildSourceList('framextv')
+        };
+      }
+    } catch {}
+  }
+
+  return {
+    success: false,
+    error: hiAnimeError || `無法取得《${animeTitle}》第 ${episode} 集的串流資源。`,
+    animeTitle,
+    episode,
+    mode,
+    availableSources: buildSourceList('hianime')
+  };
 }
 
 // Fetch all currently uploaded / released episodes for an anime
@@ -414,4 +496,8 @@ export async function getAvailableEpisodes(queryOrCandidates, forceRefresh = fal
     };
   }
 }
+
+export const resolveStreamWithFailover = resolveStream;
+export default { resolveStream, resolveStreamWithFailover, buildSourceList, getAvailableEpisodes };
+
 

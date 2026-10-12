@@ -244,7 +244,7 @@ function Navbar({
             AniFlix
           </span>
           <span className="hidden sm:inline-flex items-center text-[10px] tracking-wider bg-red-500/10 text-red-400 px-2 py-0.5 rounded-full border border-red-500/25 font-bold font-mono shadow-sm">
-            v2.0.0
+            v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.8'}
           </span>
         </div>
 

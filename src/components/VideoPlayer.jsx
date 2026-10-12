@@ -5,7 +5,7 @@ import {
   Maximize, Minimize, SkipBack, SkipForward, MonitorPlay, 
   Settings, Loader2, Copy, Check, Link2, ExternalLink, SlidersHorizontal,
   Subtitles, Upload, FileUp, Tv, Smartphone, Zap, Sparkles,
-  MoreVertical, Film, AlertTriangle
+  MoreVertical, Film, AlertTriangle, Radio, ChevronDown
 } from 'lucide-react';
 import { getPlatformInfo, getExternalPlayerLinks } from '../utils/platform.js';
 import { toCachedImageUrl } from '../utils/image.js';
@@ -155,6 +155,14 @@ export default function VideoPlayer({
   const [currentQualityIndex, setCurrentQualityIndex] = useState(-1); // -1 = Auto
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
+  // Stream Source Switcher state (HiAnime, Anime1.me, FramexTV)
+  const [activeSource, setActiveSource] = useState('auto');
+  const [availableSources, setAvailableSources] = useState([]);
+  const [showSourceMenu, setShowSourceMenu] = useState(false);
+  const [isEmbedSource, setIsEmbedSource] = useState(false);
+  const [isMp4, setIsMp4] = useState(false);
+  const sourceMenuRef = useRef(null);
+
   // In-Player Episode Drawer state
   const [showEpisodeDrawer, setShowEpisodeDrawer] = useState(false);
   const [episodeDrawerChunk, setEpisodeDrawerChunk] = useState(0);
@@ -259,13 +267,21 @@ export default function VideoPlayer({
   const previewVideoRef = useRef(null);
   const previewHlsRef = useRef(null);
   const [previewReady, setPreviewReady] = useState(false);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const pendingPreviewSeekRef = useRef(null);
+  const [videoFit, setVideoFit] = useState('contain'); // 'contain' | 'cover' | 'fill'
   const [hoverTime, setHoverTime] = useState(null);
   const [hoverPercent, setHoverPercent] = useState(0);
   const [hoverPixelX, setHoverPixelX] = useState(0);
   const [isHoveringSeekbar, setIsHoveringSeekbar] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const isScrubbingRef = useRef(false);
+  useEffect(() => {
+    isScrubbingRef.current = isScrubbing;
+  }, [isScrubbing]);
   const [bufferedEnd, setBufferedEnd] = useState(0);
   const lastScrubPreviewTimeRef = useRef(0);
+  const lastMainSeekTimeRef = useRef(0);
   const scrubThrottleTimerRef = useRef(null);
 
   // Reliably extract preview poster artwork (supports banner, image, or AniList coverImage object)
@@ -285,9 +301,19 @@ export default function VideoPlayer({
       if (externalMenuRef.current && !externalMenuRef.current.contains(e.target)) {
         setShowExternalMenu(false);
       }
+      if (sourceMenuRef.current && !sourceMenuRef.current.contains(e.target)) {
+        setShowSourceMenu(false);
+      }
+      if (subMenuRef.current && !subMenuRef.current.contains(e.target)) {
+        setShowSubtitlesMenu(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
   }, []);
 
   // Debug stats polling (only when panel is open)
@@ -448,6 +474,8 @@ export default function VideoPlayer({
     setErrorMessage('');
     setAvailableQualities([]);
     setCurrentQualityIndex(-1);
+    setIsMp4(false);
+    setIsEmbedSource(false);
 
     async function loadStream() {
       if (directStreamUrl) {
@@ -493,7 +521,8 @@ export default function VideoPlayer({
             episode,
             mode: audioMode,
             candidates: candidateTitles,
-            maxAiredCap
+            maxAiredCap,
+            source: activeSource
           })
         }).then(r => r.json());
 
@@ -511,6 +540,15 @@ export default function VideoPlayer({
             const raw = streamRes.data.streamUrl;
             const proxied = streamRes.data.proxiedStreamUrl || toPlayableUrl(raw, streamRes.data.referer);
             const refHeader = streamRes.data.referer || 'https://zokoanime.video/';
+
+            if (streamRes.data.availableSources) {
+              setAvailableSources(streamRes.data.availableSources);
+            }
+            if (streamRes.data.activeSource && streamRes.data.activeSource !== activeSource) {
+              setActiveSource(streamRes.data.activeSource);
+            }
+            setIsEmbedSource(Boolean(streamRes.data.isEmbed));
+            setIsMp4(Boolean(streamRes.data.isMp4));
 
             setRawStreamUrl(raw);
             setStreamUrl(proxied);
@@ -640,7 +678,7 @@ export default function VideoPlayer({
 
     loadStream();
     return () => { isCancelled = true; };
-  }, [anime, episode, audioMode, displayTitle, rawTitle, currentLang, directStreamUrl]);
+  }, [anime, episode, audioMode, displayTitle, rawTitle, currentLang, directStreamUrl, activeSource]);
 
   // Load live uploaded episodes list
   useEffect(() => {
@@ -737,6 +775,7 @@ export default function VideoPlayer({
   };
 
   const handleTimeUpdate = () => {
+    if (isScrubbingRef.current) return;
     const video = videoRef.current;
     if (!video) return;
     const cur = video.currentTime;
@@ -774,14 +813,31 @@ export default function VideoPlayer({
     }
   };
 
-  // Setup HLS or Native Video
+  // Setup HLS or Native Video (Supporting HLS .m3u8 & direct .mp4 streams)
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !streamUrl) return;
+    if (!video || !streamUrl || isEmbedSource) {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      return;
+    }
 
     const playable = toPlayableUrl(streamUrl, referer);
+    const isDirectMp4 = isMp4 ||
+                        (rawStreamUrl && (rawStreamUrl.includes('.mp4') || rawStreamUrl.includes('api?c='))) ||
+                        (streamUrl && (streamUrl.includes('.mp4') || streamUrl.includes('api?c=')));
 
-    if (Hls.isSupported() && (playable.includes('.m3u8') || playable.includes('/api/proxy'))) {
+    if (isDirectMp4) {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      video.src = playable;
+      setIsBuffering(false);
+      video.play().catch(() => setIsPlaying(false));
+    } else if (Hls.isSupported() && (playable.includes('.m3u8') || playable.includes('/api/proxy'))) {
       if (hlsRef.current) hlsRef.current.destroy();
 
       const hls = new Hls({
@@ -866,24 +922,49 @@ export default function VideoPlayer({
         hlsRef.current = null;
       }
     };
-  }, [streamUrl]);
+  }, [streamUrl, rawStreamUrl]);
 
   // Setup Preview HLS instance for hover thumbnail seekbar
   useEffect(() => {
     const previewVideo = previewVideoRef.current;
-    if (!previewVideo || !streamUrl) return;
+    if (!previewVideo || !streamUrl || isEmbedSource) {
+      if (previewHlsRef.current) {
+        previewHlsRef.current.destroy();
+        previewHlsRef.current = null;
+      }
+      return;
+    }
+
+    previewVideo.muted = true;
+    previewVideo.defaultMuted = true;
+    previewVideo.playsInline = true;
+    try {
+      previewVideo.setAttribute('playsinline', '');
+      previewVideo.setAttribute('webkit-playsinline', '');
+    } catch {}
 
     setPreviewReady(false);
+    setIsPreviewLoading(false);
+    pendingPreviewSeekRef.current = null;
     const playable = toPlayableUrl(streamUrl, referer);
+    const isDirectMp4 = isMp4 ||
+                        (rawStreamUrl && (rawStreamUrl.includes('.mp4') || rawStreamUrl.includes('api?c='))) ||
+                        (streamUrl && (streamUrl.includes('.mp4') || streamUrl.includes('api?c=')));
 
-    if (Hls.isSupported() && (playable.includes('.m3u8') || playable.includes('/api/proxy'))) {
+    if (isDirectMp4) {
+      if (previewHlsRef.current) {
+        previewHlsRef.current.destroy();
+        previewHlsRef.current = null;
+      }
+      previewVideo.src = playable;
+      try { previewVideo.load(); } catch {}
+    } else if (Hls.isSupported() && (playable.includes('.m3u8') || playable.includes('/api/proxy'))) {
       if (previewHlsRef.current) previewHlsRef.current.destroy();
 
       const previewHls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
         autoStartLoad: true,
-        capLevelToPlayerSize: true,
         maxBufferLength: 6,
         maxMaxBufferLength: 12,
         enableSoftwareAES: false,
@@ -895,12 +976,25 @@ export default function VideoPlayer({
 
       previewHls.on(Hls.Events.MANIFEST_PARSED, (e, data) => {
         if (data.levels && data.levels.length > 0) {
-          previewHls.currentLevel = 0; // lowest level for fast thumbnail rendering
+          // Select lowest video resolution level for fast thumbnail rendering
+          const videoLevels = data.levels
+            .map((lvl, idx) => ({ lvl, idx }))
+            .filter(item => (item.lvl.height || 0) > 0);
+          const candidates = videoLevels.length > 0 ? videoLevels : data.levels.map((lvl, idx) => ({ lvl, idx }));
+          let lowestIndex = candidates[0].idx;
+          let lowestScore = Infinity;
+          candidates.forEach(({ lvl, idx }) => {
+            const score = (lvl.height || 0) * 1000000 + (lvl.bitrate || 0);
+            if (score < lowestScore) {
+              lowestScore = score;
+              lowestIndex = idx;
+            }
+          });
+          previewHls.currentLevel = lowestIndex;
         }
       });
 
       previewHls.on(Hls.Events.ERROR, (e, data) => {
-        // Silently recover preview errors without console spam
         if (data.fatal) {
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
             previewHls.startLoad();
@@ -920,6 +1014,17 @@ export default function VideoPlayer({
       }
     };
   }, [streamUrl, referer]);
+
+  // Keep preview video in sync with real stream playback position when idle
+  useEffect(() => {
+    if (videoRef.current && previewVideoRef.current && !isHoveringSeekbar && !isScrubbing) {
+      try {
+        if (Math.abs(previewVideoRef.current.currentTime - currentTime) > 5) {
+          previewVideoRef.current.currentTime = currentTime;
+        }
+      } catch {}
+    }
+  }, [currentTime, isHoveringSeekbar, isScrubbing]);
 
   // Synchronize active subtitle track on video element
   useEffect(() => {
@@ -1026,6 +1131,7 @@ export default function VideoPlayer({
       if (
         !showLinkModal &&
         !showQualityMenu &&
+        !showSourceMenu &&
         !showContextMenu &&
         !showSubtitlesMenu &&
         !showEpisodeDrawer &&
@@ -1041,6 +1147,7 @@ export default function VideoPlayer({
     isPlaying,
     showLinkModal,
     showQualityMenu,
+    showSourceMenu,
     showContextMenu,
     showSubtitlesMenu,
     showEpisodeDrawer,
@@ -1314,6 +1421,37 @@ export default function VideoPlayer({
 
 
   // Interactive Scrubber & Thumbnail Preview handlers
+  const seekPreviewVideo = (targetTime) => {
+    const pv = previewVideoRef.current;
+    if (!pv || !isFinite(targetTime) || duration <= 0) return;
+
+    if (pv.seeking) {
+      pendingPreviewSeekRef.current = targetTime;
+      return;
+    }
+
+    try {
+      setIsPreviewLoading(true);
+      if (typeof pv.fastSeek === 'function') {
+        pv.fastSeek(targetTime);
+      } else {
+        pv.currentTime = targetTime;
+      }
+    } catch {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  const handlePreviewSeeked = () => {
+    setPreviewReady(true);
+    setIsPreviewLoading(false);
+    if (pendingPreviewSeekRef.current !== null) {
+      const nextTime = pendingPreviewSeekRef.current;
+      pendingPreviewSeekRef.current = null;
+      seekPreviewVideo(nextTime);
+    }
+  };
+
   const updateScrubberHover = (clientX) => {
     if (!seekbarRef.current || !duration) return;
     const rect = seekbarRef.current.getBoundingClientRect();
@@ -1325,23 +1463,37 @@ export default function VideoPlayer({
     setHoverPixelX(clampedX);
     setHoverTime(targetTime);
 
-    if (previewVideoRef.current && isFinite(targetTime)) {
-      const now = Date.now();
-      if (now - lastScrubPreviewTimeRef.current > 150) {
-        lastScrubPreviewTimeRef.current = now;
-        try {
-          previewVideoRef.current.currentTime = targetTime;
-        } catch {}
-      } else {
-        if (scrubThrottleTimerRef.current) clearTimeout(scrubThrottleTimerRef.current);
-        scrubThrottleTimerRef.current = setTimeout(() => {
-          if (previewVideoRef.current && isFinite(targetTime)) {
-            try {
-              previewVideoRef.current.currentTime = targetTime;
-            } catch {}
-          }
-        }, 150);
-      }
+    // Throttle preview thumbnail seeking to ~75ms to avoid decoding thrash
+    const now = Date.now();
+    if (now - lastScrubPreviewTimeRef.current > 75) {
+      lastScrubPreviewTimeRef.current = now;
+      seekPreviewVideo(targetTime);
+    } else {
+      if (scrubThrottleTimerRef.current) clearTimeout(scrubThrottleTimerRef.current);
+      scrubThrottleTimerRef.current = setTimeout(() => {
+        seekPreviewVideo(targetTime);
+      }, 75);
+    }
+  };
+
+  const applyScrubTime = (clientX, isFinal = false) => {
+    if (!seekbarRef.current || !duration) return;
+    const rect = seekbarRef.current.getBoundingClientRect();
+    const clampedX = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    const targetTime = (clampedX / rect.width) * duration;
+
+    // Immediately update UI seekbar position & hover tooltip for instant 60fps knob follow
+    setCurrentTime(targetTime);
+    updateScrubberHover(clientX);
+
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (isFinal) {
+      // Seek main video stream ONLY upon release to prevent mobile decoder thrash and stutter
+      try {
+        video.currentTime = targetTime;
+      } catch {}
     }
   };
 
@@ -1360,74 +1512,68 @@ export default function VideoPlayer({
   const handleSeekbarMouseDown = (e) => {
     setIsScrubbing(true);
     setIsHoveringSeekbar(true);
-    updateScrubberHover(e.clientX);
-    const rect = seekbarRef.current?.getBoundingClientRect();
-    if (rect && duration) {
-      const clampedX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-      const targetTime = (clampedX / rect.width) * duration;
-      if (videoRef.current) {
-        videoRef.current.currentTime = targetTime;
-        setCurrentTime(targetTime);
-      }
-    }
+    applyScrubTime(e.clientX, false);
   };
 
   const handleSeekbarTouchStart = (e) => {
     e.stopPropagation();
     setIsScrubbing(true);
     setIsHoveringSeekbar(true);
-    if (e.touches[0]) {
-      updateScrubberHover(e.touches[0].clientX);
+    if (e.touches && e.touches[0]) {
+      applyScrubTime(e.touches[0].clientX, false);
     }
   };
 
   const handleSeekbarTouchMove = (e) => {
     e.stopPropagation();
-    if (e.touches[0]) {
-      updateScrubberHover(e.touches[0].clientX);
-      const rect = seekbarRef.current?.getBoundingClientRect();
-      if (rect && duration) {
-        const clampedX = Math.max(0, Math.min(e.touches[0].clientX - rect.left, rect.width));
-        const targetTime = (clampedX / rect.width) * duration;
-        if (videoRef.current) {
-          videoRef.current.currentTime = targetTime;
-          setCurrentTime(targetTime);
-        }
-      }
+    if (e.touches && e.touches[0]) {
+      applyScrubTime(e.touches[0].clientX, false);
     }
   };
 
   const handleSeekbarTouchEnd = (e) => {
     e.stopPropagation();
+    if (e.changedTouches && e.changedTouches[0]) {
+      applyScrubTime(e.changedTouches[0].clientX, true);
+    }
     setIsScrubbing(false);
     setIsHoveringSeekbar(false);
     setHoverTime(null);
   };
 
+  // Global window listeners for drag scrubbing (mouse and touch)
   useEffect(() => {
     if (!isScrubbing) return;
-    const onMove = (e) => {
-      updateScrubberHover(e.clientX);
-      if (seekbarRef.current && duration) {
-        const rect = seekbarRef.current.getBoundingClientRect();
-        const clampedX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-        const targetTime = (clampedX / rect.width) * duration;
-        if (videoRef.current) {
-          videoRef.current.currentTime = targetTime;
-          setCurrentTime(targetTime);
-        }
+
+    const onPointerMove = (e) => {
+      const clientX = e.touches ? e.touches[0]?.clientX : e.clientX;
+      if (clientX !== undefined) {
+        applyScrubTime(clientX, false);
       }
     };
-    const onUp = () => {
+
+    const onPointerUp = (e) => {
+      const clientX = e.changedTouches ? e.changedTouches[0]?.clientX : e.clientX;
+      if (clientX !== undefined) {
+        applyScrubTime(clientX, true);
+      }
       setIsScrubbing(false);
       setIsHoveringSeekbar(false);
       setHoverTime(null);
     };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
+    window.addEventListener('touchmove', onPointerMove, { passive: true });
+    window.addEventListener('touchend', onPointerUp, { passive: true });
+    window.addEventListener('touchcancel', onPointerUp, { passive: true });
+
     return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mousemove', onPointerMove);
+      window.removeEventListener('mouseup', onPointerUp);
+      window.removeEventListener('touchmove', onPointerMove);
+      window.removeEventListener('touchend', onPointerUp);
+      window.removeEventListener('touchcancel', onPointerUp);
     };
   }, [isScrubbing, duration]);
 
@@ -1492,45 +1638,120 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Video Element */}
-      <video
-        ref={videoRef}
-        crossOrigin="anonymous"
-        playsInline
-        preload="auto"
-        disableRemotePlayback
-        className="w-full h-full object-contain cursor-pointer [transform:translateZ(0)]"
-        onClick={handleVideoClick}
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
-        onEnded={handleVideoEnded}
-        onWaiting={() => setIsBuffering(true)}
-        onPlaying={() => { 
-          setIsBuffering(false); 
-          setIsPlaying(true); 
-          resetControlsTimeout(10000); 
-        }}
-        onPause={() => { 
-          setIsPlaying(false); 
-          setIsBuffering(false); 
-          resetControlsTimeout(30000); 
-        }}
-        onCanPlay={() => setIsBuffering(false)}
-        onCanPlayThrough={() => setIsBuffering(false)}
-        onSeeked={() => setIsBuffering(false)}
-        onLoadedData={() => setIsBuffering(false)}
-      >
-        {subtitles.map((sub, idx) => (
-          <track
-            key={`${idx}_${sub.url}`}
-            kind="subtitles"
-            label={sub.lang}
-            src={sub.url}
-            srcLang={sub.lang.includes('繁體') || sub.lang.includes('TW') ? 'zh-TW' : sub.lang.includes('简') ? 'zh-CN' : sub.lang.includes('日本') || sub.lang.includes('ja') ? 'ja' : 'en'}
-            default={idx === selectedSubIndex}
+      {/* Video Element or Embed Iframe */}
+      {isEmbedSource && (rawStreamUrl || streamUrl) ? (
+        <div className="absolute inset-0 z-20 flex flex-col bg-black">
+          {/* Floating Exit & Source Switcher Bar for Embed mode */}
+          <div className="absolute top-3 left-3 right-3 z-30 flex items-center justify-between pointer-events-auto bg-black/75 backdrop-blur-md px-3.5 py-2.5 rounded-2xl border border-white/10 shadow-2xl">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-1.5 rounded-xl bg-zinc-800/90 hover:bg-zinc-700 text-white transition-colors cursor-pointer"
+                title="關閉播放器"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-bold text-white truncate max-w-[180px] sm:max-w-xs">
+                  {displayTitle} · 第 {episode} 集
+                </span>
+                <span className="text-[10px] text-amber-300 font-medium flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                  FramexTV 獨立內嵌播放模式
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowSourceMenu(!showSourceMenu)}
+                  className="flex items-center gap-1 text-[11px] font-bold px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl border border-zinc-700 cursor-pointer transition-colors"
+                >
+                  <Radio className="w-3.5 h-3.5 text-amber-400" />
+                  <span>切換線路</span>
+                  <ChevronDown className="w-3 h-3 text-zinc-400" />
+                </button>
+                {showSourceMenu && (
+                  <div className="absolute right-0 top-full mt-2 w-48 bg-[#1f1f1f] border border-zinc-700 rounded-xl shadow-2xl overflow-hidden z-50 py-1 backdrop-blur-xl animate-in fade-in zoom-in-95">
+                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-800 flex items-center justify-between">
+                      <span>選擇播放線路</span>
+                    </div>
+                    {[
+                      { id: 'auto', label: '自動線路 (推薦)', badge: 'Auto' },
+                      { id: 'anime1', label: 'Anime1.me (1080p MP4)', badge: '繁中' },
+                      { id: 'framextv', label: 'FramexTV (HD 內嵌)', badge: '備用' },
+                      { id: 'hianime', label: 'HiAnime (國際 HLS)', badge: '多語' },
+                    ].map(s => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveSource(s.id);
+                          setShowSourceMenu(false);
+                        }}
+                        className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between cursor-pointer transition-colors ${
+                          activeSource === s.id ? 'bg-[#E50914]/20 text-[#E50914] font-bold' : 'text-zinc-300 hover:bg-zinc-800'
+                        }`}
+                      >
+                        <span className="truncate">{s.label}</span>
+                        {s.badge && <span className="text-[9px] px-1 py-0.5 bg-zinc-800 text-zinc-400 rounded border border-zinc-700">{s.badge}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <iframe
+            src={rawStreamUrl || streamUrl}
+            title={`${displayTitle} Ep ${episode}`}
+            className="w-full h-full border-0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
           />
-        ))}
-      </video>
+        </div>
+      ) : (
+        <video
+          ref={videoRef}
+          crossOrigin="anonymous"
+          playsInline
+          preload="auto"
+          disableRemotePlayback
+          className={`w-full h-full ${videoFit === 'cover' ? 'object-cover' : videoFit === 'fill' ? 'object-fill' : 'object-contain'} cursor-pointer [transform:translateZ(0)]`}
+          onClick={handleVideoClick}
+          onTimeUpdate={handleTimeUpdate}
+          onLoadedMetadata={handleLoadedMetadata}
+          onEnded={handleVideoEnded}
+          onWaiting={() => setIsBuffering(true)}
+          onPlaying={() => { 
+            setIsBuffering(false); 
+            setIsPlaying(true); 
+            resetControlsTimeout(10000); 
+          }}
+          onPause={() => { 
+            setIsPlaying(false); 
+            setIsBuffering(false); 
+            resetControlsTimeout(30000); 
+          }}
+          onCanPlay={() => setIsBuffering(false)}
+          onCanPlayThrough={() => setIsBuffering(false)}
+          onSeeked={() => setIsBuffering(false)}
+          onLoadedData={() => setIsBuffering(false)}
+        >
+          {subtitles.map((sub, idx) => (
+            <track
+              key={`${idx}_${sub.url}`}
+              kind="subtitles"
+              label={sub.lang}
+              src={sub.url}
+              srcLang={sub.lang.includes('繁體') || sub.lang.includes('TW') ? 'zh-TW' : sub.lang.includes('简') ? 'zh-CN' : sub.lang.includes('日本') || sub.lang.includes('ja') ? 'ja' : 'en'}
+              default={idx === selectedSubIndex}
+            />
+          ))}
+        </video>
+      )}
 
       {/* Touch Double-Tap Seek Ripple Overlay */}
       {seekRipple && (
@@ -1752,6 +1973,30 @@ export default function VideoPlayer({
               {gpuSettings?.enableUpscale ? <Sparkles className="w-3.5 h-3.5 text-amber-400" /> : <Zap className="w-3.5 h-3.5 text-emerald-400" />}
               <span>{gpuSettings?.enableUpscale ? '✨ AI 升頻已啟用' : '⚡ 自動 / iGPU 省電'}</span>
             </button>
+          </div>
+
+          {/* Video Fit / Aspect Ratio toggle */}
+          <div className="mb-3">
+            <span className="text-[11px] font-bold text-zinc-400 mb-1.5 block">畫面比例 Aspect Ratio</span>
+            <div className="grid grid-cols-3 gap-1">
+              {[
+                { id: 'contain', label: '原比例 Fit' },
+                { id: 'cover', label: '填滿 Cover' },
+                { id: 'fill', label: '延展 Stretch' },
+              ].map(mode => (
+                <button
+                  key={mode.id}
+                  onClick={() => setVideoFit(mode.id)}
+                  className={`py-1 rounded-lg text-[11px] font-bold border transition-colors ${
+                    videoFit === mode.id
+                      ? 'bg-[#E50914] text-white border-red-500 shadow-md'
+                      : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white hover:bg-zinc-700'
+                  }`}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Screenshot */}
@@ -2072,23 +2317,23 @@ export default function VideoPlayer({
         {/* Top Header Bar */}
         <div 
           style={{
-            paddingTop: 'max(1rem, env(safe-area-inset-top, 16px))',
-            paddingLeft: 'max(1rem, env(safe-area-inset-left, 16px))',
-            paddingRight: 'max(1rem, env(safe-area-inset-right, 16px))'
+            paddingTop: 'max(0.75rem, env(safe-area-inset-top, 12px))',
+            paddingLeft: 'max(0.75rem, env(safe-area-inset-left, 12px))',
+            paddingRight: 'max(0.75rem, env(safe-area-inset-right, 12px))'
           }}
-          className="p-3 sm:p-6 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-center justify-between"
+          className="p-2 sm:p-6 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-center justify-between gap-2"
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <button
               onClick={onClose}
-              className="p-2 rounded-full hover:bg-white/20 text-white transition-colors"
+              className="p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-white transition-colors shrink-0"
               title={`${t('close')} (Esc)`}
             >
-              <X className="w-6 h-6" />
+              <X className="w-5 h-5 sm:w-6 sm:h-6" />
             </button>
-            <div>
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-bold text-white drop-shadow truncate max-w-md sm:max-w-xl">
+                <h2 className="text-sm sm:text-base md:text-lg font-bold text-white drop-shadow truncate">
                   {displayTitle}
                 </h2>
                 {subTitle && subTitle !== displayTitle && (
@@ -2097,12 +2342,12 @@ export default function VideoPlayer({
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 text-xs text-zinc-300">
+              <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs text-zinc-300">
                 <span className="font-semibold text-zinc-200">
                   {t('episodeLabel', 'Episode {ep}').replace('{ep}', episode)}
                 </span>
                 <span>•</span>
-                <span className="bg-zinc-800 text-zinc-300 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
+                <span className="bg-zinc-800 text-zinc-300 px-1 sm:px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">
                   {audioMode === 'sub' 
                     ? (t('audioSubLabel') || 'SUB') 
                     : (t('audioDubLabel') || 'DUB')}
@@ -2110,9 +2355,9 @@ export default function VideoPlayer({
                 {rawStreamUrl && (
                   <>
                     <span>•</span>
-                    <span className="text-emerald-400 font-mono text-[11px] flex items-center gap-1">
+                    <span className="text-emerald-400 font-mono text-[10px] sm:text-[11px] flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                      HLS m3u8
+                      HLS
                     </span>
                   </>
                 )}
@@ -2120,11 +2365,11 @@ export default function VideoPlayer({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             {/* Copy M3U8 Link Button */}
             <button
               onClick={handleCopyLink}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border shadow-lg shrink-0 ${
+              className={`flex items-center gap-1.5 p-1.5 sm:px-3 sm:py-1.5 rounded-full text-xs font-bold transition-all border shadow-lg shrink-0 ${
                 copiedLink 
                   ? 'bg-emerald-600/30 text-emerald-400 border-emerald-500/50' 
                   : 'bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700'
@@ -2138,7 +2383,7 @@ export default function VideoPlayer({
             {/* Inspect / Change Stream Link */}
             <button
               onClick={() => setShowLinkModal(true)}
-              className="p-2 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 transition-colors shrink-0"
+              className="p-1.5 sm:p-2 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 transition-colors shrink-0"
               title={t('inspectStream')}
             >
               <Link2 className="w-4 h-4" />
@@ -2148,7 +2393,7 @@ export default function VideoPlayer({
             <div className="relative shrink-0" ref={externalMenuRef}>
               <button
                 onClick={() => setShowExternalMenu(!showExternalMenu)}
-                className="flex items-center gap-1.5 bg-zinc-800/90 hover:bg-zinc-700 text-sky-400 hover:text-sky-300 px-3 py-1.5 rounded-full border border-zinc-700 text-xs font-bold transition-all shadow-lg"
+                className="flex items-center gap-1.5 bg-zinc-800/90 hover:bg-zinc-700 text-sky-400 hover:text-sky-300 p-1.5 sm:px-3 sm:py-1.5 rounded-full border border-zinc-700 text-xs font-bold transition-all shadow-lg"
                 title={platform.isMobile ? "Open in Mobile Player (VLC / Infuse)" : "External Players"}
               >
                 {platform.isMobile ? <Smartphone className="w-3.5 h-3.5" /> : <ExternalLink className="w-3.5 h-3.5" />}
@@ -2219,15 +2464,15 @@ export default function VideoPlayer({
         {/* Bottom Control Bar */}
         <div 
           style={{
-            paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 16px))',
-            paddingLeft: 'max(1rem, env(safe-area-inset-left, 16px))',
-            paddingRight: 'max(1rem, env(safe-area-inset-right, 16px))'
+            paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 12px))',
+            paddingLeft: 'max(0.75rem, env(safe-area-inset-left, 12px))',
+            paddingRight: 'max(0.75rem, env(safe-area-inset-right, 12px))'
           }}
-          className="p-3 sm:p-6 bg-gradient-to-t from-black/95 via-black/60 to-transparent"
+          className="p-2 sm:p-6 bg-gradient-to-t from-black/95 via-black/60 to-transparent"
         >
           {/* Interactive Custom Seekbar with Buffer & Live Thumbnail Tooltip */}
-          <div className="relative mb-3 flex items-center gap-3 select-none">
-            <span className="text-xs text-zinc-300 font-mono w-12 text-right shrink-0">
+          <div className="relative mb-2 sm:mb-3 flex items-center gap-2 sm:gap-3 select-none">
+            <span className="text-[11px] sm:text-xs text-zinc-300 font-mono w-10 sm:w-12 text-right shrink-0">
               {formatTime(currentTime)}
             </span>
 
@@ -2239,65 +2484,82 @@ export default function VideoPlayer({
               onTouchStart={handleSeekbarTouchStart}
               onTouchMove={handleSeekbarTouchMove}
               onTouchEnd={handleSeekbarTouchEnd}
-              className="relative flex-1 h-7 flex items-center cursor-pointer group/seek touch-none"
+              className="relative flex-1 h-11 py-2 flex items-center cursor-pointer group/seek touch-none select-none"
             >
               {/* Floating Scrubber Preview Tooltip Bubble */}
-              <div 
-                style={{ 
-                  left: `${Math.max(60, Math.min(hoverPixelX, (seekbarRef.current?.clientWidth || 300) - 60))}px`,
-                  transform: 'translateX(-50%)'
-                }}
-                className={`absolute bottom-9 z-50 pointer-events-none flex flex-col items-center transition-all duration-150 ${
-                  (isHoveringSeekbar || isScrubbing) && hoverTime !== null
-                    ? 'opacity-100 scale-100 visible'
-                    : 'opacity-0 scale-95 invisible'
-                }`}
-              >
-                <div className="bg-[#121216]/95 border border-zinc-700/80 rounded-2xl shadow-2xl p-1.5 backdrop-blur-xl flex flex-col items-center ring-1 ring-white/10">
-                  {/* Thumbnail Preview Card with Poster Fallback */}
-                  <div className="w-32 sm:w-36 h-20 bg-zinc-950 rounded-xl overflow-hidden relative border border-zinc-800 flex items-center justify-center">
-                    {/* Poster / Cover Image Fallback (Ensures it is never a broken screen or broken image) */}
-                    {previewPosterUrl && (
-                      <img
-                        src={previewPosterUrl}
-                        alt=""
-                        width="144"
-                        height="80"
-                        decoding="async"
-                        style={{ aspectRatio: '16/9' }}
-                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                        className="absolute inset-0 w-full h-full object-cover opacity-70 filter blur-[0.5px]"
-                        loading="lazy"
-                      />
-                    )}
-                    <video
-                      ref={previewVideoRef}
-                      muted
-                      playsInline
-                      preload="auto"
-                      className={`w-full h-full object-cover relative z-10 transition-opacity duration-150 ${
-                        previewReady ? 'opacity-100' : 'opacity-0'
-                      }`}
-                      onCanPlay={() => setPreviewReady(true)}
-                      onLoadedData={() => setPreviewReady(true)}
-                      onSeeked={() => setPreviewReady(true)}
-                      onTimeUpdate={() => setPreviewReady(true)}
+              {(() => {
+                const bubbleHalfWidth = screenInfo.isMobile ? 64 : 88;
+                const seekbarWidth = seekbarRef.current?.clientWidth || 300;
+                const clampedBubbleX = Math.max(bubbleHalfWidth, Math.min(hoverPixelX, seekbarWidth - bubbleHalfWidth));
+                const arrowOffset = Math.max(-bubbleHalfWidth + 14, Math.min(hoverPixelX - clampedBubbleX, bubbleHalfWidth - 14));
+
+                return (
+                  <div 
+                    style={{ 
+                      left: `${clampedBubbleX}px`,
+                      transform: 'translateX(-50%)'
+                    }}
+                    className={`absolute bottom-14 sm:bottom-11 z-50 pointer-events-none flex flex-col items-center transition-all duration-150 ${
+                      (isHoveringSeekbar || isScrubbing) && hoverTime !== null
+                        ? 'opacity-100 scale-100 visible'
+                        : 'opacity-0 scale-95 invisible'
+                    }`}
+                  >
+                    <div className="bg-[#121216]/95 border border-zinc-700/80 rounded-2xl shadow-2xl p-1.5 backdrop-blur-xl flex flex-col items-center ring-1 ring-white/10">
+                      {/* Thumbnail Preview Card with 16:9 Aspect Ratio */}
+                      <div className="w-32 sm:w-44 aspect-video bg-zinc-950 rounded-xl overflow-hidden relative border border-zinc-800 flex items-center justify-center">
+                        {/* Poster / Cover Image Fallback */}
+                        {previewPosterUrl && (
+                          <img
+                            src={previewPosterUrl}
+                            alt=""
+                            decoding="async"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            className="absolute inset-0 w-full h-full object-cover opacity-70 filter blur-[0.5px]"
+                            loading="lazy"
+                          />
+                        )}
+                        <video
+                          ref={previewVideoRef}
+                          muted
+                          playsInline
+                          preload="auto"
+                          className={`w-full h-full object-contain bg-black relative z-10 transition-opacity duration-150 ${
+                            previewReady ? 'opacity-100' : 'opacity-0'
+                          }`}
+                          onCanPlay={() => setPreviewReady(true)}
+                          onLoadedData={() => setPreviewReady(true)}
+                          onSeeked={handlePreviewSeeked}
+                          onTimeUpdate={() => setPreviewReady(true)}
+                        />
+                        {/* Subtle Loading Spinner when seeking thumbnail */}
+                        {isPreviewLoading && (
+                          <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center z-20">
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 pointer-events-none z-20" />
+                        <span className="absolute bottom-1 right-1.5 text-[9px] font-mono font-bold bg-black/80 px-1.5 py-0.5 rounded text-zinc-200 z-30 shadow">
+                          {Math.round(hoverPercent)}%
+                        </span>
+                      </div>
+
+                      {/* Timestamp Tooltip */}
+                      <div className="mt-1.5 px-2 py-0.5 rounded-md bg-zinc-800/90 text-white font-mono text-[11px] font-bold">
+                        {formatTime(hoverTime || 0)}
+                      </div>
+                    </div>
+
+                    {/* Downward Arrow pointing towards scrub pointer */}
+                    <div 
+                      style={{
+                        transform: `translateX(${arrowOffset}px) rotate(45deg)`
+                      }}
+                      className="w-2.5 h-2.5 bg-[#121216] border-r border-b border-zinc-700 -mt-1.5" 
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 pointer-events-none z-20" />
-                    <span className="absolute bottom-1 right-1.5 text-[9px] font-mono font-bold bg-black/80 px-1.5 py-0.5 rounded text-zinc-200 z-30 shadow">
-                      {Math.round(hoverPercent)}%
-                    </span>
                   </div>
-
-                  {/* Timestamp Tooltip */}
-                  <div className="mt-1.5 px-2 py-0.5 rounded-md bg-zinc-800/90 text-white font-mono text-[11px] font-bold">
-                    {formatTime(hoverTime || 0)}
-                  </div>
-                </div>
-
-                {/* Downward Arrow */}
-                <div className="w-2.5 h-2.5 bg-[#121216] border-r border-b border-zinc-700 transform rotate-45 -mt-1.5" />
-              </div>
+                );
+              })()}
 
               {/* Track Background */}
               <div className="w-full h-1.5 group-hover/seek:h-2.5 bg-zinc-700/80 rounded-full overflow-hidden transition-all relative">
@@ -2306,55 +2568,59 @@ export default function VideoPlayer({
                   style={{ width: `${duration ? (bufferedEnd / duration) * 100 : 0}%` }}
                   className="absolute top-0 bottom-0 left-0 bg-white/30 transition-all duration-200"
                 />
-                {/* Played Progress Bar */}
+                {/* Played Progress Bar (Instant 60fps tracking without lagging CSS transition during scrub) */}
                 <div 
                   style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
-                  className="absolute top-0 bottom-0 left-0 bg-[#E50914] transition-all"
+                  className={`absolute top-0 bottom-0 left-0 bg-[#E50914] ${
+                    isScrubbing ? 'transition-none' : 'transition-[width] duration-150'
+                  }`}
                 />
               </div>
 
               {/* Scrubber Knob Thumb */}
               <div 
                 style={{ left: `${duration ? (currentTime / duration) * 100 : 0}%` }}
-                className="absolute -translate-x-1/2 w-3.5 h-3.5 group-hover/seek:w-4 group-hover/seek:h-4 bg-white rounded-full shadow-lg ring-2 ring-[#E50914] transition-transform pointer-events-none"
+                className={`absolute -translate-x-1/2 w-3.5 h-3.5 group-hover/seek:w-4 group-hover/seek:h-4 bg-white rounded-full shadow-lg ring-2 ring-[#E50914] pointer-events-none ${
+                  isScrubbing ? 'scale-125 transition-none' : 'transition-transform duration-150'
+                }`}
               />
             </div>
 
-            <span className="text-xs text-zinc-300 font-mono w-12 shrink-0">
+            <span className="text-[11px] sm:text-xs text-zinc-300 font-mono w-10 sm:w-12 shrink-0">
               {formatTime(duration)}
             </span>
           </div>
 
           {/* Action Row */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-1 sm:gap-2">
             {/* Left Playback Controls */}
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1 sm:gap-3">
               <button
                 onClick={togglePlay}
-                className="p-2 rounded-full hover:bg-white/20 text-white transition-colors"
+                className="p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-white transition-colors"
                 title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
               >
-                {isPlaying ? <Pause className="w-6 h-6 fill-white" /> : <Play className="w-6 h-6 fill-white ml-0.5" />}
+                {isPlaying ? <Pause className="w-5 h-5 sm:w-6 sm:h-6 fill-white" /> : <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-white ml-0.5" />}
               </button>
 
               <button
                 onClick={() => seekRelative(-10)}
-                className="p-2 rounded-full hover:bg-white/20 text-zinc-300 hover:text-white transition-colors"
+                className="p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-zinc-300 hover:text-white transition-colors"
                 title="Rewind 10s (J / Left)"
               >
-                <RotateCcw className="w-5 h-5" />
+                <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
               <button
                 onClick={() => seekRelative(10)}
-                className="p-2 rounded-full hover:bg-white/20 text-zinc-300 hover:text-white transition-colors"
+                className="p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-zinc-300 hover:text-white transition-colors"
                 title="Fast Forward 10s (L / Right)"
               >
-                <RotateCw className="w-5 h-5" />
+                <RotateCw className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
-              {/* Volume Slider */}
-              <div className="flex items-center gap-2 group/vol">
+              {/* Volume Slider: Hidden on mobile phones to save precious space, shown on sm+ */}
+              <div className="hidden sm:flex items-center gap-2 group/vol">
                 <button
                   onClick={toggleMute}
                   className="p-2 rounded-full hover:bg-white/20 text-white transition-colors"
@@ -2383,16 +2649,89 @@ export default function VideoPlayer({
             </div>
 
             {/* Right Action Controls */}
-            <div className="flex items-center gap-3 relative">
+            <div className="flex items-center gap-1 sm:gap-2.5 relative">
+              {/* Stream Source Switcher (Auto, Anime1, FramexTV, HiAnime) */}
+              <div className="relative" ref={sourceMenuRef}>
+                <button
+                  onClick={() => {
+                    setShowSourceMenu(!showSourceMenu);
+                    setShowQualityMenu(false);
+                    setShowSubtitlesMenu(false);
+                  }}
+                  className={`flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-bold border transition-colors ${
+                    activeSource !== 'auto'
+                      ? 'bg-amber-600/30 text-amber-300 border-amber-500/50'
+                      : 'bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700'
+                  }`}
+                  title="切換串流線路 / Stream Source"
+                >
+                  <Radio className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <span className="hidden xs:inline">
+                    {activeSource === 'anime1' ? 'Anime1' : activeSource === 'framextv' ? 'FramexTV' : activeSource === 'hianime' ? 'HiAnime' : '自動線路'}
+                  </span>
+                  <span className="xs:hidden">
+                    {activeSource === 'anime1' ? 'A1' : activeSource === 'framextv' ? 'FX' : activeSource === 'hianime' ? 'HA' : '線路'}
+                  </span>
+                </button>
+
+                {showSourceMenu && (
+                  <div className="absolute bottom-9 right-0 bg-[#1f1f1f] border border-zinc-700 rounded-xl py-1.5 shadow-2xl z-50 min-w-[190px] animate-in fade-in zoom-in-95 backdrop-blur-xl">
+                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-800/80 flex items-center justify-between">
+                      <span>播放線路來源</span>
+                      <span className="text-[9px] text-zinc-500 font-mono">Source</span>
+                    </div>
+                    {[
+                      { id: 'auto', label: '自動線路 (Auto Failover)', badge: '推薦' },
+                      { id: 'anime1', label: 'Anime1.me (1080p MP4)', badge: '繁中' },
+                      { id: 'framextv', label: 'FramexTV (HD HLS)', badge: '備用' },
+                      { id: 'hianime', label: 'HiAnime (HD HLS)', badge: '國際' },
+                    ].map((src) => (
+                      <button
+                        key={src.id}
+                        onClick={() => {
+                          setActiveSource(src.id);
+                          setShowSourceMenu(false);
+                        }}
+                        className={`w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center justify-between gap-2 ${
+                          activeSource === src.id ? 'text-[#E50914] font-bold bg-zinc-800' : 'text-zinc-300 hover:bg-zinc-800/60'
+                        }`}
+                      >
+                        <span className="truncate">{src.label}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                            {src.badge}
+                          </span>
+                          {activeSource === src.id && <Check className="w-3.5 h-3.5 text-[#E50914]" />}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Quick Aspect Ratio Toggle (Fit / Cover / Stretch) */}
+              <button
+                onClick={() => {
+                  setVideoFit(prev => prev === 'contain' ? 'cover' : prev === 'cover' ? 'fill' : 'contain');
+                }}
+                className="flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-bold border border-zinc-700 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors"
+                title={`畫面比例: ${videoFit === 'contain' ? '原比例 (Fit)' : videoFit === 'cover' ? '填滿螢幕 (Cover)' : '延展 (Stretch)'}`}
+              >
+                <Film className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-zinc-400" />
+                <span className="text-[10px] sm:text-xs uppercase">
+                  {videoFit === 'contain' ? 'Fit' : videoFit === 'cover' ? 'Fill' : '100%'}
+                </span>
+              </button>
+
               {/* Quality Selector */}
               {availableQualities.length > 0 && (
                 <div className="relative">
                   <button
                     onClick={() => { setShowQualityMenu(!showQualityMenu); setShowSubtitlesMenu(false); }}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-bold border border-zinc-700 transition-colors"
+                    className="flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1 rounded-full bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white text-[11px] sm:text-xs font-bold border border-zinc-700 transition-colors"
                     title={t('streamQuality')}
                   >
-                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                    <SlidersHorizontal className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     <span>
                       {currentQualityIndex === -1 ? 'Auto' : `${availableQualities[currentQualityIndex]?.name || 'Auto'}`}
                     </span>
@@ -2430,18 +2769,21 @@ export default function VideoPlayer({
               <div className="relative" ref={subMenuRef}>
                 <button
                   onClick={() => { setShowSubtitlesMenu(!showSubtitlesMenu); setShowQualityMenu(false); }}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border transition-colors ${
+                  className={`flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-bold border transition-colors ${
                     selectedSubIndex !== -1
                       ? 'bg-red-600/30 text-white border-red-500/50'
                       : 'bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700'
                   }`}
                   title={t('selectSubtitleTrack')}
                 >
-                  <Subtitles className="w-3.5 h-3.5" />
-                  <span>
+                  <Subtitles className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <span className="hidden xs:inline">
                     {selectedSubIndex === -1 
-                      ? (currentLang === 'en' ? 'Subs: Off' : currentLang === 'ja' ? '字幕: オフ' : '字幕: 關') 
-                      : (currentLang === 'en' ? 'Subs: On' : currentLang === 'ja' ? '字幕: オン' : '字幕: 開')}
+                      ? (currentLang === 'en' ? 'Subs: Off' : currentLang === 'ja' ? '字幕: 關' : '字幕: 關') 
+                      : (currentLang === 'en' ? 'Subs: On' : currentLang === 'ja' ? '字幕: 開' : '字幕: 開')}
+                  </span>
+                  <span className="xs:hidden">
+                    {selectedSubIndex === -1 ? 'CC' : 'CC✓'}
                   </span>
                 </button>
 
@@ -2526,42 +2868,42 @@ export default function VideoPlayer({
                   setShowQualityMenu(false);
                   setShowSubtitlesMenu(false);
                 }}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border transition-colors ${
+                className={`flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-bold border transition-colors ${
                   showEpisodeDrawer
                     ? 'bg-[#E50914] text-white border-red-500 shadow-md'
                     : 'bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700'
                 }`}
                 title={t('episodesTab') || 'Episodes'}
               >
-                <Tv className="w-3.5 h-3.5" />
-                <span>{currentLang === 'en' ? `Ep ${episode}` : currentLang === 'ja' ? `第 ${episode} 話` : `第 ${episode} 集`}</span>
+                <Tv className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                <span>Ep {episode}</span>
               </button>
 
-              {/* Prev / Next Episode */}
+              {/* Prev / Next Episode: hidden on very narrow screens (< 380px), visible on xs+ */}
               <button
                 onClick={onPrevEpisode}
                 disabled={episode <= 1}
-                className="p-2 rounded-full hover:bg-white/20 disabled:opacity-30 text-white transition-colors"
+                className="hidden xs:flex p-1.5 sm:p-2 rounded-full hover:bg-white/20 disabled:opacity-30 text-white transition-colors"
                 title={t('prevEpisode') || 'Previous Episode'}
               >
-                <SkipBack className="w-5 h-5" />
+                <SkipBack className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
               <button
                 onClick={onNextEpisode}
-                className="p-2 rounded-full hover:bg-white/20 text-white transition-colors"
+                className="hidden xs:flex p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-white transition-colors"
                 title={t('nextEpisode') || 'Next Episode'}
               >
-                <SkipForward className="w-5 h-5" />
+                <SkipForward className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
               {/* Fullscreen Toggle */}
               <button
                 onClick={toggleFullscreen}
-                className="p-2 rounded-full hover:bg-white/20 text-white transition-colors"
+                className="p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-white transition-colors"
                 title="Fullscreen (F)"
               >
-                {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+                {isFullscreen ? <Minimize className="w-4 h-4 sm:w-5 sm:h-5" /> : <Maximize className="w-4 h-4 sm:w-5 sm:h-5" />}
               </button>
             </div>
           </div>

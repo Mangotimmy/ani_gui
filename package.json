@@ -5,6 +5,9 @@
   "description": "Netflix-style GUI and Batch Downloader for ani-cli",
   "author": "AniFlix Team<aniflix@gmail.com>",
   "main": "electron/main.cjs",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "overrides": {
     "tar": ">=7.5.21",
     "sprintf-js": ">=1.1.3",

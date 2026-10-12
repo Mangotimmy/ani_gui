@@ -379,7 +379,12 @@ Write-Host ">>> All plugins updated!"
   });
 }
 
-export const APP_VERSION = '2.0.4';
+let dynamicVersion = '2.4.8';
+try {
+  const pkgData = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf-8'));
+  if (pkgData.version) dynamicVersion = pkgData.version;
+} catch {}
+export const APP_VERSION = dynamicVersion;
 
 function parseVersion(vStr) {
   if (!vStr) return [0, 0, 0];

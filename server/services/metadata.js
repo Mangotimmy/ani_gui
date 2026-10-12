@@ -3,6 +3,7 @@ import './dnsFallback.js';
 import * as OpenCC from 'opencc-js';
 import { enrichWithChineseTitles } from './chineseTitleService.js';
 import { BoundedCache } from './cache.js';
+import { lookupAlias, getCachedSearch, setCachedSearch } from './db.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -261,13 +262,107 @@ export async function getByGenre(genre, page = 1, perPage = 50) {
   return result;
 }
 
+// Smart Query Expander for Anime Aliases, Seasons & Release Years
+function expandSmartQuery(rawQuery) {
+  const trimmed = (rawQuery || '').trim();
+  if (!trimmed) return { queries: [], targetSeason: null, targetYear: null, franchise: null };
+  const lower = trimmed.toLowerCase();
+
+  // 1. Direct alias check
+  const direct = lookupAlias(lower);
+  if (direct) {
+    return {
+      queries: [direct.canonical, direct.romaji, direct.chinese].filter(Boolean),
+      targetSeason: null,
+      targetYear: null,
+      franchise: direct.franchise
+    };
+  }
+
+  // 2. Tokenized pattern: <alias> <season|year|movie>
+  // e.g. "sao 3", "konosuba 2019", "aot s4", "jjk 2"
+  const tokens = lower.split(/\s+/);
+  if (tokens.length >= 2) {
+    const aliasCandidate = tokens[0];
+    const aliasInfo = lookupAlias(aliasCandidate);
+    if (aliasInfo) {
+      const rest = tokens.slice(1).join(' ');
+      const yearMatch = rest.match(/\b(19\d\d|20\d\d)\b/);
+      const seasonMatch = rest.match(/(?:season|s|part)?\s*(\d+|iii|ii|iv|v|vi)\b/i);
+
+      const targetYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
+      let targetSeason = null;
+      if (seasonMatch) {
+        const sVal = seasonMatch[1].toLowerCase();
+        const romanMap = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6 };
+        targetSeason = romanMap[sVal] || parseInt(sVal, 10);
+      }
+
+      const queries = [];
+
+      // Specific known franchises
+      if (aliasCandidate === 'sao') {
+        if (targetSeason === 3) {
+          queries.push('Sword Art Online Alicization', 'Sword Art Online Season 3', 'Sword Art Online');
+        } else if (targetSeason === 2) {
+          queries.push('Sword Art Online II', 'Sword Art Online');
+        } else if (targetSeason === 1) {
+          queries.push('Sword Art Online');
+        }
+      } else if (aliasCandidate === 'konosuba') {
+        if (targetYear === 2019 || rest.includes('movie') || rest.includes('crimson') || rest.includes('紅傳說')) {
+          queries.push('KonoSuba Legend of Crimson', 'Kono Subarashii Sekai ni Shukufuku wo! Kurenai Densetsu', 'KonoSuba 3', 'KonoSuba');
+        } else if (targetSeason === 3) {
+          queries.push('KonoSuba 3', 'Kono Subarashii Sekai ni Shukufuku wo! 3', 'KonoSuba');
+        } else if (targetSeason === 2) {
+          queries.push('KonoSuba 2', 'Kono Subarashii Sekai ni Shukufuku wo! 2');
+        }
+      }
+
+      if (targetSeason && queries.length === 0) {
+        queries.push(`${aliasInfo.canonical} Season ${targetSeason}`, `${aliasInfo.canonical} ${targetSeason}`, aliasInfo.canonical);
+      }
+      if (targetYear && queries.length === 0) {
+        queries.push(`${aliasInfo.canonical} ${targetYear}`, aliasInfo.canonical);
+      }
+      if (queries.length === 0) {
+        queries.push(`${aliasInfo.canonical} ${rest}`, aliasInfo.canonical);
+      }
+
+      return {
+        queries: Array.from(new Set(queries)),
+        targetSeason,
+        targetYear,
+        franchise: aliasInfo.franchise
+      };
+    }
+  }
+
+  return {
+    queries: [trimmed],
+    targetSeason: null,
+    targetYear: null,
+    franchise: null
+  };
+}
+
 export async function searchAnime(keyword, page = 1, perPage = 50) {
   const cleanKeyword = (keyword || '').trim();
   if (!cleanKeyword) return [];
 
   const cacheKey = `${cleanKeyword.toLowerCase()}_${page}_${perPage}`;
-  const cached = searchCache.get(cacheKey);
-  if (cached) return cached;
+  const memoryCached = searchCache.get(cacheKey);
+  if (memoryCached) return memoryCached;
+
+  // Check persistent SQLite search cache for sub-millisecond instant hit
+  const sqliteCached = getCachedSearch(cacheKey);
+  if (sqliteCached && Array.isArray(sqliteCached) && sqliteCached.length > 0) {
+    searchCache.set(cacheKey, sqliteCached);
+    return sqliteCached;
+  }
+
+  const smart = expandSmartQuery(cleanKeyword);
+  const searchQueries = smart.queries.length > 0 ? smart.queries : [cleanKeyword];
 
   const query = `
     query ($search: String, $page: Int, $perPage: Int) {
@@ -279,16 +374,26 @@ export async function searchAnime(keyword, page = 1, perPage = 50) {
     }
   `;
 
-  // 1. First attempt direct search on AniList
   let results = [];
-  try {
-    const data = await anilistQuery(query, { search: cleanKeyword, page, perPage });
-    results = data?.Page?.media || [];
-  } catch (err) {
-    console.warn('AniList direct search error:', err.message);
+  const existingIds = new Set();
+
+  for (const q of searchQueries) {
+    try {
+      const data = await anilistQuery(query, { search: q, page, perPage });
+      const mediaList = data?.Page?.media || [];
+      for (const item of mediaList) {
+        if (!existingIds.has(item.id)) {
+          existingIds.add(item.id);
+          results.push(item);
+        }
+      }
+      if (results.length >= perPage) break;
+    } catch (err) {
+      console.warn(`[AniList Search] Query "${q}" error:`, err.message);
+    }
   }
 
-  // 2. If results are sparse and keyword contains Chinese characters, resolve via Bangumi
+  // If results are sparse and keyword contains Chinese characters, resolve via Bangumi
   const hasChinese = /[\u4e00-\u9fa5]/.test(cleanKeyword);
   if (results.length < 3 && hasChinese) {
     try {
@@ -299,7 +404,6 @@ export async function searchAnime(keyword, page = 1, perPage = 50) {
       if (bgmRes.ok) {
         const bgmData = await bgmRes.json();
         const matches = (bgmData.list || []).slice(0, 3);
-        const existingIds = new Set(results.map(r => r.id));
 
         for (const m of matches) {
           const jpTitle = m.name;
@@ -322,9 +426,36 @@ export async function searchAnime(keyword, page = 1, perPage = 50) {
     }
   }
 
+  // Smart Rerank if target season or target year was specified
+  if (smart.targetSeason || smart.targetYear) {
+    results.sort((a, b) => {
+      let aScore = 0;
+      let bScore = 0;
+
+      const aTitle = ((a.title?.romaji || '') + ' ' + (a.title?.english || '')).toLowerCase();
+      const bTitle = ((b.title?.romaji || '') + ' ' + (b.title?.english || '')).toLowerCase();
+
+      if (smart.targetSeason) {
+        const s = smart.targetSeason;
+        if (s === 3 && (aTitle.includes('alicization') || aTitle.includes('season 3') || aTitle.includes(' 3') || aTitle.includes('iii'))) aScore += 10;
+        if (s === 3 && (bTitle.includes('alicization') || bTitle.includes('season 3') || bTitle.includes(' 3') || bTitle.includes('iii'))) bScore += 10;
+        if (s === 2 && (aTitle.includes('season 2') || aTitle.includes(' 2') || aTitle.includes('ii'))) aScore += 10;
+        if (s === 2 && (bTitle.includes('season 2') || bTitle.includes(' 2') || bTitle.includes('ii'))) bScore += 10;
+      }
+
+      if (smart.targetYear) {
+        if (a.seasonYear === smart.targetYear || a.startDate?.year === smart.targetYear) aScore += 15;
+        if (b.seasonYear === smart.targetYear || b.startDate?.year === smart.targetYear) bScore += 15;
+      }
+
+      return bScore - aScore;
+    });
+  }
+
   const enriched = enrichWithChineseTitles(results);
   if (enriched && enriched.length > 0) {
     searchCache.set(cacheKey, enriched);
+    setCachedSearch(cacheKey, enriched);
   }
   return enriched;
 }
@@ -417,7 +548,8 @@ export async function getCatalog({
   sort = 'POPULARITY_DESC',
   page = 1,
   perPage = 24,
-  isAdult = false
+  isAdult = false,
+  studio = null
 } = {}) {
   const variables = { page: parseInt(page), perPage: parseInt(perPage) };
 
@@ -425,12 +557,61 @@ export async function getCatalog({
     variables.isAdult = Boolean(isAdult);
   }
 
+  // 1. Studio-specific catalog query
+  if (studio && studio !== 'ALL' && studio.trim()) {
+    const cleanStudio = studio.trim();
+    const studioCacheKey = `catalog_studio_${cleanStudio}_${page}_${perPage}`;
+    const cachedStudio = metadataListCache.get(studioCacheKey);
+    if (cachedStudio) return cachedStudio;
+
+    const studioQuery = `
+      query ($studio: String, $page: Int, $perPage: Int) {
+        Studio(search: $studio) {
+          id
+          name
+          media(page: $page, perPage: $perPage, sort: [START_DATE_DESC, POPULARITY_DESC]) {
+            pageInfo {
+              total
+              currentPage
+              lastPage
+              hasNextPage
+              perPage
+            }
+            nodes {
+              ${MEDIA_FIELDS}
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      const data = await anilistQuery(studioQuery, { studio: cleanStudio, page: parseInt(page), perPage: parseInt(perPage) });
+      const mediaNodes = data?.Studio?.media?.nodes || [];
+      const result = {
+        media: enrichWithChineseTitles(mediaNodes),
+        pageInfo: data?.Studio?.media?.pageInfo || { hasNextPage: false }
+      };
+      if (result.media && result.media.length > 0) {
+        metadataListCache.set(studioCacheKey, result);
+      }
+      return result;
+    } catch (err) {
+      console.warn(`[AniList Studio] Query for "${cleanStudio}" failed:`, err.message);
+    }
+  }
+
   if (year && year !== 'ALL') {
     variables.seasonYear = parseInt(year);
   }
 
   if (season && season !== 'ALL') {
-    variables.season = season.toUpperCase();
+    const sUpper = season.toUpperCase();
+    if (sUpper === 'FALL' || sUpper === '10-12') variables.season = 'FALL';
+    else if (sUpper === 'SUMMER' || sUpper === '7-9') variables.season = 'SUMMER';
+    else if (sUpper === 'SPRING' || sUpper === '4-6') variables.season = 'SPRING';
+    else if (sUpper === 'WINTER' || sUpper === '1-3') variables.season = 'WINTER';
+    else variables.season = sUpper;
   }
 
   variables.sort = Array.isArray(sort) ? sort : [sort];
@@ -472,6 +653,61 @@ export async function getCatalog({
   }
 }
 
+// Scrape YouTube for multiple official anime PVs, teasers, and trailers
+export async function fetchOfficialYouTubePVs(searchTitle) {
+  if (!searchTitle) return [];
+  try {
+    const q = `${searchTitle} anime official trailer PV 本予告`;
+    const ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}&sp=EgIQAQ%253D%253D`;
+    const res = await fetch(ytUrl, {
+      headers: {
+        'User-Agent': BROWSER_UA,
+        'Accept-Language': 'ja,zh-TW,en-US;q=0.8'
+      }
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const dataMatch = html.match(/ytInitialData\s*=\s*({.+?});<\/script>/);
+    if (!dataMatch) return [];
+    const json = JSON.parse(dataMatch[1]);
+    const contents = json?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
+
+    const pvs = [];
+    for (const item of contents) {
+      const v = item?.videoRenderer;
+      if (!v || !v.videoId) continue;
+      const vTitle = v.title?.runs?.[0]?.text || '';
+      const channel = v.ownerText?.runs?.[0]?.text || '';
+      const combined = (vTitle + ' ' + channel).toLowerCase();
+
+      const isOfficial = /official|pv|trailer|teaser|特報|本予告|予告|キャラクター|宣傳|第\d+弾|aniplex|toho|kadokawa|crunchyroll|twin engine|warner|netflix|muse|ani-one/i.test(combined);
+      if (!isOfficial) continue;
+
+      let badge = 'Official PV';
+      if (/teaser|特報/i.test(combined)) badge = 'Teaser PV';
+      else if (/main\s*pv|本予告|第\d+弾/i.test(combined)) badge = 'Main PV';
+      else if (/character|キャラクター/i.test(combined)) badge = 'Character PV';
+      else if (/trailer/i.test(combined)) badge = 'Trailer';
+
+      const thumb = v.thumbnail?.thumbnails?.pop()?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+      pvs.push({
+        id: v.videoId,
+        site: 'youtube',
+        title: vTitle,
+        channel,
+        badge,
+        thumbnail: thumb,
+        embedUrl: `https://www.youtube-nocookie.com/embed/${v.videoId}?autoplay=1&rel=0`,
+        url: `https://www.youtube.com/watch?v=${v.videoId}`
+      });
+      if (pvs.length >= 10) break;
+    }
+    return pvs;
+  } catch (err) {
+    return [];
+  }
+}
+
 // In-memory cache for media videos (PV, OP, ED) - Capped at 300 entries, 24h TTL
 const mediaVideosCache = new BoundedCache(300, 24 * 60 * 60 * 1000);
 
@@ -497,6 +733,7 @@ export async function getAnimeMediaVideos(animeId, romajiTitle = '', englishTitl
         id: tr.id,
         site: tr.site || 'youtube',
         title: 'Official Teaser / PV',
+        badge: 'AniList Official PV',
         thumbnail: tr.thumbnail || (tr.site === 'youtube' ? `https://i.ytimg.com/vi/${tr.id}/hqdefault.jpg` : null),
         embedUrl: tr.site === 'youtube' ? `https://www.youtube-nocookie.com/embed/${tr.id}?autoplay=1&rel=0` : null,
         url: tr.site === 'youtube' ? `https://www.youtube.com/watch?v=${tr.id}` : null
@@ -504,6 +741,22 @@ export async function getAnimeMediaVideos(animeId, romajiTitle = '', englishTitl
     }
 
     const titleToSearch = romajiTitle || animeDetails?.title?.romaji || englishTitle || animeDetails?.title?.english || '';
+
+    // 2. Extract multiple official PVs & Trailers from YouTube
+    if (titleToSearch) {
+      try {
+        const ytPvs = await fetchOfficialYouTubePVs(titleToSearch);
+        const seenIds = new Set(result.trailers.map(t => t.id));
+        for (const pv of ytPvs) {
+          if (!seenIds.has(pv.id)) {
+            seenIds.add(pv.id);
+            result.trailers.push(pv);
+          }
+        }
+      } catch (ytErr) {
+        console.warn(`[Metadata] YouTube PV scrape error for "${titleToSearch}":`, ytErr.message);
+      }
+    }
 
     // 2. Fetch OP and ED from AnimeThemes API
     try {

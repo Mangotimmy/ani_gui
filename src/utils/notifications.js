@@ -51,27 +51,55 @@ export function sendAnimeNotification({ title, body, icon, animeId, episode }) {
     console.warn('Could not save notification to localStorage:', e);
   }
 
-  // 2. Trigger native/browser Web Notification
+  // 2. Trigger mobile-compatible Web Push / ServiceWorker notification
   if (isNotificationSupported() && Notification.permission === 'granted') {
-    try {
-      const nativeNotif = new Notification(notificationItem.title, {
-        body: notificationItem.body,
-        icon: notificationItem.icon,
-        badge: '/build/icon.png',
-        tag: `anime-${animeId || notifId}`,
-        silent: false
-      });
-
-      nativeNotif.onclick = () => {
-        window.focus();
-        if (animeId) {
-          window.dispatchEvent(new CustomEvent('aniflix:open_anime', { detail: { animeId } }));
+    const dispatchViaSW = async () => {
+      try {
+        if ('serviceWorker' in navigator) {
+          const reg = await navigator.serviceWorker.ready;
+          if (reg && typeof reg.showNotification === 'function') {
+            await reg.showNotification(notificationItem.title, {
+              body: notificationItem.body,
+              icon: notificationItem.icon,
+              badge: '/icon.png',
+              tag: `anime-${animeId || notifId}`,
+              data: { animeId: animeId || null, episode: episode || null },
+              vibrate: [200, 100, 200],
+              renotify: true,
+              silent: false
+            });
+            return true;
+          }
         }
-        nativeNotif.close();
-      };
-    } catch (err) {
-      console.warn('Failed to dispatch native Notification:', err);
-    }
+      } catch (swErr) {
+        console.warn('ServiceWorker showNotification failed, trying fallback:', swErr);
+      }
+      return false;
+    };
+
+    dispatchViaSW().then((dispatched) => {
+      if (!dispatched) {
+        try {
+          const nativeNotif = new Notification(notificationItem.title, {
+            body: notificationItem.body,
+            icon: notificationItem.icon,
+            badge: '/icon.png',
+            tag: `anime-${animeId || notifId}`,
+            silent: false
+          });
+
+          nativeNotif.onclick = () => {
+            window.focus();
+            if (animeId) {
+              window.dispatchEvent(new CustomEvent('aniflix:open_anime', { detail: { animeId } }));
+            }
+            nativeNotif.close();
+          };
+        } catch (err) {
+          console.warn('Failed to dispatch native Notification:', err);
+        }
+      }
+    });
   }
 
   return notificationItem;
@@ -151,3 +179,13 @@ export function checkFavoritesForNewAiring(favorites = []) {
     } catch {}
   }
 }
+
+// Receive background notification click message from ServiceWorker
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'aniflix:open_anime' && event.data.animeId) {
+      window.dispatchEvent(new CustomEvent('aniflix:open_anime', { detail: { animeId: event.data.animeId } }));
+    }
+  });
+}
+

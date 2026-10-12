@@ -6,7 +6,7 @@
  */
 export function collectUserData() {
   const data = {
-    version: '2.0.0',
+    version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.8',
     exportedAt: new Date().toISOString(),
     settings: {
       lang: localStorage.getItem('aniflix_lang') || 'zh-TW',

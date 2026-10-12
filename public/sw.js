@@ -68,3 +68,29 @@ self.addEventListener('message', (event) => {
     });
   }
 });
+
+// Notification Click handler for Mobile Android & iOS PWA
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const animeId = event.notification.data?.animeId;
+  const targetUrl = animeId ? `/?anime=${animeId}` : '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // If a window is already open, focus it and notify client
+      for (const client of clientList) {
+        if (client.url && 'focus' in client) {
+          client.focus();
+          if (animeId) {
+            client.postMessage({ type: 'aniflix:open_anime', animeId });
+          }
+          return;
+        }
+      }
+      // Otherwise open a new window
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+    })
+  );
+});

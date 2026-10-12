@@ -165,14 +165,15 @@ app.get('/api/upcoming', async (req, res) => {
 // Seasonal & Year Catalog Routes
 app.get('/api/catalog', async (req, res) => {
   try {
-    const { year, season, sort, page = 1, perPage = 24, isAdult } = req.query;
+    const { year, season, sort, page = 1, perPage = 24, isAdult, studio } = req.query;
     const catalogData = await getCatalog({
       year: year || new Date().getFullYear(),
       season: season || null,
       sort: sort || 'POPULARITY_DESC',
       page: parseInt(page),
       perPage: parseInt(perPage),
-      isAdult: isAdult === 'true' ? true : isAdult === 'false' ? false : (isAdult === 'all' ? 'all' : false)
+      isAdult: isAdult === 'true' ? true : isAdult === 'false' ? false : (isAdult === 'all' ? 'all' : false),
+      studio: studio || null
     });
     res.json({ success: true, ...catalogData });
   } catch (err) {
@@ -377,8 +378,8 @@ app.get('/api/subtitles/local/file', (req, res) => {
 
 app.post('/api/stream', async (req, res) => {
   try {
-    const { animeTitle, candidates, episode = 1, mode = 'sub', quality = 'best', maxAiredCap } = req.body;
-    const streamData = await resolveStream({ animeTitle, candidates, episode, mode, quality, maxAiredCap });
+    const { animeTitle, candidates, episode = 1, mode = 'sub', quality = 'best', maxAiredCap, source = 'auto', tmdbId } = req.body;
+    const streamData = await resolveStream({ animeTitle, candidates, episode, mode, quality, maxAiredCap, source, tmdbId });
     if (!streamData || streamData.success === false) {
       return res.status(200).json({
         success: false,

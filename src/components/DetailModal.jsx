@@ -981,11 +981,11 @@ export default function DetailModal({
                         type: 'trailer',
                         id: tr.id,
                         title: tr.title,
-                        tag: 'PV'
+                        tag: tr.badge || 'PV'
                       })}
-                      className="group/pv cursor-pointer bg-zinc-900/80 hover:bg-zinc-800/90 rounded-xl overflow-hidden border border-zinc-800 hover:border-rose-500/50 transition-all shadow-md hover:scale-[1.02]"
+                      className="group/pv cursor-pointer bg-zinc-900/80 hover:bg-zinc-800/90 rounded-2xl overflow-hidden border border-zinc-800 hover:border-rose-500/50 transition-colors shadow-md hover:scale-[1.02] motion-safe:active:scale-[0.96]"
                     >
-                      <div className="aspect-video relative overflow-hidden bg-black">
+                      <div className="aspect-video relative overflow-hidden bg-black rounded-t-2xl">
                         {tr.thumbnail ? (
                           <img
                             src={toCachedImageUrl(tr.thumbnail)}
@@ -995,7 +995,7 @@ export default function DetailModal({
                             loading="lazy"
                             decoding="async"
                             style={{ aspectRatio: '16/9' }}
-                            className="w-full h-auto aspect-[16/9] object-cover group-hover/pv:scale-105 transition-transform duration-300"
+                            className="w-full h-auto aspect-[16/9] object-cover group-hover/pv:scale-105 transition-transform duration-300 ring-1 ring-inset ring-white/10"
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center bg-zinc-950">
@@ -1007,17 +1007,30 @@ export default function DetailModal({
                             <Play className="w-5 h-5 fill-white ml-0.5" />
                           </div>
                         </div>
-                        <span className="absolute bottom-1.5 right-1.5 bg-black/80 text-[10px] text-white px-1.5 py-0.5 rounded font-bold">
-                          YouTube PV
+                        <span className={`absolute bottom-1.5 right-1.5 text-[10px] text-white px-2 py-0.5 rounded-full font-bold shadow-md border ${
+                          tr.badge?.includes('Main') 
+                            ? 'bg-red-950/80 border-red-500/60 text-red-200'
+                            : tr.badge?.includes('Teaser')
+                            ? 'bg-amber-950/80 border-amber-500/60 text-amber-200'
+                            : tr.badge?.includes('Character')
+                            ? 'bg-purple-950/80 border-purple-500/60 text-purple-200'
+                            : 'bg-black/80 border-white/20 text-white'
+                        }`}>
+                          {tr.badge || 'Official PV'}
                         </span>
                       </div>
                       <div className="p-3">
-                        <h4 className="text-xs font-bold text-white group-hover/pv:text-rose-400 truncate">
+                        <h4 className="text-xs font-bold text-white group-hover/pv:text-rose-400 line-clamp-2 leading-tight">
                           {tr.title}
                         </h4>
-                        <p className="text-[10px] text-zinc-400 mt-0.5">
-                          Click to play teaser video above
-                        </p>
+                        <div className="flex items-center justify-between text-[10px] text-zinc-400 mt-1.5">
+                          <span className="truncate text-zinc-300 font-medium">
+                            {tr.channel ? `📺 ${tr.channel}` : 'Official Trailer'}
+                          </span>
+                          <span className="text-rose-400 font-semibold shrink-0">
+                            點擊即播 ▶
+                          </span>
+                        </div>
                       </div>
                     </div>
                   ))}

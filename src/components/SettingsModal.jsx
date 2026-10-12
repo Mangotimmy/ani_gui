@@ -1528,7 +1528,7 @@ export default function SettingsModal({
             <div className="pt-3 border-t border-zinc-800 flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold text-white block">AniFlix Application</span>
-                <span className="text-[11px] text-zinc-400">Current version: v{appUpdateInfo?.currentVersion || '2.0.0'}</span>
+                <span className="text-[11px] text-zinc-400">Current version: v{appUpdateInfo?.currentVersion || (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.8')}</span>
               </div>
 
               <button
