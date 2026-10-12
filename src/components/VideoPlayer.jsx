@@ -246,6 +246,13 @@ export default function VideoPlayer({
   const lastTapTimeRef = useRef(0);
   const singleTapTimerRef = useRef(null);
   const longPressTimerRef = useRef(null);
+  const showControlsRef = useRef(showControls);
+  useEffect(() => {
+    showControlsRef.current = showControls;
+  }, [showControls]);
+  const touchStartedControlsVisibleRef = useRef(false);
+  const touchStartedOnInteractiveRef = useRef(false);
+  const lastTouchTimeRef = useRef(0);
 
   // Interactive scrubber with thumbnail preview & buffer tracking
   const seekbarRef = useRef(null);
@@ -1191,15 +1198,35 @@ export default function VideoPlayer({
     }
   };
 
+  const handleVideoClick = (e) => {
+    // If a touch tap occurred within 650ms, ignore synthetic browser click
+    // so tapping to show controls on touch monitor does not accidentally toggle playback
+    if (Date.now() - lastTouchTimeRef.current < 650) {
+      return;
+    }
+    togglePlay();
+  };
+
   // Touch Gestures: Single Tap (Controls), Double Tap (Seek Left/Right, Play/Pause), Long Press (Menu)
   const handleTouchStart = (e) => {
     if (e.touches.length !== 1) return;
+    lastTouchTimeRef.current = Date.now();
+
+    // Check if touch target is inside interactive controls (buttons, inputs, sliders, drawers, menus)
+    const isInteractive = !!e.target?.closest?.('button, input, select, a, [role="button"], [role="slider"], .interactive-control, .interactive');
+    touchStartedOnInteractiveRef.current = isInteractive;
+    touchStartedControlsVisibleRef.current = showControlsRef.current;
+
+    if (isInteractive) {
+      // User tapped or dragged an interactive button/slider.
+      // Reset the 10s/30s inactivity timer so controls stay visible while interacting!
+      handleMouseMove();
+      return;
+    }
+
     const touch = e.touches[0];
     const touchX = touch.clientX;
     const touchY = touch.clientY;
-
-    // Wake up controls and reset 10s inactivity timer
-    handleMouseMove();
 
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
     longPressTimerRef.current = setTimeout(() => {
@@ -1209,6 +1236,7 @@ export default function VideoPlayer({
   };
 
   const handleTouchMove = () => {
+    lastTouchTimeRef.current = Date.now();
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
@@ -1216,9 +1244,17 @@ export default function VideoPlayer({
   };
 
   const handleTouchEnd = (e) => {
+    lastTouchTimeRef.current = Date.now();
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
+    }
+
+    if (touchStartedOnInteractiveRef.current) {
+      // User tapped or dragged an interactive button/slider.
+      // Keep controls visible for 10s/30s, do not toggle or hide controls!
+      handleMouseMove();
+      return;
     }
 
     const now = Date.now();
@@ -1232,7 +1268,7 @@ export default function VideoPlayer({
     const widthRatio = x / rect.width;
 
     if (timeDiff < 300) {
-      // Double tap! Cancel single tap controls toggle
+      // Double tap! Cancel single tap controls timer
       if (singleTapTimerRef.current) {
         clearTimeout(singleTapTimerRef.current);
         singleTapTimerRef.current = null;
@@ -1254,21 +1290,28 @@ export default function VideoPlayer({
       handleMouseMove();
       lastTapTimeRef.current = 0;
     } else {
-      // Single tap: toggle controls after 260ms delay
+      // Single tap: wait 260ms to verify it's not the first tap of a double tap
       lastTapTimeRef.current = now;
+      const wasVisible = touchStartedControlsVisibleRef.current;
+
       if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current);
       singleTapTimerRef.current = setTimeout(() => {
-        setShowControls(prev => {
-          const next = !prev;
-          if (next) {
-            handleMouseMove();
+        if (!wasVisible) {
+          // Controls were HIDDEN when tapped -> SHOW THEM and start full 10s (play) / 30s (pause) timer!
+          resetControlsTimeout();
+        } else {
+          // Controls were ALREADY VISIBLE and user tapped the empty video background -> HIDE controls immediately
+          setShowControls(false);
+          if (controlsTimeoutRef.current) {
+            clearTimeout(controlsTimeoutRef.current);
+            controlsTimeoutRef.current = null;
           }
-          return next;
-        });
+        }
         singleTapTimerRef.current = null;
       }, 260);
     }
   };
+
 
   // Interactive Scrubber & Thumbnail Preview handlers
   const updateScrubberHover = (clientX) => {
@@ -1457,7 +1500,7 @@ export default function VideoPlayer({
         preload="auto"
         disableRemotePlayback
         className="w-full h-full object-contain cursor-pointer [transform:translateZ(0)]"
-        onClick={togglePlay}
+        onClick={handleVideoClick}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleVideoEnded}
@@ -1692,6 +1735,22 @@ export default function VideoPlayer({
               className="px-3 py-1 rounded-lg text-xs font-bold border border-zinc-700 bg-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-700 transition-colors"
             >
               {videoRef.current?.loop ? '✅ 開啟' : '⬜ 關閉'}
+            </button>
+          </div>
+
+          {/* AI Upscale / Auto-Scale toggle */}
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-[11px] font-bold text-zinc-400">AI 升頻 (Auto-Scale)</span>
+            <button
+              onClick={() => onUpdateGpuSettings?.({ enableUpscale: !gpuSettings?.enableUpscale })}
+              className={`px-3 py-1 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1.5 ${
+                gpuSettings?.enableUpscale 
+                  ? 'border-amber-500/50 bg-amber-600/30 text-amber-300' 
+                  : 'border-zinc-700 bg-zinc-800 text-zinc-300 hover:text-white'
+              }`}
+            >
+              {gpuSettings?.enableUpscale ? <Sparkles className="w-3.5 h-3.5 text-amber-400" /> : <Zap className="w-3.5 h-3.5 text-emerald-400" />}
+              <span>{gpuSettings?.enableUpscale ? '✨ AI 升頻已啟用' : '⚡ 自動 / iGPU 省電'}</span>
             </button>
           </div>
 
@@ -2062,20 +2121,6 @@ export default function VideoPlayer({
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            {/* Quick iGPU Low-Power / AI Upscale mode switcher */}
-            <button
-              onClick={() => onUpdateGpuSettings?.({ enableUpscale: !gpuSettings?.enableUpscale })}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border shadow-lg shrink-0 ${
-                gpuSettings?.enableUpscale
-                  ? 'bg-amber-600/30 text-amber-300 border-amber-500/50 hover:bg-amber-600/40'
-                  : 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50 hover:bg-emerald-600/40'
-              }`}
-              title={gpuSettings?.enableUpscale ? 'AI 升頻中 (點擊切換為 iGPU 省電模式)' : 'iGPU 省電模式 (點擊開啟 AI 升頻)'}
-            >
-              {gpuSettings?.enableUpscale ? <Sparkles className="w-3.5 h-3.5 text-amber-400" /> : <Zap className="w-3.5 h-3.5 text-emerald-400" />}
-              <span className="hidden sm:inline">{gpuSettings?.enableUpscale ? 'AI 升頻' : '⚡ iGPU 模式'}</span>
-            </button>
-
             {/* Copy M3U8 Link Button */}
             <button
               onClick={handleCopyLink}
