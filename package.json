@@ -1,6 +1,6 @@
 {
   "name": "aniflix",
-  "version": "2.4.9",
+  "version": "2.5.0",
   "type": "module",
   "description": "Netflix-style GUI and Batch Downloader for ani-cli",
   "author": "AniFlix Team<aniflix@gmail.com>",
