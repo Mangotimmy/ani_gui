@@ -254,14 +254,18 @@ export async function resolveStream({
   quality = 'best', 
   maxAiredCap = null, 
   source = 'auto',
-  tmdbId = null 
+  tmdbId = null,
+  anilistId = null,
+  season = 1,
+  synonyms = []
 }) {
   const queryCandidates = [
     ...(Array.isArray(candidates) ? candidates : (typeof candidates === 'string' ? candidates.split(/\|\||\||,/) : [])),
+    ...(Array.isArray(synonyms) ? synonyms : []),
     animeTitle
   ].filter(Boolean);
 
-  console.log(`[StreamResolver] Resolving stream for [${queryCandidates.join(', ')}] Ep ${episode} (${mode}, Source: ${source})...`);
+  console.log(`[StreamResolver] Resolving stream for [${queryCandidates.join(', ')}] Ep ${episode} (${mode}, Source: ${source}, AniList: ${anilistId || 'n/a'})...`);
 
   if (maxAiredCap !== null && maxAiredCap !== undefined && Number(maxAiredCap) > 0 && Number(episode) > Number(maxAiredCap)) {
     return {
@@ -283,18 +287,26 @@ export async function resolveStream({
         availableSources: buildSourceList('anime1')
       };
     }
-    // If explicit anime1 was requested but failed, return error
     return {
       success: false,
       activeSource: 'anime1',
       availableSources: buildSourceList('anime1'),
-      error: a1Res?.error || `Anime1.me 找不到《${animeTitle}》第 ${episode} 集。`
+      error: a1Res?.error || `Anime1 找不到《${animeTitle}》第 ${episode} 集。`,
+      suggestedFallback: 'framextv'
     };
   }
 
   // 2. Explicit FramexTV selection
   if (source === 'framextv') {
-    const fxRes = await resolveFramexStream({ title: animeTitle, candidates: queryCandidates, episode, tmdbId });
+    const fxRes = await resolveFramexStream({ 
+      title: animeTitle, 
+      candidates: queryCandidates, 
+      episode, 
+      season, 
+      anilistId, 
+      tmdbId, 
+      mode 
+    });
     if (fxRes && fxRes.success) {
       return {
         ...fxRes,
@@ -306,7 +318,8 @@ export async function resolveStream({
       success: false,
       activeSource: 'framextv',
       availableSources: buildSourceList('framextv'),
-      error: fxRes?.error || `FramexTV 找不到《${animeTitle}》第 ${episode} 集。`
+      error: fxRes?.error || `FramexTV 找不到《${animeTitle}》第 ${episode} 集。`,
+      suggestedFallback: 'hianime'
     };
   }
 
@@ -425,10 +438,19 @@ export async function resolveStream({
       }
     } catch {}
 
-    // Try FramexTV fallback
+    // Try FramexTV fallback (Direct API or Embed)
     try {
-      const fxRes = await resolveFramexStream({ title: animeTitle, candidates: queryCandidates, episode, tmdbId });
+      const fxRes = await resolveFramexStream({ 
+        title: animeTitle, 
+        candidates: queryCandidates, 
+        episode, 
+        season, 
+        anilistId, 
+        tmdbId, 
+        mode 
+      });
       if (fxRes && fxRes.success) {
+        console.log(`[StreamResolver] Auto-fallback to FramexTV succeeded for "${animeTitle}" Ep ${episode}`);
         return {
           ...fxRes,
           activeSource: 'framextv',

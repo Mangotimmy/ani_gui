@@ -522,7 +522,10 @@ export default function VideoPlayer({
             mode: audioMode,
             candidates: candidateTitles,
             maxAiredCap,
-            source: activeSource
+            source: activeSource,
+            anilistId: anime?.id,
+            season: anime?.seasonNumber || anime?.season || 1,
+            synonyms: anime?.synonyms || []
           })
         }).then(r => r.json());
 
@@ -2173,9 +2176,37 @@ export default function VideoPlayer({
           <h3 className="text-xl font-black text-white mb-2">
             {isUnreleased ? '🎬 本季尚未正式開播 (Coming Soon)' : '⚠️ 串流資源連線提示 (Playback Notice)'}
           </h3>
-          <p className="text-sm text-zinc-300 max-w-lg mb-6 leading-relaxed bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800">
+          <p className="text-sm text-zinc-300 max-w-lg mb-4 leading-relaxed bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800">
             {errorMessage}
           </p>
+
+          {/* Quick Line / Source Switcher Pills */}
+          {!isUnreleased && (
+            <div className="flex flex-col items-center justify-center gap-2 mb-6 w-full max-w-lg bg-zinc-900/60 p-3.5 rounded-2xl border border-zinc-800/80">
+              <span className="text-[11px] font-medium text-zinc-400">當前線路查無此集數？建議點擊立即嘗試備用播放線路：</span>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {[
+                  { id: 'auto', name: '自動線路 (推薦)' },
+                  { id: 'anime1', name: 'Anime1 (繁中 MP4 / HLS)' },
+                  { id: 'framextv', name: 'FramexTV (HD 多伺服器)' },
+                  { id: 'hianime', name: 'HiAnime (國際多語)' }
+                ].filter(s => s.id !== activeSource).map(s => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setErrorMessage('');
+                      setActiveSource(s.id);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-all cursor-pointer shadow-sm motion-safe:active:scale-[0.97]"
+                  >
+                    <Radio className="w-3.5 h-3.5 text-amber-400" />
+                    <span>切換至 {s.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-center gap-3">
             {/* If trailer is available, prominent button to watch trailer */}

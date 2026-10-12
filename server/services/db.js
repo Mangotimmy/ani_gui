@@ -40,9 +40,20 @@ const SEED_ALIASES = [
   { alias: 'tensura', canonical: 'That Time I Got Reincarnated as a Slime', romaji: 'Tensei shitara Slime Datta Ken', chinese: '關於我轉生變成史萊姆這檔事', franchise: 'That Time I Got Reincarnated as a Slime' },
   { alias: 'mushoku', canonical: 'Mushoku Tensei: Jobless Reincarnation', romaji: 'Mushoku Tensei: Isekai Ittara Honki Dasu', chinese: '無職轉生～到了異世界就拿出真本事～', franchise: 'Mushoku Tensei' },
   { alias: 'oshi no ko', canonical: 'Oshi no Ko', romaji: 'Oshi no Ko', chinese: '【我推的孩子】', franchise: 'Oshi no Ko' },
-  { alias: 'bleach', canonical: 'Bleach', romaji: 'Bleach', chinese: '死神 / BLEACH 千年血戰篇', franchise: 'Bleach' },
+  { alias: 'bleach', canonical: 'Bleach', romaji: 'Bleach', chinese: '死神', franchise: 'Bleach' },
   { alias: 'naruto', canonical: 'Naruto', romaji: 'Naruto', chinese: '火影忍者', franchise: 'Naruto' },
-  { alias: 'one piece', canonical: 'One Piece', romaji: 'One Piece', chinese: '航海王 / 海賊王', franchise: 'One Piece' },
+  // One Piece mappings (Taiwan: 航海王, HK/CN: 海賊王)
+  { alias: 'one piece', canonical: 'One Piece', romaji: 'One Piece', chinese: '航海王', franchise: 'One Piece' },
+  { alias: 'op', canonical: 'One Piece', romaji: 'One Piece', chinese: '航海王', franchise: 'One Piece' },
+  { alias: '海賊王', canonical: 'One Piece', romaji: 'One Piece', chinese: '航海王', franchise: 'One Piece' },
+  { alias: '海贼王', canonical: 'One Piece', romaji: 'One Piece', chinese: '航海王', franchise: 'One Piece' },
+  { alias: '航海王', canonical: 'One Piece', romaji: 'One Piece', chinese: '海賊王', franchise: 'One Piece' },
+  // Seven Deadly Sins mappings
+  { alias: 'seven deadly sins', canonical: 'The Seven Deadly Sins', romaji: 'Nanatsu no Taizai', chinese: '七大罪', franchise: 'The Seven Deadly Sins' },
+  { alias: 'the seven deadly sins', canonical: 'The Seven Deadly Sins', romaji: 'Nanatsu no Taizai', chinese: '七大罪', franchise: 'The Seven Deadly Sins' },
+  { alias: 'nanatsu no taizai', canonical: 'The Seven Deadly Sins', romaji: 'Nanatsu no Taizai', chinese: '七大罪', franchise: 'The Seven Deadly Sins' },
+  { alias: '七大罪', canonical: 'The Seven Deadly Sins', romaji: 'Nanatsu no Taizai', chinese: '七大罪', franchise: 'The Seven Deadly Sins' },
+  { alias: '七つの大罪', canonical: 'The Seven Deadly Sins', romaji: 'Nanatsu no Taizai', chinese: '七大罪', franchise: 'The Seven Deadly Sins' },
   { alias: 'gintama', canonical: 'Gintama', romaji: 'Gintama', chinese: '銀魂', franchise: 'Gintama' },
   { alias: 'eva', canonical: 'Neon Genesis Evangelion', romaji: 'Shin Seiki Evangelion', chinese: '新世紀福音戰士', franchise: 'Evangelion' }
 ];
@@ -186,6 +197,24 @@ export function lookupAlias(rawAlias) {
   return fallbackAliases.get(clean) || null;
 }
 
+export function getAliasCandidates(raw) {
+  if (!raw) return [];
+  const clean = raw.trim().toLowerCase();
+  const candidates = new Set();
+  
+  const record = lookupAlias(clean);
+  if (record) {
+    if (record.canonical) candidates.add(record.canonical);
+    if (record.romaji) candidates.add(record.romaji);
+    if (record.chinese) {
+      const parts = record.chinese.split(/[\/、，,\|\+]/).map(s => s.trim()).filter(Boolean);
+      parts.forEach(p => candidates.add(p));
+    }
+  }
+
+  return Array.from(candidates);
+}
+
 export function getAllAliases() {
   if (isNativeSqlite && getAllAliasesStmt) {
     try {
@@ -260,6 +289,7 @@ export function cleanExpiredCache() {
 
 export default {
   lookupAlias,
+  getAliasCandidates,
   getAllAliases,
   getCachedSearch,
   setCachedSearch,
