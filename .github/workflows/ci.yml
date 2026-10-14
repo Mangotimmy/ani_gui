@@ -33,7 +33,7 @@ jobs:
           # 取得去除 'v' 的純數字版號 (例如 2.0.4)
           VERSION="${GITHUB_REF_NAME#v}"
           echo "Syncing package.json version to $VERSION"
-          npm version $VERSION --no-git-tag-version --allow-same-version
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
       - name: Build Web Application
         run: npm run build
 

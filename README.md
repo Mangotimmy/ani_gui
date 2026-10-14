@@ -112,7 +112,7 @@ services:
   #    Both services share ./data, so the trainer reads data/users/*.json (the real
   #    interaction data) and the server reads the artifacts next to it.
   rec-service:
-    image: ani-gui/lightfm-annoy-rec:latest
+    image: ghcr.io/mangotimmy/ani_gui-rec:latest
     build:
       context: ./lightfm-annoy-rec
       dockerfile: Dockerfile
@@ -142,7 +142,7 @@ services:
 
   # One-shot trainer: builds/trains the artifacts into ./data, then exits.
   rec-trainer:
-    image: ani-gui/lightfm-annoy-rec:latest
+    image: ghcr.io/mangotimmy/ani_gui-rec:latest
     build:
       context: ./lightfm-annoy-rec
       dockerfile: Dockerfile
@@ -167,6 +167,8 @@ services:
       - WATCHTOWER_INCLUDE_STOPPED=false
       - WATCHTOWER_REVIVE_STOPPED=false
       - WATCHTOWER_SCOPE=aniflix
+      # watchtower 1.7.1 speaks Docker API 1.25, which modern engines reject
+      - DOCKER_API_VERSION=1.40
     labels:
       - "com.centurylinklabs.watchtower.scope=aniflix"
 ```
@@ -264,19 +266,46 @@ one unchanged API (`POST /api/recommendations`):
 2. **Content-based graph scorer** — the original AniList-recommendation + genre-affinity ranking. It is
    always available and is used automatically whenever the service is missing, slow, empty or unhealthy.
 
+GitHub Actions publishes both images (see [`.github/workflows/docker.yml`](.github/workflows/docker.yml)):
+
+| Image | Purpose |
+| --- | --- |
+| `ghcr.io/mangotimmy/ani_gui:latest` | web server + API |
+| `ghcr.io/mangotimmy/ani_gui-rec:latest` | LightFM + Annoy recommender (multi-arch amd64/arm64) |
+
+Both also get `:sha-<short>` tags and `:X.Y.Z` on `v*` tags, and both are updated by watchtower.
+
 ```bash
+# pull both published images (watchtower keeps them fresh afterwards)
+docker compose pull
+
 # train the artifacts once (reads ./data/users/*.json = real favourites + watch history)
 docker compose run --rm rec-trainer
 
 # bring the stack up (aniflix + rec-service + watchtower)
-docker compose up -d --build
+docker compose up -d
 curl http://localhost:8080/api/v1/recommend/21?k=10     # item-to-item
 curl http://localhost:8080/healthz                      # readiness + backend + item counts
 ```
 
+GHCR packages are **private by default**: on the NAS run
+`echo <token> | docker login ghcr.io -u <user> --password-stdin` once (or make the package public), otherwise
+`docker compose pull` cannot fetch either image.
+
 Memory: the index is opened with `prefault=False` (mmap) in a single worker with a 2 GB container cap, so
 online inference stays well inside the NAS budget. See [`lightfm-annoy-rec/README.md`](lightfm-annoy-rec/README.md)
 for endpoints, environment variables, retraining and troubleshooting.
+
+**Is the learned ranking actually connected?** The server reports which engine is serving:
+
+```bash
+curl http://localhost:3000/api/recommendations/engine
+# {"success":true,"mode":"lightfm-annoy","serviceUrl":"http://rec-service:8080","healthy":true,
+#  "backend":"annoy","items":13,"dataQuality":"insufficient","requireGoodData":true}
+```
+
+`mode` stays `content-based` until the recommender is reachable **and** `dataQuality` is `ok`
+(set `REC_USE_ONLY_WITH_GOOD_DATA=0` to force the learned path on sparse data).
 
 | Env var | Default | Purpose |
 | --- | --- | --- |

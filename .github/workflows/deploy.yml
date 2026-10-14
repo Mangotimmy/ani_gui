@@ -3,7 +3,7 @@ name: Build and Push Docker Image
 # 定義何時觸發此工作流（此處設定為當 main 分支有 push 時觸發）
 on:
   push:
-    branches: [ "main, master" ]
+    branches: [ main, master ]
     tags: [ 'v*' ]
   workflow_dispatch:
 

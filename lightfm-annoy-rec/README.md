@@ -119,6 +119,50 @@ REC_TIMEOUT_MS=600
 falls back to the existing content-based scorer on any timeout, error, missing index or
 `data_quality: insufficient`. The `POST /api/recommendations` response shape is unchanged.
 
+Confirm which engine is actually serving:
+
+```bash
+curl http://localhost:3000/api/recommendations/engine
+# {"mode":"lightfm-annoy","serviceUrl":"http://rec-service:8080","healthy":true,
+#  "backend":"annoy","items":13,"dataQuality":"insufficient","requireGoodData":true}
+```
+
+## CI & registry
+
+[`.github/workflows/docker.yml`](../.github/workflows/docker.yml) builds and publishes this service next to the app image:
+
+| Job | What it does |
+| --- | --- |
+| `rec-test` | builds `linux/amd64` with `load: true`, then runs `tests/test_pipeline.py` and `src.train --synthetic --engine lightfm --dry-run` inside the image |
+| `rec` | builds and pushes `linux/amd64,linux/arm64` to `ghcr.io/<owner>/ani_gui-rec` |
+
+```
+ghcr.io/mangotimmy/ani_gui-rec:latest       # default branch
+ghcr.io/mangotimmy/ani_gui-rec:sha-1a2b3c4  # every build
+ghcr.io/mangotimmy/ani_gui-rec:2.5.1        # on v* tags
+```
+
+* `rec-test` is what protects the three build traps baked into the Dockerfile: **Python 3.10**
+  (lightfm's Cython-0.29 C does not compile on 3.11+), **setuptools < 70 with `--no-build-isolation`**,
+  and **libgomp1** in the runtime stage for the OpenMP build of the extension.
+* The arm64 leg compiles lightfm from source under QEMU emulation, so it is slow (the job allows 120
+  minutes). Drop `,linux/arm64` from `platforms:` in the `rec` job to make it amd64-only.
+* No trained artifacts are published - they are derived from your own `data/users/*.json` at deploy time.
+* GHCR packages are private by default: run `docker login ghcr.io` on the NAS, or make the package public.
+
+## Retraining safely
+
+```bash
+docker compose stop rec-service      # release the memory-mapped index (required on Windows bind mounts)
+docker compose run --rm rec-trainer  # rewrites the ./data artifacts atomically (tmp + rename)
+docker compose start rec-service
+curl -X POST http://localhost:8080/api/v1/reload   # optional: re-read without a restart
+```
+
+`src/train.py` writes every artifact to a `.tmp` sibling and renames it into place, so a running service
+never observes a half-written index. On Linux the rename works even while the old file is mapped; on
+Windows/Docker Desktop a mapped file cannot be replaced, hence the `stop` above.
+
 ## Verifying
 
 ```bash
@@ -140,4 +184,5 @@ docker stats --no-stream aniflix-rec          # RSS should sit far below 2 GB
 * **RSS keeps growing** - keep `REC_PREFETCH=0`, `--workers 1`, and do not copy the index
   into a Python list.
 * **Retrain cadence** - nightly or weekly is plenty; the Annoy index is read-only, so a
-  retrain only needs `docker compose run --rm trainer` followed by `POST /api/v1/reload`.
+  retrain only needs `docker compose stop rec-service`, `docker compose run --rm rec-trainer`,
+  `docker compose start rec-service` and (optionally) `POST /api/v1/reload`.

@@ -32,7 +32,7 @@ import {
   checkAppUpdate,
   isContainerEnvironment 
 } from './services/environment.js';
-import { computeRecommendations } from './services/recommendation.js';
+import { computeRecommendations, getRecommendationEngineStatus } from './services/recommendation.js';
 import { findLocalSubtitles, assToVtt, srtToVtt } from './services/localSubtitleService.js';
 import fs from 'fs';
 import path from 'path';
@@ -350,6 +350,16 @@ app.post('/api/recommendations', async (req, res) => {
     res.json({ success: true, data: recommendations });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message, data: [] });
+  }
+});
+
+// Which ranking engine is actually serving requests (LightFM + Annoy service reachability).
+app.get('/api/recommendations/engine', async (req, res) => {
+  try {
+    const status = await getRecommendationEngineStatus();
+    res.json({ success: true, ...status });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

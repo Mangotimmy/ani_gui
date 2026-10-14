@@ -9,6 +9,8 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Recommender service image: ghcr.io/<owner>/ani_gui-rec
+  REC_IMAGE_NAME: ${{ github.repository }}-rec
 
 jobs:
   docker:
@@ -53,5 +55,94 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+
+  # ---------------------------------------------------------------------------
+  # Recommender service (lightfm-annoy-rec)
+  # Builds linux/amd64 only, loads it into the runner and proves it works before
+  # anything is published. This is what guards the three build traps of the image:
+  # the lightfm build needs Python 3.10, setuptools < 70 without build isolation,
+  # and libgomp1 in the runtime stage.
+  # ---------------------------------------------------------------------------
+  rec-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the recommender image (amd64, no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./lightfm-annoy-rec
+          file: ./lightfm-annoy-rec/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ani-gui/rec:ci
+          cache-from: type=gha,scope=rec
+
+      - name: Pipeline smoke test (numpy SVD engine, offline)
+        run: docker run --rm ani-gui/rec:ci python tests/test_pipeline.py
+
+      - name: LightFM native extension + trainer dry run
+        run: |
+          docker run --rm ani-gui/rec:ci python -c "import lightfm, annoy, fastapi; print('lightfm', lightfm.__version__)"
+          docker run --rm ani-gui/rec:ci python -m src.train --synthetic --engine lightfm --epochs 2 --dry-run --quiet
+
+  # ---------------------------------------------------------------------------
+  # Recommender service (lightfm-annoy-rec) - multi-arch publish
+  # ---------------------------------------------------------------------------
+  rec:
+    runs-on: ubuntu-latest
+    # lightfm is compiled from source; the arm64 leg runs under QEMU emulation.
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU (for multi-arch amd64/arm64)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REC_IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build and push recommender image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./lightfm-annoy-rec
+          file: ./lightfm-annoy-rec/Dockerfile
+          # Drop ",linux/arm64" here if the emulated build is ever too slow for your CI budget.
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=rec
+          cache-to: type=gha,mode=max,scope=rec

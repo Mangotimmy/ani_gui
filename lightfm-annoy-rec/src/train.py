@@ -18,7 +18,9 @@ Examples
 from __future__ import annotations
 
 import argparse
+import gc
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -172,6 +174,23 @@ def popularity_from(interactions: Sequence[Interaction], item_map: IdMap) -> Dic
     return {video_id: round(score, 4) for video_id, score in ranked[:limit]}
 
 
+def atomic_numpy_save(path: Path, array: np.ndarray) -> None:
+    """Write through a temp file + rename so a serving process never sees a partial file."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    # Pass a file object: np.save would otherwise append .npy to the temp name.
+    with open(tmp, "wb") as handle:
+        np.save(handle, array)
+    os.replace(tmp, path)
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def build_annoy(item_embeddings: np.ndarray, metric: str, trees: int, destination: Path,
                 quiet: bool) -> bool:
     try:
@@ -189,9 +208,19 @@ def build_annoy(item_embeddings: np.ndarray, metric: str, trees: int, destinatio
     for position in range(count):
         index.add_item(position, item_embeddings[position].tolist())
     index.build(trees)
+    destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    index.save(str(destination))
-    size_mb = destination.stat().st_size / (1024 * 1024)
+    tmp = destination.with_name(destination.name + ".tmp")
+    index.save(str(tmp))
+    # Read the size while the temp file is still the one we just wrote: after the rename,
+    # a bind-mounted filesystem (Docker Desktop on Windows) may not expose the new path yet.
+    size_bytes = tmp.stat().st_size
+    os.replace(tmp, destination)  # atomic on POSIX filesystems
+    # Annoy keeps the file it wrote open. On bind mounts the renamed path only becomes
+    # observable once that handle is released, so drop the index and collect before use.
+    index = None
+    gc.collect()
+    size_mb = size_bytes / (1024 * 1024)
     log("[ok] Annoy index: " + str(destination) + " (" + str(count) + " items, "
         + str(dimension) + "d, " + str(trees) + " trees, " + format(size_mb, ".2f") + " MB)", quiet)
     return True
@@ -279,15 +308,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    item_map.save(artifact_dir / "id_mapping.json")
+    # Every artifact is written to a .tmp sibling and renamed into place, so a running
+    # service (which memory-maps these files) can never observe a half-written index.
+    item_map.save(artifact_dir / "id_mapping.json")  # atomic internally (tmp + replace)
     user_map.save(artifact_dir / "user_mapping.json")
-    np.save(artifact_dir / "item_embeddings.npy", item_embeddings)
-    np.save(artifact_dir / "user_embeddings.npy", user_embeddings)
+    atomic_numpy_save(artifact_dir / "item_embeddings.npy", item_embeddings)
+    atomic_numpy_save(artifact_dir / "user_embeddings.npy", user_embeddings)
     build_annoy(item_embeddings, args.metric, args.trees, artifact_dir / "video_index.ann", args.quiet)
-
-    (artifact_dir / "train_meta.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    atomic_write_text(artifact_dir / "train_meta.json", json.dumps(meta, ensure_ascii=False, indent=2))
     log("[ok] artifacts written to " + str(artifact_dir) + " in "
         + format(time.time() - started, ".1f") + "s", args.quiet)
     return 0
