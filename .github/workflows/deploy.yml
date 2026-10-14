@@ -22,7 +22,7 @@ jobs:
 
     # 2. 設定 Docker Buildx（用於建置映像檔的高階工具）
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
     # 🔥 2. 自動擷取 Docker 標籤元數據
     - name: Extract Docker metadata
       id: meta
