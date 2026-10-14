@@ -48,7 +48,7 @@ jobs:
             type=sha
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -78,7 +78,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build the recommender image (amd64, no push)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./lightfm-annoy-rec
           file: ./lightfm-annoy-rec/Dockerfile
@@ -135,7 +135,7 @@ jobs:
             type=sha
 
       - name: Build and push recommender image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./lightfm-annoy-rec
           file: ./lightfm-annoy-rec/Dockerfile
