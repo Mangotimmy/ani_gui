@@ -61,7 +61,7 @@ Deploy AniFlix effortlessly on **Synology DSM 7.2 (Container Manager)**, **QNAP 
 1. Create a `docker-compose.yml` file:
 
 ```yaml
- version: '3.8'
+version: '3.8'
 
 services:
   aniflix:
@@ -73,12 +73,22 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+      - 1.0.0.1
     environment:
       - NODE_ENV=production
       - PORT=3000
       - TZ=Asia/Taipei
       - ANIFLIX_DATA_DIR=/data
       - ANIFLIX_DOWNLOADS_DIR=/downloads
+      # LightFM + Annoy micro-service. When it is unreachable the API silently falls
+      # back to the built-in content-based ranking, so this is safe to leave on.
+      - REC_SERVICE_URL=http://rec-service:8080
+      - REC_TIMEOUT_MS=600
+    depends_on:
+      - rec-service
     volumes:
       - ./data:/data
       - ./downloads:/downloads
@@ -96,6 +106,54 @@ services:
         limits:
           memory: 1024M
 
+  # 🧠 LightFM + Annoy recommender (learned item embeddings, memory-mapped index).
+  #    Train the artifacts once with:
+  #      docker compose run --rm rec-trainer
+  #    Both services share ./data, so the trainer reads data/users/*.json (the real
+  #    interaction data) and the server reads the artifacts next to it.
+  rec-service:
+    image: ani-gui/lightfm-annoy-rec:latest
+    build:
+      context: ./lightfm-annoy-rec
+      dockerfile: Dockerfile
+    container_name: aniflix-rec
+    restart: unless-stopped
+    environment:
+      - REC_ARTIFACT_DIR=/app/data
+      - REC_PLATFORM_DATA_DIR=/app/data
+      - REC_DEFAULT_K=10
+      # 0 keeps the Annoy index memory-mapped instead of prefaulting it into RAM.
+      - REC_PREFETCH=0
+    volumes:
+      - ./data:/app/data
+    expose:
+      - "8080"
+    mem_limit: 2000m
+    deploy:
+      resources:
+        limits:
+          memory: 2000M
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # One-shot trainer: builds/trains the artifacts into ./data, then exits.
+  rec-trainer:
+    image: ani-gui/lightfm-annoy-rec:latest
+    build:
+      context: ./lightfm-annoy-rec
+      dockerfile: Dockerfile
+    profiles: ["train"]
+    environment:
+      - REC_PLATFORM_DATA_DIR=/app/data
+      - REC_ARTIFACT_DIR=/app/data
+    volumes:
+      - ./data:/app/data
+    command: ["python", "-m", "src.train", "--data-dir", "/app/data", "--artifact-dir", "/app/data"]
+
   # 🚀 Auto-Updater: Watchtower automatically polls GHCR and updates AniFlix with zero downtime
   watchtower:
     image: containrrr/watchtower:latest
@@ -111,7 +169,6 @@ services:
       - WATCHTOWER_SCOPE=aniflix
     labels:
       - "com.centurylinklabs.watchtower.scope=aniflix"
-      
 ```
 
 2. Launch container:
