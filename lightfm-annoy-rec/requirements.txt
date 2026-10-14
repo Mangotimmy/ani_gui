@@ -1,0 +1,13 @@
+# Pinned for reproducible builds. numpy is held below 2.x because lightfm 1.17 is
+# built against the 1.26 C ABI, and the image runs Python 3.10 because lightfm's
+# sdist does not compile on newer interpreters. Install with:
+#   pip install setuptools==69.5.1 wheel numpy==1.26.4 "Cython<3"
+#   pip install --no-build-isolation -r requirements.txt
+numpy==1.26.4
+scipy==1.13.1
+pandas==2.2.3
+lightfm==1.17
+annoy==1.17.3
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4

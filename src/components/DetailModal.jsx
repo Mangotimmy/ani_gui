@@ -4,9 +4,11 @@ import {
   X, Play, Download, Star, Tv, MonitorPlay, Heart, 
   RefreshCw, Clock, Sparkles, Calendar, Music, Video, 
   Maximize2, Volume2, Film, AlertCircle, Copy, Check, ExternalLink,
-  Users, HardDrive, Radio, Languages, Compass, Search, Zap
+  Users, HardDrive, Radio, Languages, Compass, Search, Zap, MessageSquare
 } from 'lucide-react';
 import { getAnimeCoverUrl, getAnimeBannerUrl, toCachedImageUrl } from '../utils/image.js';
+import AnimeComments from './AnimeComments';
+import AnimeInfoLinks from './AnimeInfoLinks';
 
 export default function DetailModal({ 
   anime, 
@@ -18,6 +20,7 @@ export default function DetailModal({
   onToggleFavorite, 
   onSelectAnime,
   currentLang = 'zh-TW',
+  currentUser,
   hideR18 = true,
   gpuSettings,
   onUpdateGpuSettings,
@@ -735,6 +738,7 @@ export default function DetailModal({
                   </span>
                 </div>
               )}
+              <AnimeInfoLinks anime={anime} t={t} />
             </div>
           </div>
 
@@ -792,6 +796,18 @@ export default function DetailModal({
               >
                 <Radio className="w-3.5 h-3.5 text-amber-400" />
                 <span>{t('btTab')} ({torrentCounts.all})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('comments')}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-[background-color,color] duration-150 ${
+                  activeTab === 'comments'
+                    ? 'bg-sky-600 text-white shadow-md'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>{t('commentsTab')}</span>
               </button>
             </div>
 
@@ -1133,6 +1149,16 @@ export default function DetailModal({
                 </>
               )}
             </div>
+          )}
+
+          {/* TAB 5: COMMENTS */}
+          {activeTab === 'comments' && (
+            <AnimeComments
+              animeId={anime.id}
+              username={currentUser?.username || 'Guest'}
+              currentLang={currentLang}
+              t={t}
+            />
           )}
 
           {/* TAB 4: BITTORRENT & MAGNETS VIEW */}

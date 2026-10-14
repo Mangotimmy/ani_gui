@@ -197,6 +197,63 @@ npm start
 
 ---
 
+## 🧠 Recommendation Engine (LightFM + Annoy)
+
+Personalised ranking runs through `server/services/recommendation.js`, which now has two paths behind
+one unchanged API (`POST /api/recommendations`):
+
+1. **LightFM + Annoy service** (`lightfm-annoy-rec/`) — learned 32-dimensional item embeddings served
+   from a **memory-mapped** Annoy index. `REC_SERVICE_URL` turns it on.
+2. **Content-based graph scorer** — the original AniList-recommendation + genre-affinity ranking. It is
+   always available and is used automatically whenever the service is missing, slow, empty or unhealthy.
+
+```bash
+# train the artifacts once (reads ./data/users/*.json = real favourites + watch history)
+docker compose run --rm rec-trainer
+
+# bring the stack up (aniflix + rec-service + watchtower)
+docker compose up -d --build
+curl http://localhost:8080/api/v1/recommend/21?k=10     # item-to-item
+curl http://localhost:8080/healthz                      # readiness + backend + item counts
+```
+
+Memory: the index is opened with `prefault=False` (mmap) in a single worker with a 2 GB container cap, so
+online inference stays well inside the NAS budget. See [`lightfm-annoy-rec/README.md`](lightfm-annoy-rec/README.md)
+for endpoints, environment variables, retraining and troubleshooting.
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `REC_SERVICE_URL` | (unset) | e.g. `http://rec-service:8080`; unset = content-based only |
+| `REC_TIMEOUT_MS` | 600 | per-query budget before falling back |
+| `REC_USE_ONLY_WITH_GOOD_DATA` | 0 | 1 = ignore learned results while `train_meta.json` reports `data_quality: insufficient` |
+
+`computeRecommendations()` also exports `getRecommendationEngineStatus()` for diagnostics.
+
+---
+
+## 🌏 Chinese Title Resolution
+
+`server/services/chineseTitleService.js` resolves titles through a validated pipeline:
+exact dictionary → **identity + season checked** Bangumi match (with subject-detail lookup) →
+machine translation → original title.
+
+* Every cached entry stores a fingerprint of the anime's own titles (`titleZhKey`), so a translation
+  that belongs to a different anime can never be served, re-saved, or trusted from storage
+  (the v1 cache was keyed by title text, which had mixed up e.g. Dragon Ball with Dragon Ball Daima).
+* Season markers are normalised to Chinese (`第2期` → `第二季`) instead of being dropped.
+* Hand-curated names win over everything: add them to `data/title_overrides.json`
+  (`{ "214968": "老鼠小弟的背心" }`, keys may be an AniList id or a title).
+* If the public translators rate-limit your IP, point the app at any LibreTranslate-compatible
+  endpoint with `TRANSLATE_ENDPOINT` (+ `TRANSLATE_API_KEY`).
+* Repair existing installs once after upgrading:
+
+```bash
+node scripts/repair-titles.mjs --dry-run   # report
+node scripts/repair-titles.mjs             # rewrite profiles (timestamped backups)
+```
+
+---
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).

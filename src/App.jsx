@@ -10,6 +10,8 @@ import DownloadedFilesModal from './components/DownloadedFilesModal';
 import UserProfileModal from './components/UserProfileModal';
 import AnimeCard from './components/AnimeCard';
 import MarqueeTicker from './components/animata/MarqueeTicker';
+import ScheduleView from './components/ScheduleView';
+import { getDayRange, fetchSchedule } from './utils/schedule';
 import { getPlatformInfo } from './utils/platform';
 
 // Code-split heavy modals to eliminate main-thread evaluation on boot and minimize INP latency
@@ -95,6 +97,21 @@ function hasHomeCache() {
   const [fantasyAnimes, setFantasyAnimes] = useState(() => getHomeCache('fantasyAnimes'));
   const [recommendations, setRecommendations] = useState([]);
   const [isLoading, setIsLoading] = useState(() => !hasHomeCache());
+
+  // Today's airing episodes for the announcement ticker (refreshed every 30 min)
+  const [todayAiring, setTodayAiring] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      const { start, end } = getDayRange();
+      fetchSchedule(start, end)
+        .then((data) => { if (!cancelled) setTodayAiring(data); })
+        .catch(() => {});
+    };
+    load();
+    const timer = setInterval(load, 30 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
 
   // Infinite Horizontal Carousel Pagination State
   const [carouselPages, setCarouselPages] = useState({
@@ -881,6 +898,8 @@ function hasHomeCache() {
           <MarqueeTicker 
             currentLang={currentLang}
             isContainer={serverInfo.isContainer}
+            todayAiring={todayAiring}
+            onOpenAnime={setSelectedAnime}
           />
         </div>
       )}
@@ -1236,6 +1255,8 @@ function hasHomeCache() {
               </>
             )}
           </div>
+        ) : activeTab === 'schedule' ? (
+          <ScheduleView currentLang={currentLang} t={t} onOpenAnime={setSelectedAnime} />
         ) : activeTab === 'upcoming' ? (
           /* Upcoming / Coming Soon Tab Grid */
           <div className="pt-24 px-4 md:px-12">
@@ -1244,11 +1265,6 @@ function hasHomeCache() {
                 <Calendar className="w-6 h-6 text-indigo-400" />
                 <h2 className="text-2xl font-black text-white">Coming Soon / Anticipated Releases ({filterAnimeList(upcoming).length})</h2>
               </div>
-              {carouselHasMore.upcoming && (
-                <span className="text-xs font-bold text-red-400 bg-red-950/50 px-2.5 py-1 rounded-full border border-red-800/40 uppercase tracking-wider">
-                  ∞ 無限載入已啟用
-                </span>
-              )}
             </div>
 
             {filterAnimeList(upcoming).length === 0 ? (
@@ -1307,11 +1323,6 @@ function hasHomeCache() {
                       <IconComp className={`w-6 h-6 ${config.color}`} />
                       <h2 className="text-2xl font-black text-white">{config.title} ({config.list.length})</h2>
                     </div>
-                    {carouselHasMore[config.key] && (
-                      <span className="text-xs font-bold text-red-400 bg-red-950/50 px-2.5 py-1 rounded-full border border-red-800/40 uppercase tracking-wider">
-                        ∞ 無限載入已啟用
-                      </span>
-                    )}
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
@@ -1587,6 +1598,7 @@ function hasHomeCache() {
             onToggleFavorite={handleToggleFavorite}
             onSelectAnime={(newAnime) => setSelectedAnime(newAnime)}
             currentLang={currentLang}
+            currentUser={currentUser}
             hideR18={hideR18}
             gpuSettings={gpuSettings}
             onUpdateGpuSettings={handleSaveSettings}

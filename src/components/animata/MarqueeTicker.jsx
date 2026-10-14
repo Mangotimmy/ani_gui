@@ -3,7 +3,9 @@
 // Features hardware-accelerated smooth scrolling, pause on hover, edge gradient fades, and reduced-motion fallbacks.
 
 import React from 'react';
-import { Sparkles, Flame, Shield, Radio, Server, Cpu } from 'lucide-react';
+import { createTranslator } from '../../utils/i18n.js';
+import { pickTitle, formatAirTime } from '../../utils/schedule.js';
+import { formatEpisode } from '../../utils/i18nSchedule.js';
 
 export default function MarqueeTicker({
   items = [],
@@ -11,7 +13,9 @@ export default function MarqueeTicker({
   pauseOnHover = true,
   className = '',
   currentLang = 'zh-TW',
-  isContainer = false
+  isContainer = false,
+  todayAiring = [],
+  onOpenAnime
 }) {
   // Multilingual announcements
   const defaultItems = React.useMemo(() => {
@@ -52,13 +56,63 @@ export default function MarqueeTicker({
     ];
   }, [currentLang, isContainer]);
 
-  const displayItems = items.length > 0 ? items : defaultItems;
+  const t = React.useMemo(() => createTranslator(currentLang), [currentLang]);
+
+  // Today's airing episodes (clickable) take priority; static notices are the fallback / trailing filler
+  const todayItems = React.useMemo(() => {
+    return (todayAiring || []).slice(0, 15).map((row) => ({
+      id: `today-${row.media.id}-${row.episode}`,
+      tag: t('todayAiring'),
+      text: `${formatAirTime(row.airingAt, currentLang)} · ${pickTitle(row.media, currentLang)} · ${formatEpisode(currentLang, row.episode)}`,
+      media: row.media
+    }));
+  }, [todayAiring, currentLang, t]);
+
+  const displayItems = items.length > 0
+    ? items
+    : todayItems.length > 0
+      ? [...todayItems, defaultItems[1]]
+      : defaultItems;
+
+  const loopSeconds = todayItems.length > 0 ? Math.max(speed, displayItems.length * 6) : speed;
+
+  const renderPass = (prefix, hidden) => displayItems.map((item, idx) => {
+    const content = (
+      <>
+        {item.tag && (
+          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-950/60 text-red-400 border border-red-800/50 uppercase tracking-wider">
+            {item.tag}
+          </span>
+        )}
+        <span className="text-xs font-medium text-zinc-300 group-hover:text-white transition-colors duration-150">
+          {item.text}
+        </span>
+      </>
+    );
+    return (
+      <div key={`${prefix}-${item.id || idx}`} className="flex items-center gap-2 shrink-0" aria-hidden={hidden || undefined}>
+        {item.media && onOpenAnime ? (
+          <button
+            type="button"
+            tabIndex={hidden ? -1 : 0}
+            onClick={() => onOpenAnime(item.media)}
+            className="group flex items-center gap-2 rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          >
+            {content}
+          </button>
+        ) : (
+          <div className="group flex items-center gap-2">{content}</div>
+        )}
+        <span className="text-zinc-600 ml-4 font-black" aria-hidden="true">✦</span>
+      </div>
+    );
+  });
 
   return (
     <div 
       className={`relative w-full overflow-hidden bg-[#0c0c10]/95 backdrop-blur-md border-b border-white/[0.06] py-2 sm:py-2.5 select-none ${className}`}
       role="region"
-      aria-label="Anime Highlights Marquee"
+      aria-label={t('todayAiring')}
     >
       {/* Left & Right Smooth Edge Fade Masks */}
       <div 
@@ -70,44 +124,17 @@ export default function MarqueeTicker({
         className="pointer-events-none absolute right-0 top-0 bottom-0 w-12 sm:w-20 bg-gradient-to-l from-[#0c0c10] to-transparent z-10" 
       />
 
-      {/* Marquee Track Container */}
-      <div 
-        className={`flex w-max items-center gap-6 sm:gap-10 animate-marquee select-none ${className}`}
+      {/* Marquee Track Container (static scrollable row under reduced motion) */}
+      <div className="ticker-track flex w-max items-center gap-6 sm:gap-10 animate-marquee select-none"
         style={{
-          animationDuration: `${speed}s`,
+          animationDuration: `${loopSeconds}s`,
           animationTimingFunction: 'linear',
           animationIterationCount: 'infinite'
         }}
       >
-        {/* First Loop Pass */}
-        {displayItems.map((item, idx) => (
-          <div key={`item-a-${item.id || idx}`} className="flex items-center gap-2 shrink-0">
-            {item.tag && (
-              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-950/60 text-red-400 border border-red-800/50 uppercase tracking-wider">
-                {item.tag}
-              </span>
-            )}
-            <span className="text-xs font-medium text-zinc-300 hover:text-white transition-colors">
-              {item.text}
-            </span>
-            <span className="text-zinc-600 ml-4 font-black">✦</span>
-          </div>
-        ))}
-
+        {renderPass('item-a', false)}
         {/* Second Loop Pass for Seamless Infinite Wrap */}
-        {displayItems.map((item, idx) => (
-          <div key={`item-b-${item.id || idx}`} className="flex items-center gap-2 shrink-0">
-            {item.tag && (
-              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-950/60 text-red-400 border border-red-800/50 uppercase tracking-wider">
-                {item.tag}
-              </span>
-            )}
-            <span className="text-xs font-medium text-zinc-300 hover:text-white transition-colors">
-              {item.text}
-            </span>
-            <span className="text-zinc-600 ml-4 font-black">✦</span>
-          </div>
-        ))}
+        {renderPass('item-b', true)}
       </div>
     </div>
   );

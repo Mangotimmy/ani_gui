@@ -15,8 +15,10 @@ import {
   getCurrentSeasonInfo,
   getAnimeMediaVideos,
   searchTorrents,
-  getAnimeChineseInfo
+  getAnimeChineseInfo,
+  getAiringSchedule
 } from './services/metadata.js';
+import { listComments, addComment, deleteComment } from './services/commentsService.js';
 import { resolveStream, getAvailableEpisodes } from './services/streamResolver.js';
 import { launchMpv, openFolder, openMagnetLink } from './services/playerLauncher.js';
 import { downloadManager } from './services/downloader.js';
@@ -160,6 +162,44 @@ app.get('/api/upcoming', async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// Weekly airing schedule (unix seconds, range capped at 8 days)
+app.get('/api/schedule', async (req, res) => {
+  try {
+    const start = parseInt(req.query.start, 10);
+    const end = parseInt(req.query.end, 10);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start || end - start > 8 * 86400) {
+      return res.status(400).json({ success: false, error: 'Invalid start/end range' });
+    }
+    const list = await getAiringSchedule(start, end);
+    res.json({ success: true, data: list });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Local per-server comments
+app.get('/api/anime/:id/comments', (req, res) => {
+  try {
+    res.json({ success: true, data: listComments(req.params.id) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/anime/:id/comments', (req, res) => {
+  try {
+    const comment = addComment(req.params.id, { author: req.body?.author, text: req.body?.text });
+    res.json({ success: true, data: comment });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/anime/:id/comments/:cid', (req, res) => {
+  const ok = deleteComment(req.params.id, req.params.cid, String(req.query.author || ''));
+  res.status(ok ? 200 : 403).json({ success: ok });
 });
 
 // Seasonal & Year Catalog Routes

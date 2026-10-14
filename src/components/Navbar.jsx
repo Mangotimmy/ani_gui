@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, Download, X, Settings, Heart, Bell,
   Clock, Trash2, Flame, History, Compass, Globe, ChevronDown, Check,
-  Clipboard, Sparkles, Swords, Star, Menu
+  Clipboard, Sparkles, Swords, Star, Menu, CalendarDays
 } from 'lucide-react';
 import { SUPPORTED_LANGS } from '../utils/i18n';
 import { 
@@ -337,6 +337,18 @@ function Navbar({
           >
             <Compass className="w-3.5 h-3.5 text-amber-400" />
             <span>{t('catalog')}</span>
+          </button>
+          <button 
+            onClick={() => { setActiveTab('schedule'); onSearch(''); }}
+            aria-current={activeTab === 'schedule' ? 'page' : undefined}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-[background-color,color] duration-150 ${
+              activeTab === 'schedule' 
+                ? 'bg-white/15 text-white font-bold shadow-sm ring-1 ring-white/20' 
+                : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'
+            }`}
+          >
+            <CalendarDays className="w-3.5 h-3.5 text-cyan-400" />
+            <span>{t('schedule')}</span>
           </button>
           <button 
             onClick={() => { setActiveTab('favorites'); onSearch(''); }}
@@ -700,6 +712,7 @@ function Navbar({
         <button onClick={() => { setActiveTab('upcoming'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'upcoming' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Clock className="w-4 h-4 text-cyan-400" />{t('upcoming')}</button>
         <button onClick={() => { setActiveTab('top-rated'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'top-rated' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{t('topRated')}</button>
         <button onClick={() => { setActiveTab('catalog'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'catalog' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Compass className="w-4 h-4 text-amber-400" />{t('catalog')}</button>
+              <button onClick={() => { setActiveTab('schedule'); onSearch(''); setShowMobileMenu(false); }} aria-current={activeTab === 'schedule' ? 'page' : undefined} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'schedule' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><CalendarDays className="w-4 h-4 text-cyan-400" />{t('schedule')}</button>
         <button onClick={() => { setActiveTab('favorites'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'favorites' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Heart className={`w-4 h-4 ${favoritesCount > 0 ? 'text-red-500 fill-red-500' : ''}`} />{t('favorites')}{favoritesCount > 0 && <span className="ml-auto text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full font-bold">{favoritesCount}</span>}</button>
         <button onClick={() => { setActiveTab('history'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'history' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><History className={`w-4 h-4 ${watchHistoryCount > 0 ? 'text-indigo-400' : ''}`} />{t('history')}{watchHistoryCount > 0 && <span className="ml-auto text-[10px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded-full font-bold">{watchHistoryCount}</span>}</button>
       </div>

@@ -1,11 +1,185 @@
 // server/services/recommendation.js - Advanced Video Platform Recommendation Engine
-import { getRecommendationsForAnime, getTrending, getPopular, getByGenre } from './metadata.js';
+//
+// Two ranking paths share one public contract (computeRecommendations):
+//   1. LightFM + Annoy micro-service (set REC_SERVICE_URL) - learned item embeddings
+//      served from a memory-mapped index; see lightfm-annoy-rec/.
+//   2. The content-based graph scorer below - always available, used as the fallback
+//      whenever the service is missing, slow, empty or unhealthy.
+import { getRecommendationsForAnime, getTrending, getPopular, getByGenre, getAnimeDetails } from './metadata.js';
+
+// ---- LightFM + Annoy service configuration ---------------------------------
+const REC_SERVICE_URL = (process.env.REC_SERVICE_URL || '').replace(/\/+$/, '');
+const REC_TIMEOUT_MS = Number(process.env.REC_TIMEOUT_MS || 600);
+const REC_SEED_LIMIT = Number(process.env.REC_SEED_LIMIT || 8);
+const REC_PER_SEED = Number(process.env.REC_PER_SEED || 20);
+const REC_CANDIDATE_FLOOR = Number(process.env.REC_CANDIDATE_FLOOR || 8);
+const REC_COOLDOWN_MS = Number(process.env.REC_COOLDOWN_MS || 60000);
+const REC_HEALTH_TTL_MS = Number(process.env.REC_HEALTH_TTL_MS || 30000);
+// Quality-first by default: while the trainer reports data_quality != 'ok' (too few users /
+// interactions for collaborative filtering to mean anything) the content-based scorer stays in
+// charge. Set REC_USE_ONLY_WITH_GOOD_DATA=0 to force the learned ranking on anyway.
+const REC_ONLY_GOOD_DATA = !/^(0|false|no|off)$/i.test(process.env.REC_USE_ONLY_WITH_GOOD_DATA || '1');
+let weakDataWarned = false;
+
+const recServiceState = { health: null, checkedAt: 0, downUntil: 0 };
+
+function titleOf(anime) {
+  return anime?.titleZhTW || anime?.titleZh || anime?.title?.english || anime?.title?.romaji || 'Anime';
+}
+
+/** Best-effort health probe, cached for REC_HEALTH_TTL_MS and backed off on failure. */
+async function probeRecService() {
+  const now = Date.now();
+  if (recServiceState.checkedAt && now - recServiceState.checkedAt < REC_HEALTH_TTL_MS) {
+    return recServiceState.health;
+  }
+  recServiceState.checkedAt = now;
+  try {
+    const res = await fetch(`${REC_SERVICE_URL}/healthz`, {
+      signal: AbortSignal.timeout(Math.max(400, REC_TIMEOUT_MS))
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const health = await res.json();
+    recServiceState.health = health;
+    recServiceState.downUntil = 0;
+    return health;
+  } catch (err) {
+    recServiceState.health = null;
+    recServiceState.downUntil = now + REC_COOLDOWN_MS;
+    console.warn('[Recommendation] LightFM/Annoy service unavailable; using content-based ranking:', err.message);
+    return null;
+  }
+}
+
+async function fetchSimilar(videoId, k) {
+  const res = await fetch(
+    `${REC_SERVICE_URL}/api/v1/recommend/${encodeURIComponent(videoId)}?k=${k}`,
+    { signal: AbortSignal.timeout(REC_TIMEOUT_MS) }
+  );
+  if (res.status === 404) return null; // id unknown to the index: not an error
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Explicit favourites + recency/episode-weighted history, richest seeds first. */
+function collectSeeds({ favoriteIds, favorites, watchHistory }) {
+  const seeds = new Map();
+  const now = Date.now();
+  const push = (id, anime, weight) => {
+    const key = String(id);
+    if (!key) return;
+    const existing = seeds.get(key);
+    if (!existing || weight > existing.weight) {
+      seeds.set(key, { id: key, title: existing?.title || titleOf(anime), weight });
+    }
+  };
+
+  for (const id of favoriteIds) push(id, null, 3.5);
+  for (const favorite of favorites) {
+    if (favorite?.id) push(favorite.id, favorite, 3.5);
+  }
+  for (const item of watchHistory) {
+    const anime = item?.anime || item;
+    if (!anime?.id) continue;
+    const timestamp = item?.timestamp ? new Date(item.timestamp).getTime() : now;
+    const ageDays = Math.max(0, (now - timestamp) / 86400000);
+    const recency = ageDays <= 1 ? 1.25 : ageDays <= 7 ? 1.0 : ageDays <= 30 ? 0.75 : 0.5;
+    const episode = Number(item?.episode) || 1;
+    push(anime.id, anime, (2.5 * recency) + Math.min(1.0, (episode - 1) * 0.1));
+  }
+
+  return [...seeds.values()].sort((a, b) => b.weight - a.weight).slice(0, REC_SEED_LIMIT);
+}
+
+/**
+ * Ranks candidates with the LightFM + Annoy service. Returns null whenever the learned
+ * path cannot be trusted, so the caller can fall back to the content-based scorer.
+ */
+async function rankWithLightfm(seeds, seen) {
+  if (!REC_SERVICE_URL || seeds.length === 0) return null;
+  if (Date.now() < recServiceState.downUntil) return null;
+
+  const health = await probeRecService();
+  if (!health || health.ready === false) return null;
+  if (REC_ONLY_GOOD_DATA && health.data_quality && health.data_quality !== 'ok') {
+    if (!weakDataWarned) {
+      weakDataWarned = true;
+      console.warn(
+        '[Recommendation] LightFM index reports data_quality=' + health.data_quality +
+        ' (' + health.items + ' items / ' + health.users + ' users). Keeping content-based ranking; ' +
+        'set REC_USE_ONLY_WITH_GOOD_DATA=0 to force the learned path.'
+      );
+    }
+    return null;
+  }
+
+  const settled = await Promise.allSettled(seeds.map((seed) => fetchSimilar(seed.id, REC_PER_SEED)));
+  const failures = settled.filter((entry) => entry.status === 'rejected').length;
+  if (failures === settled.length) {
+    recServiceState.downUntil = Date.now() + REC_COOLDOWN_MS;
+    recServiceState.health = null;
+    console.warn('[Recommendation] Every LightFM/Annoy query failed; backing off for', REC_COOLDOWN_MS, 'ms');
+    return null;
+  }
+
+  const candidateMap = new Map();
+  settled.forEach((entry, index) => {
+    if (entry.status !== 'fulfilled' || !entry.value) return;
+    const seed = seeds[index];
+    const seedWeight = 0.5 + Math.min(1.5, seed.weight / 2.5);
+    for (const item of entry.value.items || []) {
+      const id = String(item.video_id);
+      if (!id || seen.has(id)) continue;
+      const contribution = Math.max(0, Number(item.score) || 0) * 10 * seedWeight;
+      const existing = candidateMap.get(id);
+      if (existing) {
+        existing.score += contribution + 4; // recommended by several seeds
+        existing.sources.push(seed);
+      } else {
+        candidateMap.set(id, { id, score: contribution + 20, sources: [seed] });
+      }
+    }
+  });
+
+  if (candidateMap.size === 0) return null;
+
+  // Degenerate embeddings (e.g. trained from a single user's rank-1 matrix) score every
+  // candidate identically. Ranking then carries no information, so do not pretend it does.
+  const distinctScores = new Set([...candidateMap.values()].map((entry) => Math.round(entry.score * 1000)));
+  if (distinctScores.size < 2) return null;
+
+  const ranked = [...candidateMap.values()].sort((a, b) => b.score - a.score).slice(0, 60);
+  const hydrated = await Promise.all(ranked.map(async (entry) => {
+    try {
+      return { entry, anime: await getAnimeDetails(entry.id) };
+    } catch {
+      return { entry, anime: null };
+    }
+  }));
+
+  const results = [];
+  for (const { entry, anime } of hydrated) {
+    if (!anime) continue;
+    const seed = entry.sources[0];
+    const crossSource = entry.sources.length > 1;
+    results.push({
+      ...anime,
+      recommendationReason: crossSource
+        ? `Matches several of your favourites (LightFM)`
+        : `Similar to ${seed?.title || 'your favourites'} (LightFM)`,
+      matchPercent: Math.min(99, Math.max(85, Math.round(84 + Math.min(15, entry.score / 6)))),
+      _finalScore: entry.score,
+      recommendationSource: 'lightfm-annoy'
+    });
+  }
+  return results.length > 0 ? results : null;
+}
 
 /**
  * Computes deep personalized anime recommendations by synthesizing explicit favorites
  * and implicit watch history (with recency decay & episode engagement) like modern video platforms.
  */
-export async function computeRecommendations({ 
+async function computeContentBasedRecommendations({ 
   favoriteIds = [], 
   favorites = [], 
   watchHistory = [], 
@@ -237,4 +411,49 @@ export async function computeRecommendations({
   const ranked = candidateList.slice(0, limit);
 
   return ranked;
+}
+
+/**
+ * Public entry point. Tries the learned LightFM + Annoy ranking first and transparently
+ * falls back to the content-based scorer, so the API contract never changes.
+ */
+export async function computeRecommendations({ favoriteIds = [], favorites = [], watchHistory = [], limit = 60 } = {}) {
+  const seeds = collectSeeds({ favoriteIds, favorites, watchHistory });
+  const seen = new Set();
+  for (const id of favoriteIds) if (id !== undefined && id !== null) seen.add(String(id));
+  for (const favorite of favorites) if (favorite?.id) seen.add(String(favorite.id));
+  for (const item of watchHistory) {
+    const anime = item?.anime || item;
+    if (anime?.id !== undefined && anime?.id !== null) seen.add(String(anime.id));
+  }
+
+  if (seeds.length > 0) {
+    try {
+      const learned = await rankWithLightfm(seeds, seen);
+      if (learned && learned.length >= Math.min(REC_CANDIDATE_FLOOR, limit)) {
+        return learned.slice(0, limit);
+      }
+    } catch (err) {
+      console.warn('[Recommendation] LightFM path failed; using content-based ranking:', err.message);
+    }
+  }
+
+  return computeContentBasedRecommendations({ favoriteIds, favorites, watchHistory, limit });
+}
+
+/** Exposed for diagnostics / the settings UI. */
+export async function getRecommendationEngineStatus() {
+  if (!REC_SERVICE_URL) {
+    return { mode: 'content-based', serviceUrl: null, reason: 'REC_SERVICE_URL is not set' };
+  }
+  const health = await probeRecService();
+  return {
+    mode: health?.ready ? 'lightfm-annoy' : 'content-based',
+    serviceUrl: REC_SERVICE_URL,
+    healthy: !!health?.ready,
+    backend: health?.backend || null,
+    items: health?.items ?? null,
+    dataQuality: health?.data_quality ?? null,
+    requireGoodData: REC_ONLY_GOOD_DATA
+  };
 }

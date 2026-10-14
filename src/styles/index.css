@@ -110,3 +110,21 @@
 .animate-marquee:hover {
   animation-play-state: paused;
 }
+
+/* Reduced motion: ticker becomes a static, scrollable row */
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee {
+    animation: none !important;
+  }
+  .ticker-track {
+    overflow-x: auto;
+    max-width: 100%;
+  }
+}
+
+/* Keep hover feedback to hover-capable pointers */
+@media (hover: none) {
+  .animate-marquee:hover {
+    animation-play-state: running;
+  }
+}

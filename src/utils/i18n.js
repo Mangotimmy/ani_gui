@@ -1,5 +1,7 @@
 // src/utils/i18n.js - Multilingual Localization for AniFlix (EN / 繁體中文 TW/HK / 簡體中文 CN / 日本語 JA)
 
+import { scheduleTranslations } from './i18nSchedule.js';
+
 export const SUPPORTED_LANGS = [
   { code: 'zh-TW', label: '繁體中文 (TW/HK)', short: '繁中' },
   { code: 'zh-CN', label: '简体中文 (CN)', short: '简中' },
@@ -540,6 +542,10 @@ export const translations = {
     directStreamModalDesc: 'このエピソード用に抽出された復号済み HLS (.m3u8) リンクです。'
   }
 };
+
+for (const lang of Object.keys(scheduleTranslations)) {
+  Object.assign(translations[lang], scheduleTranslations[lang]);
+}
 
 export function getSavedLanguage() {
   try {

@@ -1,0 +1,50 @@
+# LightFM + Annoy recommendation service.
+#
+#   docker compose up -d --build          # serve (needs trained artifacts in ./data)
+#   docker compose run --rm trainer       # train once, then exit
+#
+# ./data is shared with the AniFlix container so the trainer can read the real
+# user profiles (users/*.json) and write the artifacts next to them.
+services:
+  rec-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ani-gui/lightfm-annoy-rec:latest
+    container_name: aniflix-rec
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      REC_ARTIFACT_DIR: /app/data
+      REC_PLATFORM_DATA_DIR: /app/data
+      REC_DEFAULT_K: "10"
+      # 0 = memory-map the Annoy index instead of prefaulting it into RAM.
+      REC_PREFETCH: "0"
+    volumes:
+      - ./data:/app/data
+    # Hard cap keeps online inference inside the 2 GB NAS budget.
+    mem_limit: 2000m
+    deploy:
+      resources:
+        limits:
+          memory: 2000M
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ani-gui/lightfm-annoy-rec:latest
+    profiles: ["train"]
+    environment:
+      REC_PLATFORM_DATA_DIR: /app/data
+      REC_ARTIFACT_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    command: ["python", "-m", "src.train", "--data-dir", "/app/data", "--artifact-dir", "/app/data"]
