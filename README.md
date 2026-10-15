@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![AniFlix Banner](https://img.shields.io/badge/AniFlix-v2.0.0-E50914?style=for-the-badge&logo=netflix&logoColor=white)
+![AniFlix Banner](https://img.shields.io/badge/AniFlix-v2.0.6-E50914?style=for-the-badge&logoColor=white)
 [![Docker Image](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/Atszl/aniflix)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
