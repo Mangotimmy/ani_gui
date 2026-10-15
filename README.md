@@ -1,4 +1,4 @@
-# 🎬 AniFlix 2.0 (アニメフリックス)
+# 🎬 AniFlix 2.0 
 
 <div align="center">
 
@@ -13,7 +13,7 @@
   streaming platform 風格影院級動漫串流平台 • 批次下載器 • Synology NAS / Docker 私有雲伺服器
 </p>
 platform 
-[English](#-english) | [繁體中文](#-繁體中文) | [Docker NAS Deployment](#-docker--nas-deployment) | [API & Tech Specs](#-technical-architecture)
+[English] | [繁體中文]| 
 
 </div>
 
