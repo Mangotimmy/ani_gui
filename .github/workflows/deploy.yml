@@ -26,7 +26,7 @@ jobs:
     # 🔥 2. 自動擷取 Docker 標籤元數據
     - name: Extract Docker metadata
       id: meta
-      uses: docker/metadata-action@v5
+      uses: docker/metadata-action@v6
       with:
           images: |
             ${{ secrets.DOCKER_USERNAME }}/mangoau
