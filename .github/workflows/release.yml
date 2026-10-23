@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0   # 關鍵：拉取完整 Git 歷史與 Tags，計算 commit 差異
 
@@ -76,7 +76,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0   # 關鍵：拉取完整 Git 歷史與 Tags，避免 Windows 誤判
 
