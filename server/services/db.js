@@ -6,10 +6,14 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Data directory at project server/data
-const DATA_DIR = path.resolve(__dirname, '../data');
+// Data directory: ANIFLIX_DATA_DIR (Docker /data, Electron userData) or <server>/data.
+// Must not depend on process.cwd(); in Docker that put the SQLite DB outside the mounted
+// volume and every container update silently dropped aliases, caches and comments.
+const DATA_DIR = process.env.ANIFLIX_DATA_DIR && process.env.ANIFLIX_DATA_DIR.trim()
+  ? path.resolve(process.env.ANIFLIX_DATA_DIR.trim())
+  : path.resolve(__dirname, '../data');
 if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
 }
 
 const DB_PATH = path.join(DATA_DIR, 'aniflix.db');
@@ -55,7 +59,45 @@ const SEED_ALIASES = [
   { alias: '七大罪', canonical: 'The Seven Deadly Sins', romaji: 'Nanatsu no Taizai', chinese: '七大罪', franchise: 'The Seven Deadly Sins' },
   { alias: '七つの大罪', canonical: 'The Seven Deadly Sins', romaji: 'Nanatsu no Taizai', chinese: '七大罪', franchise: 'The Seven Deadly Sins' },
   { alias: 'gintama', canonical: 'Gintama', romaji: 'Gintama', chinese: '銀魂', franchise: 'Gintama' },
-  { alias: 'eva', canonical: 'Neon Genesis Evangelion', romaji: 'Shin Seiki Evangelion', chinese: '新世紀福音戰士', franchise: 'Evangelion' }
+  { alias: 'eva', canonical: 'Neon Genesis Evangelion', romaji: 'Shin Seiki Evangelion', chinese: '新世紀福音戰士', franchise: 'Evangelion' },
+
+  // Japanese-native titles and katakana-only names: AniList's search is unreliable for
+  // these (ワンピース used to return an unrelated short), and they are what Japanese users
+  // actually type into the search bar.
+  { alias: 'ワンピース', canonical: 'One Piece', romaji: 'One Piece', chinese: '航海王', franchise: 'One Piece' },
+  { alias: 'ナルト', canonical: 'Naruto', romaji: 'Naruto', chinese: '火影忍者', franchise: 'Naruto' },
+  { alias: 'ブリーチ', canonical: 'Bleach', romaji: 'Bleach', chinese: '死神', franchise: 'Bleach' },
+  { alias: 'ドラゴンボール', canonical: 'Dragon Ball', romaji: 'Dragon Ball', chinese: '七龍珠', franchise: 'Dragon Ball' },
+  { alias: 'エヴァンゲリオン', canonical: 'Neon Genesis Evangelion', romaji: 'Shin Seiki Evangelion', chinese: '新世紀福音戰士', franchise: 'Evangelion' },
+  { alias: 'ガンダム', canonical: 'Mobile Suit Gundam', romaji: 'Kidou Senshi Gundam', chinese: '機動戰士鋼彈', franchise: 'Gundam' },
+  { alias: 'ポケモン', canonical: 'Pokemon', romaji: 'Pokemon', chinese: '寶可夢', franchise: 'Pokemon' },
+  { alias: 'ポケットモンスター', canonical: 'Pokemon', romaji: 'Pokemon', chinese: '寶可夢', franchise: 'Pokemon' },
+  { alias: 'コナン', canonical: 'Detective Conan', romaji: 'Meitantei Conan', chinese: '名偵探柯南', franchise: 'Detective Conan' },
+  { alias: '名探偵コナン', canonical: 'Detective Conan', romaji: 'Meitantei Conan', chinese: '名偵探柯南', franchise: 'Detective Conan' },
+  { alias: '鬼滅の刃', canonical: 'Demon Slayer', romaji: 'Kimetsu no Yaiba', chinese: '鬼滅之刃', franchise: 'Demon Slayer' },
+  { alias: '進撃の巨人', canonical: 'Attack on Titan', romaji: 'Shingeki no Kyojin', chinese: '進擊的巨人', franchise: 'Attack on Titan' },
+  { alias: '呪術廻戦', canonical: 'Jujutsu Kaisen', romaji: 'Jujutsu Kaisen', chinese: '咒術迴戰', franchise: 'Jujutsu Kaisen' },
+  { alias: '葬送のフリーレン', canonical: 'Frieren: Beyond Journey\'s End', romaji: 'Sousou no Frieren', chinese: '葬送的芙莉蓮', franchise: 'Frieren' },
+  { alias: '僕のヒーローアカデミア', canonical: 'My Hero Academia', romaji: 'Boku no Hero Academia', chinese: '我的英雄學院', franchise: 'My Hero Academia' },
+  { alias: 'スパイファミリー', canonical: 'SPY x FAMILY', romaji: 'Spy x Family', chinese: '間諜家家酒', franchise: 'Spy x Family' },
+  { alias: 'チェンソーマン', canonical: 'Chainsaw Man', romaji: 'Chainsaw Man', chinese: '鏈鋸人', franchise: 'Chainsaw Man' },
+  { alias: 'ハンターハンター', canonical: 'Hunter x Hunter', romaji: 'Hunter x Hunter', chinese: '獵人', franchise: 'Hunter x Hunter' },
+  { alias: '東京リベンジャーズ', canonical: 'Tokyo Revengers', romaji: 'Tokyo Revengers', chinese: '東京復仇者', franchise: 'Tokyo Revengers' },
+  { alias: '無職転生', canonical: 'Mushoku Tensei: Jobless Reincarnation', romaji: 'Mushoku Tensei: Isekai Ittara Honki Dasu', chinese: '無職轉生', franchise: 'Mushoku Tensei' },
+  { alias: '転生したらスライムだった件', canonical: 'That Time I Got Reincarnated as a Slime', romaji: 'Tensei shitara Slime Datta Ken', chinese: '關於我轉生變成史萊姆這檔事', franchise: 'That Time I Got Reincarnated as a Slime' },
+  { alias: 'かぐや様は告らせたい', canonical: 'Kaguya-sama: Love is War', romaji: 'Kaguya-sama wa Kokurasetai', chinese: '輝夜姬想讓人告白', franchise: 'Kaguya-sama' },
+  { alias: '五等分の花嫁', canonical: 'The Quintessential Quintuplets', romaji: 'Gotoubun no Hanayome', chinese: '五等分的新娘', franchise: 'The Quintessential Quintuplets' },
+
+  // Latin short names / romanised fragments
+  { alias: 'shingeki', canonical: 'Attack on Titan', romaji: 'Shingeki no Kyojin', chinese: '進擊的巨人', franchise: 'Attack on Titan' },
+  { alias: 'kimetsu', canonical: 'Demon Slayer', romaji: 'Kimetsu no Yaiba', chinese: '鬼滅之刃', franchise: 'Demon Slayer' },
+  { alias: 'hxh', canonical: 'Hunter x Hunter', romaji: 'Hunter x Hunter', chinese: '獵人', franchise: 'Hunter x Hunter' },
+  { alias: 'spy family', canonical: 'SPY x FAMILY', romaji: 'Spy x Family', chinese: '間諜家家酒', franchise: 'Spy x Family' },
+  { alias: 'spy x family', canonical: 'SPY x FAMILY', romaji: 'Spy x Family', chinese: '間諜家家酒', franchise: 'SPY x FAMILY' },
+  { alias: 'tokyo revengers', canonical: 'Tokyo Revengers', romaji: 'Tokyo Revengers', chinese: '東京復仇者', franchise: 'Tokyo Revengers' },
+  { alias: 'kaguya', canonical: 'Kaguya-sama: Love is War', romaji: 'Kaguya-sama wa Kokurasetai', chinese: '輝夜姬想讓人告白', franchise: 'Kaguya-sama' },
+  { alias: 'gotoubun', canonical: 'The Quintessential Quintuplets', romaji: 'Gotoubun no Hanayome', chinese: '五等分的新娘', franchise: 'The Quintessential Quintuplets' },
+  { alias: 'quintuplets', canonical: 'The Quintessential Quintuplets', romaji: 'Gotoubun no Hanayome', chinese: '五等分的新娘', franchise: 'The Quintessential Quintuplets' }
 ];
 
 // Fallback in-memory stores

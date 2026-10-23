@@ -112,18 +112,23 @@ export function saveUser(username, data = {}) {
       ? JSON.parse(fs.readFileSync(filePath, 'utf-8'))
       : { createdAt: Date.now() };
 
+    // Guard against runaway payloads from a corrupted localStorage copy.
+    const MAX_ITEMS = 5000;
     const updated = {
       username: clean,
       displayName: data.displayName || existing.displayName || clean,
       avatar: data.avatar || existing.avatar || 'cat',
-      favorites: Array.isArray(data.favorites) ? data.favorites : (existing.favorites || []),
-      watchHistory: Array.isArray(data.watchHistory) ? data.watchHistory : (existing.watchHistory || []),
+      favorites: Array.isArray(data.favorites) ? data.favorites.slice(0, MAX_ITEMS) : (existing.favorites || []),
+      watchHistory: Array.isArray(data.watchHistory) ? data.watchHistory.slice(0, MAX_ITEMS) : (existing.watchHistory || []),
       settings: data.settings !== undefined ? { ...existing.settings, ...data.settings } : (existing.settings || {}),
       updatedAt: Date.now(),
       createdAt: existing.createdAt || Date.now()
     };
 
-    fs.writeFileSync(filePath, JSON.stringify(updated, null, 2), 'utf-8');
+    // Atomic write: a crash or a concurrent request must never leave a truncated profile.
+    const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(updated, null, 2), 'utf-8');
+    fs.renameSync(tempPath, filePath);
     return updated;
   } catch (err) {
     console.error(`[UserService] Failed to save user ${clean}:`, err.message);

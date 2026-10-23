@@ -4,13 +4,8 @@ import Navbar from './components/Navbar';
 import HeroBanner from './components/HeroBanner';
 import AnimeCarousel from './components/AnimeCarousel';
 import DownloadManager from './components/DownloadManager';
-import SettingsModal from './components/SettingsModal';
-import SetupWizardModal from './components/SetupWizardModal';
-import DownloadedFilesModal from './components/DownloadedFilesModal';
-import UserProfileModal from './components/UserProfileModal';
 import AnimeCard from './components/AnimeCard';
 import MarqueeTicker from './components/animata/MarqueeTicker';
-import ScheduleView from './components/ScheduleView';
 import { getDayRange, fetchSchedule } from './utils/schedule';
 import { getPlatformInfo } from './utils/platform';
 
@@ -18,6 +13,13 @@ import { getPlatformInfo } from './utils/platform';
 const DetailModal = React.lazy(() => import('./components/DetailModal'));
 const BatchDownloadModal = React.lazy(() => import('./components/BatchDownloadModal'));
 const VideoPlayer = React.lazy(() => import('./components/VideoPlayer'));
+// Heavy, rarely-opened surfaces are split out of the boot bundle: parsing them up front
+// delayed first paint and the hero image (LCP).
+const SettingsModal = React.lazy(() => import('./components/SettingsModal'));
+const SetupWizardModal = React.lazy(() => import('./components/SetupWizardModal'));
+const DownloadedFilesModal = React.lazy(() => import('./components/DownloadedFilesModal'));
+const UserProfileModal = React.lazy(() => import('./components/UserProfileModal'));
+const ScheduleView = React.lazy(() => import('./components/ScheduleView'));
 import { 
   Flame, Star, Trophy, Swords, Sparkles, Loader2, 
   Search, Heart, Calendar, History, Trash2, Clock, Play,
@@ -30,6 +32,17 @@ import {
   checkFavoritesForNewAiring 
 } from './utils/notifications';
 import { getAnimeCoverUrl } from './utils/image';
+
+// Trim the profiles we push to the server: descriptions and external links are not needed
+// for cross-device favourites/history and made every sync payload needlessly large.
+const slimAnimeForSync = (anime) => {
+  if (!anime || typeof anime !== 'object') return anime;
+  const { externalLinks, trailer, relations, characters, staff, streamingEpisodes, ...rest } = anime;
+  return {
+    ...rest,
+    description: typeof anime.description === 'string' ? anime.description.slice(0, 240) : ''
+  };
+};
 
 // Dynamically compute future years so catalog, UI and scraper seamlessly scale to 2027, 2028 and beyond
 const CURRENT_YEAR = new Date().getFullYear();
@@ -299,8 +312,10 @@ function hasHomeCache() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: currentUser.username,
-          favorites,
-          watchHistory
+          favorites: favorites.map(slimAnimeForSync),
+          watchHistory: watchHistory.map(item => (
+            item && item.anime ? { ...item, anime: slimAnimeForSync(item.anime) } : item
+          ))
         })
       }).catch((err) => {
         console.warn('Background user profile sync warning:', err);
@@ -461,8 +476,10 @@ function hasHomeCache() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             favoriteIds: favorites.map(f => f.id),
-            favorites,
-            watchHistory,
+            favorites: favorites.map(slimAnimeForSync),
+            watchHistory: watchHistory.slice(0, 300).map(item => (
+              item && item.anime ? { ...item, anime: slimAnimeForSync(item.anime) } : item
+            )),
             limit: 60
           })
         });
@@ -509,42 +526,87 @@ function hasHomeCache() {
     }
   }, [activeTab, catalogYear, catalogSeason, catalogSort, catalogStudio, hideR18]);
 
-  // 3. Real-Time Server-Sent Events (SSE) for Downloads
+  // 3. Real-Time Downloader updates: SSE with an automatic polling fallback.
+  // Reverse proxies that terminate HTTP/2 (Synology DSM nginx) intermittently reset
+  // long-lived SSE streams (ERR_HTTP2_PROTOCOL_ERROR). Rather than showing a dead
+  // download list, fall back to polling until a fresh SSE stream connects again.
   useEffect(() => {
-    const eventSource = new EventSource('/api/downloads/events');
+    let eventSource = null;
+    let pollTimer = null;
+    let sseFailures = 0;
+    let disposed = false;
 
-    eventSource.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === 'SNAPSHOT') {
-          setDownloadTasks(data.tasks);
-        } else if (data.type === 'TASKS_ADDED') {
-          setDownloadTasks(prev => [...data.tasks, ...prev]);
-        } else if (data.type === 'TASK_UPDATED') {
-          // If the drawer is open, update so user sees live progress/speed
-          // If closed, only update if task status changed (to update active count badge)
-          if (isDownloadsOpenRef.current) {
-            setDownloadTasks(prev => 
-              prev.map(t => t.id === data.task.id ? data.task : t)
-            );
-          } else {
-            setDownloadTasks(prev => {
-              const existing = prev.find(t => t.id === data.task.id);
-              if (existing && existing.status !== data.task.status) {
-                return prev.map(t => t.id === data.task.id ? data.task : t);
-              }
-              return prev; // Same reference -> React skips re-render!
-            });
-          }
+    const applyEvent = (data) => {
+      if (!data || !data.type) return;
+      if (data.type === 'SNAPSHOT') {
+        setDownloadTasks(data.tasks || []);
+      } else if (data.type === 'TASKS_ADDED') {
+        setDownloadTasks(prev => [...(data.tasks || []), ...prev]);
+      } else if (data.type === 'TASK_UPDATED' && data.task) {
+        if (isDownloadsOpenRef.current) {
+          setDownloadTasks(prev => prev.map(t => (t.id === data.task.id ? data.task : t)));
+        } else {
+          setDownloadTasks(prev => {
+            const existing = prev.find(t => t.id === data.task.id);
+            if (existing && existing.status !== data.task.status) {
+              return prev.map(t => (t.id === data.task.id ? data.task : t));
+            }
+            return prev; // Same reference -> React skips re-render!
+          });
         }
-      } catch (err) {
-        console.error('SSE parse error:', err);
       }
     };
 
-    eventSource.onerror = (err) => {
-      console.warn('SSE connection notice (auto-reconnecting):', err?.type || err);
+    const stopPolling = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
     };
+
+    const startPolling = () => {
+      if (pollTimer || disposed) return;
+      const poll = async () => {
+        try {
+          const res = await fetch('/api/downloads');
+          const data = await res.json();
+          if (!disposed && data?.success && Array.isArray(data.tasks)) {
+            setDownloadTasks(data.tasks);
+          }
+        } catch {}
+      };
+      poll();
+      pollTimer = setInterval(poll, 6000);
+    };
+
+    const connect = () => {
+      if (disposed) return;
+      try {
+        eventSource = new EventSource('/api/downloads/events');
+      } catch {
+        startPolling();
+        return;
+      }
+      eventSource.onopen = () => {
+        sseFailures = 0;
+        stopPolling();
+      };
+      eventSource.onmessage = (e) => {
+        try {
+          applyEvent(JSON.parse(e.data));
+        } catch (err) {
+          console.warn('SSE parse error:', err?.message || err);
+        }
+      };
+      eventSource.onerror = (err) => {
+        sseFailures += 1;
+        console.warn('SSE connection notice (auto-reconnecting):', err?.type || err);
+        // Give EventSource one automatic retry, then guarantee live data via polling.
+        if (sseFailures >= 2) startPolling();
+      };
+    };
+
+    connect();
 
     // Load initial settings
     fetch('/api/settings')
@@ -553,7 +615,9 @@ function hasHomeCache() {
       .catch(() => {});
 
     return () => {
-      eventSource.close();
+      disposed = true;
+      stopPolling();
+      try { eventSource?.close(); } catch {}
     };
   }, []);
 
@@ -868,6 +932,21 @@ function hasHomeCache() {
     }
   };
 
+  // Open an anime picked from the search typeahead: paint immediately with the light
+  // suggestion object, then hydrate with full details (description, episodes, trailers).
+  const handleOpenAnimeFromSearch = useCallback(async (anime) => {
+    if (!anime) return;
+    setSelectedAnime(anime);
+    if (!anime.id) return;
+    try {
+      const res = await fetch(`/api/anime/${anime.id}`);
+      const data = await res.json();
+      if (data?.success && data.data) {
+        setSelectedAnime(prev => (prev && String(prev.id) === String(anime.id) ? data.data : prev));
+      }
+    } catch {}
+  }, []);
+
   const activeDownloadsCount = downloadTasks.filter(
     t => t.status === 'DOWNLOADING' || t.status === 'QUEUED'
   ).length;
@@ -883,6 +962,7 @@ function hasHomeCache() {
         onOpenSettings={() => handleOpenSettings('content')}
         onOpenUserProfile={() => setIsUserProfileOpen(true)}
         currentUser={currentUser}
+        onOpenAnime={handleOpenAnimeFromSearch}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         favoritesCount={favorites.length}
@@ -1256,7 +1336,13 @@ function hasHomeCache() {
             )}
           </div>
         ) : activeTab === 'schedule' ? (
-          <ScheduleView currentLang={currentLang} t={t} onOpenAnime={setSelectedAnime} />
+          <Suspense fallback={
+            <div className="pt-28 px-4 md:px-12 text-zinc-400 text-sm flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-amber-400" /> Loading schedule…
+            </div>
+          }>
+            <ScheduleView currentLang={currentLang} t={t} onOpenAnime={setSelectedAnime} />
+          </Suspense>
         ) : activeTab === 'upcoming' ? (
           /* Upcoming / Coming Soon Tab Grid */
           <div className="pt-24 px-4 md:px-12">
@@ -1638,7 +1724,7 @@ function hasHomeCache() {
         )}
       </Suspense>
 
-      {/* Slide-Out Download Manager Drawer */}
+      {/* Slide-Out Download Manager Drawer */} 
       <DownloadManager
         isOpen={isDownloadsOpen}
         onClose={() => setIsDownloadsOpen(false)}
@@ -1650,51 +1736,61 @@ function hasHomeCache() {
         onOpenDownloadedFiles={() => setIsDownloadedFilesOpen(true)}
       />
 
-      {/* Settings & Plugins Modal */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        currentDir={downloadDir}
-        onSaveSettings={handleSaveSettings}
-        onOpenFolder={handleOpenFolder}
-        onOpenDownloadedFiles={() => setIsDownloadedFilesOpen(true)}
-        hideR18={hideR18}
-        onToggleHideR18={handleToggleHideR18}
-        currentLang={currentLang}
-        gpuSettings={gpuSettings}
-        onUpdateGpuSettings={handleSaveSettings}
-        initialTab={settingsInitialTab}
-        serverInfo={serverInfo}
-        trendingCount={filteredTrending.length}
-        activeDownloadsCount={downloadTasks.length}
-      />
+      <Suspense fallback={null}>
+        {/* Settings & Plugins Modal */}
+        {isSettingsOpen && (
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            currentDir={downloadDir}
+            onSaveSettings={handleSaveSettings}
+            onOpenFolder={handleOpenFolder}
+            onOpenDownloadedFiles={() => setIsDownloadedFilesOpen(true)}
+            hideR18={hideR18}
+            onToggleHideR18={handleToggleHideR18}
+            currentLang={currentLang}
+            gpuSettings={gpuSettings}
+            onUpdateGpuSettings={handleSaveSettings}
+            initialTab={settingsInitialTab}
+            serverInfo={serverInfo}
+            trendingCount={filteredTrending.length}
+            activeDownloadsCount={downloadTasks.length}
+          />
+        )}
 
-      {/* User Profile & Account Switcher Modal */}
-      <UserProfileModal
-        isOpen={isUserProfileOpen}
-        onClose={() => setIsUserProfileOpen(false)}
-        currentUser={currentUser}
-        onSwitchUser={handleSwitchUser}
-        currentLang={currentLang}
-        favoritesCount={favorites.length}
-        historyCount={watchHistory.length}
-      />
+        {/* User Profile & Account Switcher Modal */}
+        {isUserProfileOpen && (
+          <UserProfileModal
+            isOpen={isUserProfileOpen}
+            onClose={() => setIsUserProfileOpen(false)}
+            currentUser={currentUser}
+            onSwitchUser={handleSwitchUser}
+            currentLang={currentLang}
+            favoritesCount={favorites.length}
+            historyCount={watchHistory.length}
+          />
+        )}
 
-      {/* Downloaded Anime Files Browser Modal (Mobile & Web) */}
-      <DownloadedFilesModal
-        isOpen={isDownloadedFilesOpen}
-        onClose={() => setIsDownloadedFilesOpen(false)}
-        onPlayFile={handlePlayDownloadedFile}
-        currentLang={currentLang}
-        t={t}
-      />
+        {/* Downloaded Anime Files Browser Modal (Mobile & Web) */}
+        {isDownloadedFilesOpen && (
+          <DownloadedFilesModal
+            isOpen={isDownloadedFilesOpen}
+            onClose={() => setIsDownloadedFilesOpen(false)}
+            onPlayFile={handlePlayDownloadedFile}
+            currentLang={currentLang}
+            t={t}
+          />
+        )}
 
-      {/* First-Run Environment Setup Wizard */}
-      <SetupWizardModal
-        isOpen={isSetupWizardOpen}
-        onClose={() => setIsSetupWizardOpen(false)}
-        onComplete={() => setIsSetupWizardOpen(false)}
-      />
+        {/* First-Run Environment Setup Wizard */}
+        {isSetupWizardOpen && (
+          <SetupWizardModal
+            isOpen={isSetupWizardOpen}
+            onClose={() => setIsSetupWizardOpen(false)}
+            onComplete={() => setIsSetupWizardOpen(false)}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

@@ -1,4 +1,6 @@
 // server/index.js - AniFlix Express backend server
+// Must run before the DB / cache modules are evaluated (they open files at import time).
+import './services/migrateData.js';
 import './services/dnsFallback.js';
 import express from 'express';
 import cors from 'cors';
@@ -9,6 +11,7 @@ import {
   getUpcoming,
   getByGenre, 
   searchAnime, 
+  getSearchSuggestions,
   getAnimeDetails,
   getRecommendationsForAnime,
   getCatalog,
@@ -38,6 +41,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import http from 'node:http';
+import zlib from 'node:zlib';
 import { exec, execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import { listUsers, getUser, saveUser, deleteUser } from './services/userService.js';
@@ -116,7 +120,38 @@ const PORT = process.env.PORT || 3001;
 app.set('trust proxy', true);
 
 app.use(cors());
-app.use(express.json());
+// Body limits: a synced profile (favorites + watch history for hundreds of titles) easily
+// exceeds Express' 100 kB default and used to fail with an HTML 413 page, which the client
+// then reported as "Unexpected token '<' ... is not valid JSON". Keep generous, explicit caps.
+app.use(express.json({ limit: '64mb' }));
+app.use(express.urlencoded({ extended: true, limit: '64mb' }));
+
+// Lightweight gzip for JSON API responses (no extra dependency). Catalogue payloads are
+// 30-60 kB of highly compressible JSON; on a NAS behind a home connection this is the
+// single biggest win for first-contentful-paint and catalogue switching.
+app.use((req, res, next) => {
+  if (!/\bgzip\b/i.test(req.headers['accept-encoding'] || '')) return next();
+  if (!req.path.startsWith('/api')) return next();
+  if (req.path === '/api/downloads/events' || req.path.startsWith('/api/proxy')) return next();
+
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    try {
+      const json = JSON.stringify(body);
+      // Small payloads are not worth the gzip header overhead.
+      if (json.length < 1024) return originalJson(body);
+      const compressed = zlib.gzipSync(json, { level: 6 });
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Vary', 'Accept-Encoding');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Length', compressed.length);
+      return res.end(compressed);
+    } catch {
+      return originalJson(body);
+    }
+  };
+  next();
+});
 
 // --- Metadata Routes ---
 
@@ -254,6 +289,22 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
+// Lightweight search suggestions / typeahead (Google-style hints, aliases, short names)
+app.get('/api/search/suggest', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 8, 1), 20);
+    if (!q) {
+      const trending = await getTrending(1, limit).catch(() => []);
+      return res.json({ success: true, data: (trending || []).slice(0, limit), fallback: true });
+    }
+    const data = await getSearchSuggestions(q, limit);
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(200).json({ success: false, error: err.message, data: [] });
+  }
+});
+
 // BitTorrent / Magnet Search (DMHY + Nyaa) - Must be registered BEFORE /api/anime/:id
 app.get('/api/torrents', async (req, res) => {
   try {
@@ -345,11 +396,27 @@ app.post('/api/torrents/open', (req, res) => {
 // Personalized recommendations
 app.post('/api/recommendations', async (req, res) => {
   try {
-    const { favoriteIds = [], favorites = [], watchHistory = [], limit = 60 } = req.body;
-    const recommendations = await computeRecommendations({ favoriteIds, favorites, watchHistory, limit });
+    const body = req.body || {};
+    const favoriteIds = Array.isArray(body.favoriteIds) ? body.favoriteIds : [];
+    const favorites = Array.isArray(body.favorites) ? body.favorites : [];
+    let watchHistory = Array.isArray(body.watchHistory) ? body.watchHistory : [];
+    const limit = Math.min(Math.max(parseInt(body.limit, 10) || 60, 1), 120);
+
+    // Defensive cap: a corrupted localStorage payload must degrade, not kill the request.
+    const MAX_ITEMS = 2000;
+    const cappedFavorites = favorites.slice(0, MAX_ITEMS);
+    watchHistory = watchHistory.slice(0, MAX_ITEMS);
+
+    const recommendations = await computeRecommendations({
+      favoriteIds: favoriteIds.slice(0, MAX_ITEMS),
+      favorites: cappedFavorites,
+      watchHistory,
+      limit
+    });
     res.json({ success: true, data: recommendations });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message, data: [] });
+    console.error('[Recommendations] Failed:', err.message);
+    res.status(200).json({ success: false, error: err.message, data: [] });
   }
 });
 
@@ -494,23 +561,35 @@ app.get('/api/downloads/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // Crucial for Synology DSM Nginx / Reverse Proxy!
+  // Stop compression / buffering layers (Synology DSM nginx, Cloudflare, Caddy) from sitting
+  // on the stream until they reset the HTTP/2 connection (ERR_HTTP2_PROTOCOL_ERROR).
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Content-Encoding', 'identity');
   res.flushHeaders();
+  try { res.socket?.setNoDelay?.(true); } catch {}
+
+  // Immediate comment so intermediaries commit the stream right away.
+  try { res.write(': connected\n\n'); } catch {}
 
   downloadManager.addSubscriber(res);
 
-  // Keep-alive heartbeat comment every 15 seconds to prevent Synology HTTP/2 stream reset
+  // Keep-alive heartbeat comment every 10 seconds to prevent HTTP/2 stream resets.
   const heartbeat = setInterval(() => {
     try {
+      if (res.writableEnded) throw new Error('ended');
       res.write(': ping\n\n');
     } catch {
       clearInterval(heartbeat);
     }
-  }, 15000);
+  }, 10000);
 
-  req.on('close', () => {
+  const cleanup = () => {
     clearInterval(heartbeat);
-  });
+    try { downloadManager.removeSubscriber(res); } catch {}
+  };
+  req.on('close', cleanup);
+  req.on('aborted', cleanup);
+  res.on('error', cleanup);
 });
 
 app.get('/api/downloads', (req, res) => {
@@ -1052,12 +1131,51 @@ app.get('/api/app/check-update', async (req, res) => {
 
 const distPath = path.join(__dirname, '..', 'dist');
 
-// Serve static build if dist exists
-app.use(express.static(distPath));
+// Serve the built SPA. Vite emits content-hashed filenames under /assets, so they are
+// immutable and can be cached for a year (repeat visits skip the network entirely and the
+// HTML shell is the only thing revalidated). The shell itself must never be cached or
+// users keep booting an old bundle after an update.
+app.use('/assets', express.static(path.join(distPath, 'assets'), {
+  immutable: true,
+  maxAge: '365d',
+  fallthrough: true
+}));
+app.use(express.static(distPath, {
+  maxAge: 0,
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('index.html') || filePath.endsWith('sw.js')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    } else if (/\.(png|ico|svg|webp|jpg|jpeg|woff2?)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=604800');
+    }
+  }
+}));
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) return next();
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.sendFile(path.join(distPath, 'index.html'));
+});
+
+// --- Central error handler -------------------------------------------------
+// Never leak Express' HTML error page to /api callers: every JSON consumer would blow up
+// on "Unexpected token '<'". Always answer with the same envelope the routes use.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = Number(err?.status || err?.statusCode || 500);
+  const isApi = req.path?.startsWith('/api');
+  if (status >= 500) {
+    console.error('[API Error]', req.method, req.path, '-', err?.message || err);
+  }
+  if (!isApi) return next(err);
+  const code = err?.code || err?.type || (status === 413 ? 'PAYLOAD_TOO_LARGE' : 'SERVER_ERROR');
+  res.status(status === 413 ? 413 : status).json({
+    success: false,
+    error: status === 413
+      ? 'Request body too large. The payload was rejected by the server body limit.'
+      : (err?.message || 'Internal server error'),
+    code
+  });
 });
 
 // Start standard Express HTTP server

@@ -5,7 +5,8 @@ import {
   Maximize, Minimize, SkipBack, SkipForward, MonitorPlay, 
   Settings, Loader2, Copy, Check, Link2, ExternalLink, SlidersHorizontal,
   Subtitles, Upload, FileUp, Tv, Smartphone, Zap, Sparkles,
-  MoreVertical, Film, AlertTriangle, Radio, ChevronDown
+  MoreVertical, Film, AlertTriangle, Radio, ChevronDown,
+  PictureInPicture2, Minimize2, Maximize2
 } from 'lucide-react';
 import { getPlatformInfo, getExternalPlayerLinks } from '../utils/platform.js';
 import { toCachedImageUrl } from '../utils/image.js';
@@ -108,6 +109,24 @@ function formatTime(seconds) {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
+// Pick the best subtitle track for the active UI language. Shared by the initial
+// resolution and the live language switch so both behave identically.
+function preferredSubtitleIndex(list, lang) {
+  if (!Array.isArray(list) || list.length === 0) return -1;
+  const matches = {
+    'zh-TW': (s) => isTradZh(s.lang),
+    'zh-CN': (s) => isSimpZh(s.lang),
+    'ja': (s) => isJapanese(s.lang),
+    'en': (s) => /(eng|english|\ben\b)/i.test(s.lang || '')
+  }[lang] || ((s) => /(eng|english|\ben\b)/i.test(s.lang || ''));
+
+  const exact = list.findIndex(s => matches(s) && !s.isAi);
+  if (exact !== -1) return exact;
+  const anyLang = list.findIndex(s => matches(s));
+  if (anyLang !== -1) return anyLang;
+  return 0;
+}
+
 export default function VideoPlayer({ 
   anime, 
   episode = 1, 
@@ -147,6 +166,89 @@ export default function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
 
+  // ─── Floating (mini) player ────────────────────────────────────────────────
+  // Keeps the stream alive in a draggable picture-in-picture-style window while the
+  // user keeps browsing the catalogue. Position is persisted per device.
+  const [isMini, setIsMini] = useState(false);
+  const [miniPos, setMiniPos] = useState({ x: null, y: null });
+  const miniDragRef = useRef(null);
+
+  const toggleMiniPlayer = useCallback(() => {
+    setIsMini(prev => {
+      const next = !prev;
+      if (next) {
+        try {
+          const saved = localStorage.getItem('aniflix_mini_pos');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Number.isFinite(parsed?.x) && Number.isFinite(parsed?.y)) setMiniPos(parsed);
+          }
+        } catch {}
+      }
+      return next;
+    });
+    setShowControls(true);
+  }, []);
+
+  const handleMiniPointerDown = useCallback((e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = containerRef.current?.getBoundingClientRect?.();
+    miniDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      baseX: rect ? rect.left : window.innerWidth - 440,
+      baseY: rect ? rect.top : window.innerHeight - 280,
+      moved: false
+    };
+    const onMove = (ev) => {
+      const drag = miniDragRef.current;
+      if (!drag) return;
+      const width = rect ? rect.width : 420;
+      const height = rect ? rect.height : 236;
+      const nx = Math.max(4, Math.min(window.innerWidth - width - 4, drag.baseX + ev.clientX - drag.startX));
+      const ny = Math.max(4, Math.min(window.innerHeight - height - 4, drag.baseY + ev.clientY - drag.startY));
+      if (Math.abs(ev.clientX - drag.startX) > 3 || Math.abs(ev.clientY - drag.startY) > 3) drag.moved = true;
+      setMiniPos({ x: nx, y: ny });
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      const drag = miniDragRef.current;
+      miniDragRef.current = null;
+      if (drag?.moved) {
+        setMiniPos(current => {
+          try { localStorage.setItem('aniflix_mini_pos', JSON.stringify(current)); } catch {}
+          return current;
+        });
+      }
+    };
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+  }, []);
+
+  const togglePictureInPicture = useCallback(async () => {
+    try {
+      const video = videoRef.current;
+      if (!video) return;
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        return;
+      }
+      if (document.pictureInPictureEnabled && typeof video.requestPictureInPicture === 'function') {
+        await video.requestPictureInPicture();
+      } else if (typeof video.webkitSetPresentationMode === 'function') {
+        // iOS Safari fallback (inline -> picture-in-picture)
+        video.webkitSetPresentationMode(
+          video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture'
+        );
+      }
+    } catch (err) {
+      console.warn('[PiP] Not available:', err?.message || err);
+    }
+  }, []);
+
   // M3U8 link & quality features
   const [copiedLink, setCopiedLink] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
@@ -156,7 +258,13 @@ export default function VideoPlayer({
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
   // Stream Source Switcher state (HiAnime, Anime1.me, FramexTV)
+  // activeSource is the source the USER picked. It is never overwritten by a server
+  // response (doing so re-triggered the resolver and reloaded the video mid-playback,
+  // which is exactly what made "switching source" feel broken).
   const [activeSource, setActiveSource] = useState('auto');
+  const [resolvedSource, setResolvedSource] = useState('');
+  const resolveSeqRef = useRef(0);
+  const pendingSeekRef = useRef(null);
   const [availableSources, setAvailableSources] = useState([]);
   const [showSourceMenu, setShowSourceMenu] = useState(false);
   const [isEmbedSource, setIsEmbedSource] = useState(false);
@@ -467,11 +575,35 @@ export default function VideoPlayer({
     return url;
   };
 
+  // Localized title as a ref: the resolver must not re-run just because the async
+  // Chinese-title lookup finished (that used to restart playback a second after opening).
+  const displayTitleRef = useRef(displayTitle);
+  useEffect(() => {
+    displayTitleRef.current = displayTitle;
+  }, [displayTitle]);
+
   // Fetch Stream & Local Subtitles concurrently
   useEffect(() => {
     let isCancelled = false;
+    let resolved = false;
+    // Generation token: a slow resolution for source A must never overwrite source B.
+    const seq = ++resolveSeqRef.current;
+    // Keep the playhead when the user switches line/source or the episode reloads.
+    const previousVideo = videoRef.current;
+    if (previousVideo && Number.isFinite(previousVideo.currentTime) && previousVideo.currentTime > 3) {
+      pendingSeekRef.current = previousVideo.currentTime;
+    }
+    setSubtitles([]);
+    setSelectedSubIndex(-1);
     setIsBuffering(true);
     setErrorMessage('');
+    setResolvedSource('');
+    if (!directStreamUrl) {
+      // Tear down the previous line immediately; leaving it running behind an error (or
+      // behind the newly resolved line) made switching sources look like it did nothing.
+      setStreamUrl('');
+      setRawStreamUrl('');
+    }
     setAvailableQualities([]);
     setCurrentQualityIndex(-1);
     setIsMp4(false);
@@ -488,16 +620,16 @@ export default function VideoPlayer({
       // Check if anime is unreleased beforehand
       if (anime?.status === 'NOT_YET_RELEASED' || anime?.episodes === 0) {
         setIsBuffering(false);
-        setErrorMessage(`《${displayTitle}》本季尚未正式開播 (Coming Soon)。您可以搶先欣賞官方宣傳預告片 (PV)！`);
+        setErrorMessage(`《${displayTitleRef.current || rawTitle}》本季尚未正式開播 (Coming Soon)。您可以搶先欣賞官方宣傳預告片 (PV)！`);
         return;
       }
 
       const timeoutId = setTimeout(() => {
-        if (!isCancelled && !streamUrl) {
+        if (!isCancelled && !resolved && seq === resolveSeqRef.current) {
           setIsBuffering(false);
           setErrorMessage(prev => prev || '串流載入逾時。您可以嘗試重新整理、欣賞官方預告片或使用外部 MPV 播放器。');
         }
-      }, 10000);
+      }, 12000);
 
       try {
         const candidateTitles = [
@@ -530,14 +662,15 @@ export default function VideoPlayer({
         }).then(r => r.json());
 
         // Concurrently query local subtitles on user's machine (e.g. downloads folder)
-        const localSubsPromise = fetch(`/api/subtitles/local?animeTitle=${encodeURIComponent(displayTitle || rawTitle)}&episode=${episode}`)
+        const localSubsPromise = fetch(`/api/subtitles/local?animeTitle=${encodeURIComponent(displayTitleRef.current || rawTitle)}&episode=${episode}`)
           .then(r => r.json())
           .catch(() => ({ success: false, subtitles: [] }));
 
         const [streamRes, localSubsRes] = await Promise.all([streamPromise, localSubsPromise]);
         clearTimeout(timeoutId);
 
-        if (!isCancelled) {
+        if (!isCancelled && seq === resolveSeqRef.current) {
+          resolved = true;
           const hasValidStream = streamRes.success && streamRes.data && (streamRes.data.proxiedStreamUrl || streamRes.data.streamUrl);
           if (hasValidStream) {
             const raw = streamRes.data.streamUrl;
@@ -547,9 +680,8 @@ export default function VideoPlayer({
             if (streamRes.data.availableSources) {
               setAvailableSources(streamRes.data.availableSources);
             }
-            if (streamRes.data.activeSource && streamRes.data.activeSource !== activeSource) {
-              setActiveSource(streamRes.data.activeSource);
-            }
+            // Display only — never feed the resolved source back into activeSource.
+            setResolvedSource(streamRes.data.activeSource || '');
             setIsEmbedSource(Boolean(streamRes.data.isEmbed));
             setIsMp4(Boolean(streamRes.data.isMp4));
 
@@ -574,97 +706,52 @@ export default function VideoPlayer({
             const hasCn = combinedSubs.some(s => isSimpZh(s.lang));
             const hasJa = combinedSubs.some(s => isJapanese(s.lang));
 
-            // Find base English or primary remote subtitle track to translate if needed
-            const enSub = remoteSubs.find(s => /(eng|english|\ben\b)/i.test(s.lang)) || remoteSubs[0];
+            // Pick the best base track for on-the-fly AI translation. Prefer the ORIGINAL
+            // upstream URL (streamRes.data.subtitles) over the already-proxied one: the old
+            // code wrapped "/api/proxy?..." inside another /api/subtitles/translate URL,
+            // which the server could not fetch (relative URL -> HTTP 500 -> no subtitles).
+            const rawRemoteSubs = Array.isArray(streamRes.data.subtitles) ? streamRes.data.subtitles : [];
+            const candidatesForTranslation = [
+              ...rawRemoteSubs.filter(s => s && s.url),
+              ...remoteSubs.filter(s => s && s.url)
+            ];
+            const translateSource =
+              candidatesForTranslation.find(s => /(eng|english|\ben\b)/i.test(s.lang || '')) ||
+              candidatesForTranslation[0];
 
-            if (enSub && enSub.url) {
+            if (translateSource && translateSource.url) {
+              // Unwrap a proxied URL so the server talks to the CDN directly.
+              const baseSubUrl = translateSource.url;
               const aiTracks = [];
-              if (!hasTw) {
-                aiTracks.push({
-                  lang: '繁體中文 (AI 翻譯)',
-                  url: `/api/subtitles/translate?url=${encodeURIComponent(enSub.url)}&targetLang=zh-TW`,
-                  isAi: true
-                });
-              }
-              if (!hasCn) {
-                aiTracks.push({
-                  lang: '简体中文 (AI 翻译)',
-                  url: `/api/subtitles/translate?url=${encodeURIComponent(enSub.url)}&targetLang=zh-CN`,
-                  isAi: true
-                });
-              }
-              if (!hasJa) {
-                aiTracks.push({
-                  lang: '日本語 (AI 翻訳)',
-                  url: `/api/subtitles/translate?url=${encodeURIComponent(enSub.url)}&targetLang=ja`,
-                  isAi: true
-                });
-              }
-              combinedSubs = [...localSubs, ...aiTracks, ...remoteSubs];
+              const mkAi = (lang, code) => ({
+                lang,
+                url: `/api/subtitles/translate?url=${encodeURIComponent(baseSubUrl)}&referer=${encodeURIComponent(refHeader)}&targetLang=${code}`,
+                isAi: true
+              });
+              if (!hasTw) aiTracks.push(mkAi('繁體中文 (AI 翻譯)', 'zh-TW'));
+              if (!hasCn) aiTracks.push(mkAi('简体中文 (AI 翻译)', 'zh-CN'));
+              if (!hasJa) aiTracks.push(mkAi('日本語 (AI 翻訳)', 'ja'));
+              // Keep tracks that actually have a URL; embedded-only tracks ("") are labels.
+              combinedSubs = [...localSubs, ...aiTracks, ...remoteSubs.filter(s => s.url)];
+              // De-duplicate by language label so the menu is not flooded.
+              const seenLabels = new Set();
+              combinedSubs = combinedSubs.filter(s => {
+                const key = String(s.lang || '').trim();
+                if (!key || seenLabels.has(key)) return false;
+                seenLabels.add(key);
+                return true;
+              });
             }
 
             setSubtitles(combinedSubs);
 
-            // Auto-select preferred subtitle track based on active language
-            if (currentLang === 'zh-TW') {
-              const twIdx = combinedSubs.findIndex(s => isTradZh(s.lang) && !s.isAi);
-              if (twIdx !== -1) {
-                setSelectedSubIndex(twIdx);
-              } else if (localSubs.length > 0) {
-                setSelectedSubIndex(0);
-              } else {
-                const aiTwIdx = combinedSubs.findIndex(s => s.lang?.includes('繁體中文 (AI 翻譯)'));
-                if (aiTwIdx !== -1) {
-                  setSelectedSubIndex(aiTwIdx);
-                } else {
-                  const cnIdx = combinedSubs.findIndex(s => isSimpZh(s.lang));
-                  setSelectedSubIndex(cnIdx !== -1 ? cnIdx : (combinedSubs.length > 0 ? 0 : -1));
-                }
-              }
-            } else if (currentLang === 'zh-CN') {
-              const cnIdx = combinedSubs.findIndex(s => isSimpZh(s.lang) && !s.isAi);
-              if (cnIdx !== -1) {
-                setSelectedSubIndex(cnIdx);
-              } else if (localSubs.length > 0) {
-                setSelectedSubIndex(0);
-              } else {
-                const aiCnIdx = combinedSubs.findIndex(s => s.lang?.includes('简体中文 (AI 翻译)'));
-                if (aiCnIdx !== -1) {
-                  setSelectedSubIndex(aiCnIdx);
-                } else {
-                  const twIdx = combinedSubs.findIndex(s => isTradZh(s.lang));
-                  setSelectedSubIndex(twIdx !== -1 ? twIdx : (combinedSubs.length > 0 ? 0 : -1));
-                }
-              }
-            } else if (currentLang === 'ja') {
-              const jaIdx = combinedSubs.findIndex(s => isJapanese(s.lang) && !s.isAi);
-              if (jaIdx !== -1) {
-                setSelectedSubIndex(jaIdx);
-              } else if (localSubs.length > 0) {
-                setSelectedSubIndex(0);
-              } else {
-                const aiJaIdx = combinedSubs.findIndex(s => s.lang?.includes('日本語 (AI 翻訳)'));
-                if (aiJaIdx !== -1) {
-                  setSelectedSubIndex(aiJaIdx);
-                } else {
-                  setSelectedSubIndex(combinedSubs.length > 0 ? 0 : -1);
-                }
-              }
-            } else {
-              const enIdx = combinedSubs.findIndex(s => /(eng|english|\ben\b)/i.test(s.lang) && !s.isAi);
-              if (enIdx !== -1) {
-                setSelectedSubIndex(enIdx);
-              } else if (localSubs.length > 0) {
-                setSelectedSubIndex(0);
-              } else {
-                setSelectedSubIndex(combinedSubs.length > 0 ? 0 : -1);
-              }
-            }
+            // Auto-select the preferred track for the active UI language.
+            setSelectedSubIndex(preferredSubtitleIndex(combinedSubs, currentLang));
           } else {
             const rawErr = streamRes.error || streamRes.data?.error || '';
             const isAiredErr = rawErr.includes('not officially aired');
             const friendlyErr = isAiredErr
-              ? `《${displayTitle}》第 ${episode} 集目前尚未正式播映 (未發行)。`
+              ? `《${displayTitleRef.current || rawTitle}》第 ${episode} 集目前尚未正式播映 (未發行)。`
               : (rawErr || '來源端查無此集數之串流資源，您可以嘗試其他集數或欣賞官方預告片。');
             setErrorMessage(friendlyErr);
           }
@@ -681,7 +768,9 @@ export default function VideoPlayer({
 
     loadStream();
     return () => { isCancelled = true; };
-  }, [anime, episode, audioMode, displayTitle, rawTitle, currentLang, directStreamUrl, activeSource]);
+    // NOTE: displayTitle / currentLang are intentionally NOT dependencies — they change
+    // asynchronously and must never trigger a re-resolve + playback restart.
+  }, [anime?.id, episode, audioMode, rawTitle, directStreamUrl, activeSource]);
 
   // Load live uploaded episodes list
   useEffect(() => {
@@ -762,6 +851,17 @@ export default function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
     setDuration(video.duration || 0);
+    // A source/line switch keeps the playhead: seek straight back to where the user was.
+    const pending = pendingSeekRef.current;
+    if (pending && Number.isFinite(video.duration) && pending < video.duration - 2) {
+      try {
+        video.currentTime = pending;
+        setCurrentTime(pending);
+      } catch {}
+      pendingSeekRef.current = null;
+      return;
+    }
+    pendingSeekRef.current = null;
     try {
       const saved = localStorage.getItem(progressKey);
       if (saved) {
@@ -846,12 +946,26 @@ export default function VideoPlayer({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        progressive: true,
-        backBufferLength: 300,
-        maxBufferLength: 120,
-        maxMaxBufferLength: 600,
-        maxBufferSize: 128 * 1024 * 1024,
+        // Start-up oriented tuning: cap the rendition to the real element size (a 1080p
+        // stream on a 720p phone/NAS-transcoded box only adds latency), keep a compact
+        // forward buffer, and use generous but bounded retries so one slow segment does
+        // not surface as a fatal error.
+        capLevelToPlayerSize: true,
+        startLevel: -1,
+        abrEwmaDefaultEstimate: 1500000,
+        maxStarvationDelay: 4,
+        maxLoadingDelay: 4,
+        backBufferLength: 90,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120,
+        maxBufferSize: 64 * 1024 * 1024,
         enableSoftwareAES: false,
+        manifestLoadingTimeOut: 15000,
+        manifestLoadingMaxRetry: 3,
+        levelLoadingTimeOut: 15000,
+        levelLoadingMaxRetry: 3,
+        fragLoadingTimeOut: 25000,
+        fragLoadingMaxRetry: 4
       });
       hlsRef.current = hls;
 
@@ -1029,21 +1143,52 @@ export default function VideoPlayer({
     }
   }, [currentTime, isHoveringSeekbar, isScrubbing]);
 
+  // Tracks that can actually be attached to <video> (some sources list an embedded /
+  // hardcoded track with an empty URL, which would otherwise render <track src=""> and
+  // request the app HTML as if it were WebVTT).
+  const playableSubtitles = useMemo(
+    () => (Array.isArray(subtitles) ? subtitles.filter(s => s && s.url) : []),
+    [subtitles]
+  );
+
   // Synchronize active subtitle track on video element
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !video.textTracks) return;
 
+    const selected = subtitles[selectedSubIndex];
+    const targetTrackIndex = selected ? playableSubtitles.indexOf(selected) : -1;
+
     const syncTracks = () => {
       for (let i = 0; i < video.textTracks.length; i++) {
-        video.textTracks[i].mode = (i === selectedSubIndex) ? 'showing' : 'disabled';
+        video.textTracks[i].mode = (i === targetTrackIndex) ? 'showing' : 'disabled';
       }
     };
 
     syncTracks();
     const t = setTimeout(syncTracks, 400);
     return () => clearTimeout(t);
-  }, [selectedSubIndex, subtitles]);
+  }, [selectedSubIndex, subtitles, playableSubtitles]);
+
+  // Switching the UI language should re-pick the matching track instantly (the stream
+  // itself must NOT be re-resolved — that used to restart playback from scratch).
+  useEffect(() => {
+    if (!subtitles.length) return;
+    setSelectedSubIndex(prev => {
+      const next = preferredSubtitleIndex(subtitles, currentLang);
+      return next === -1 ? prev : next;
+    });
+  }, [currentLang, subtitles]);
+
+  // A subtitle file that fails to load (expired CDN link, translation timeout, ...) must
+  // fall back to another working track instead of leaving the user with silent captions.
+  const handleSubtitleTrackError = (failedUrl) => {
+    const failedIndex = subtitles.findIndex(s => s.url === failedUrl);
+    if (failedIndex === -1) return;
+    const fallbackIndex = subtitles.findIndex((s, i) => i !== failedIndex && s.url);
+    if (fallbackIndex === -1) return;
+    setSelectedSubIndex(current => (current === failedIndex ? fallbackIndex : current));
+  };
 
   // Handle local subtitle file import (.vtt / .srt / .ass / .ssa)
   const handleImportSubtitle = (e) => {
@@ -1589,6 +1734,11 @@ export default function VideoPlayer({
     errorMessage?.includes('尚未正式開播')
   );
 
+  // Floating mode geometry: default to the bottom-right corner, then follow the user's drag.
+  const miniStyle = isMini && Number.isFinite(miniPos?.x) && Number.isFinite(miniPos?.y)
+    ? { left: miniPos.x, top: miniPos.y, right: 'auto', bottom: 'auto' }
+    : undefined;
+
   return (
     <div 
       ref={containerRef}
@@ -1601,7 +1751,12 @@ export default function VideoPlayer({
         setContextMenuPos(getClampedMenuPos(e.clientX, e.clientY));
         setShowContextMenu(true);
       }}
-      className="fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden touch-manipulation w-full h-[100dvh]"
+      style={miniStyle}
+      className={
+        isMini
+          ? 'fixed right-4 bottom-4 z-[60] w-[min(26rem,92vw)] aspect-video bg-black rounded-2xl overflow-hidden shadow-[0_24px_60px_rgba(0,0,0,0.75)] ring-1 ring-white/25 select-none touch-manipulation'
+          : 'fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden touch-manipulation w-full h-[100dvh]'
+      }
     >
       {/* ─── Official Trailer (PV) Playback Mode ─── */}
       {isPlayingTrailer && hasTrailer && (
@@ -1743,17 +1898,74 @@ export default function VideoPlayer({
           onSeeked={() => setIsBuffering(false)}
           onLoadedData={() => setIsBuffering(false)}
         >
-          {subtitles.map((sub, idx) => (
+          {playableSubtitles.map((sub, idx) => (
             <track
               key={`${idx}_${sub.url}`}
               kind="subtitles"
               label={sub.lang}
               src={sub.url}
-              srcLang={sub.lang.includes('繁體') || sub.lang.includes('TW') ? 'zh-TW' : sub.lang.includes('简') ? 'zh-CN' : sub.lang.includes('日本') || sub.lang.includes('ja') ? 'ja' : 'en'}
-              default={idx === selectedSubIndex}
+              srcLang={
+                sub.lang.includes('繁體') || sub.lang.includes('TW') || sub.lang.includes('繁中')
+                  ? 'zh-TW'
+                  : sub.lang.includes('简') || sub.lang.includes('简中')
+                  ? 'zh-CN'
+                  : sub.lang.includes('日本') || /\bja\b/i.test(sub.lang)
+                  ? 'ja'
+                  : 'en'
+              }
+              default={sub === subtitles[selectedSubIndex]}
+              onError={() => handleSubtitleTrackError(sub.url)}
             />
           ))}
         </video>
+      )}
+
+      {/* ─── Floating (mini) player chrome ─────────────────────── */}
+      {isMini && (
+        <div
+          onPointerDown={handleMiniPointerDown}
+          className="absolute inset-x-0 top-0 z-40 flex items-center gap-1 px-2 py-1.5 bg-gradient-to-b from-black/90 via-black/60 to-transparent cursor-move"
+        >
+          <span className="flex-1 min-w-0 truncate text-[10px] sm:text-[11px] font-bold text-white/90 select-none">
+            {displayTitle} · EP {episode}
+          </span>
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={togglePlay}
+            className="p-1 rounded-lg bg-white/10 hover:bg-white/25 text-white transition-colors"
+            title={isPlaying ? '暫停' : '播放'}
+          >
+            {isPlaying ? <Pause className="w-3.5 h-3.5 fill-white" /> : <Play className="w-3.5 h-3.5 fill-white" />}
+          </button>
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={togglePictureInPicture}
+            className="p-1 rounded-lg bg-white/10 hover:bg-white/25 text-white transition-colors"
+            title="子母畫面 (Picture-in-Picture)"
+          >
+            <PictureInPicture2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={toggleMiniPlayer}
+            className="p-1 rounded-lg bg-white/10 hover:bg-white/25 text-white transition-colors"
+            title="放大播放器 (Restore)"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={onClose}
+            className="p-1 rounded-lg bg-[#E50914]/90 hover:bg-[#E50914] text-white transition-colors"
+            title="關閉 (Close)"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       )}
 
       {/* Touch Double-Tap Seek Ripple Overlay */}
@@ -2341,8 +2553,10 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Netflix Controls Overlay */}
-      <div className={`absolute inset-0 flex flex-col justify-between transition-opacity duration-300 ${
+      {/* Netflix Controls Overlay (hidden while floating — a compact bar takes over) */}
+      <div className={`${
+        isMini ? 'hidden' : 'absolute inset-0 flex flex-col justify-between transition-opacity duration-300'
+      } ${
         showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}>
         {/* Top Header Bar */}
@@ -2361,6 +2575,22 @@ export default function VideoPlayer({
               title={`${t('close')} (Esc)`}
             >
               <X className="w-5 h-5 sm:w-6 sm:h-6" />
+            </button>
+
+            {/* Floating mini player / native PiP */}
+            <button
+              onClick={toggleMiniPlayer}
+              className="hidden sm:flex p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-white transition-colors shrink-0"
+              title="浮動迷你播放器 (Floating player)"
+            >
+              <Minimize2 className="w-5 h-5 sm:w-5 sm:h-5" />
+            </button>
+            <button
+              onClick={togglePictureInPicture}
+              className="hidden sm:flex p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-white transition-colors shrink-0"
+              title="子母畫面 (Picture-in-Picture)"
+            >
+              <PictureInPicture2 className="w-5 h-5 sm:w-5 sm:h-5" />
             </button>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
@@ -2707,9 +2937,11 @@ export default function VideoPlayer({
 
                 {showSourceMenu && (
                   <div className="absolute bottom-9 right-0 bg-[#1f1f1f] border border-zinc-700 rounded-xl py-1.5 shadow-2xl z-50 min-w-[190px] animate-in fade-in zoom-in-95 backdrop-blur-xl">
-                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-800/80 flex items-center justify-between">
+                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-800/80 flex items-center justify-between gap-2">
                       <span>播放線路來源</span>
-                      <span className="text-[9px] text-zinc-500 font-mono">Source</span>
+                      <span className="text-[9px] text-zinc-500 font-mono truncate">
+                        {resolvedSource ? `現在: ${resolvedSource}` : 'Source'}
+                      </span>
                     </div>
                     {[
                       { id: 'auto', label: '自動線路 (Auto Failover)', badge: '推薦' },
@@ -2836,6 +3068,13 @@ export default function VideoPlayer({
                       {selectedSubIndex === -1 && <Check className="w-3.5 h-3.5" />}
                     </button>
 
+                    {subtitles.length === 0 && (
+                      <div className="px-3 py-2 text-[11px] leading-relaxed text-amber-300/90 border-b border-zinc-800/80">
+                        此線路沒有可用的字幕軌道。<br />
+                        請切換播放線路，或使用下方「匯入字幕」載入 .vtt / .srt / .ass 檔案。
+                      </div>
+                    )}
+
                     {/* Available Subtitle Tracks */}
                     <div className="max-h-48 overflow-y-auto custom-scrollbar">
                       {subtitles.map((s, idx) => {
@@ -2848,8 +3087,9 @@ export default function VideoPlayer({
                         return (
                           <button
                             key={idx}
+                            disabled={!s.url}
                             onClick={() => { setSelectedSubIndex(idx); setShowSubtitlesMenu(false); }}
-                            className={`w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center justify-between gap-2 ${
+                            className={`w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center justify-between gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${
                               selectedSubIndex === idx ? 'text-[#E50914] font-bold bg-zinc-800' : 'text-zinc-300 hover:bg-zinc-800/60'
                             }`}
                           >

@@ -8,10 +8,33 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="description" content="AniFlix - Cinematic anime streaming, batch downloader and NAS media server" />
     <title>AniFlix - Anime Streaming & Downloader</title>
+    <!-- Warm the CDNs used for artwork while the app bundle is being parsed (cuts the
+         render-delay portion of LCP and the first cover image request). -->
+    <link rel="preconnect" href="https://s4.anilist.co" crossorigin />
+    <link rel="dns-prefetch" href="https://s4.anilist.co" />
+    <link rel="preconnect" href="https://img.youtube.com" crossorigin />
+    <style>
+      /* Critical inline CSS: paints the app shell immediately instead of a white flash
+         while the JS bundle downloads and evaluates. */
+      html, body { margin: 0; background: #12111a; color: #fff; }
+      #root { min-height: 100vh; }
+      .ani-boot { display: flex; min-height: 100vh; align-items: center; justify-content: center; flex-direction: column; gap: 14px; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+      .ani-boot__logo { font-weight: 900; letter-spacing: -0.04em; font-size: 34px; color: #E50914; }
+      .ani-boot__bar { width: 168px; height: 3px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden; }
+      .ani-boot__bar::after { content: ''; display: block; width: 40%; height: 100%; border-radius: 999px; background: #E50914; animation: ani-boot-slide 1.1s ease-in-out infinite; }
+      @keyframes ani-boot-slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(320%); } }
+      @media (prefers-reduced-motion: reduce) { .ani-boot__bar::after { animation: none; width: 100%; opacity: .5; } }
+    </style>
   </head>
   <body class="bg-[#12111a] text-white antialiased selection:bg-[#E50914] selection:text-white">
-    <div id="root"></div>
+    <div id="root">
+      <div class="ani-boot" role="status" aria-live="polite" aria-label="Loading AniFlix">
+        <div class="ani-boot__logo">ANIFLIX</div>
+        <div class="ani-boot__bar"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

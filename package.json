@@ -1,6 +1,6 @@
 {
   "name": "aniflix",
-  "version": "2.5.2",
+  "version": "2.6.0",
   "type": "module",
   "description": "Netflix-style GUI and Batch Downloader for ani-cli",
   "author": "AniFlix Team<aniflix@gmail.com>",
@@ -20,6 +20,7 @@
     "dev:client": "vite",
     "build": "vite build",
     "start": "node server/index.js",
+    "verify:server": "node scripts/verify-fixes.mjs",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "desktop:start": "electron electron/main.cjs",
     "desktop:build": "npm run build && electron-builder --publish always",

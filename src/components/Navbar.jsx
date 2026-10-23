@@ -32,6 +32,7 @@ function Navbar({
   onOpenSettings,
   onOpenUserProfile,
   currentUser,
+  onOpenAnime = () => {},
   activeTab,
   setActiveTab,
   favoritesCount = 0,
@@ -57,6 +58,58 @@ function Navbar({
   });
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false);
   const searchContainerRef = useRef(null);
+
+  // Live typeahead: real anime matches (Japanese / English / Chinese / short names).
+  const [suggestions, setSuggestions] = useState([]);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(-1);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    setActiveSuggestion(-1);
+    if (!q) {
+      setSuggestions([]);
+      setIsLoadingSuggestions(false);
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingSuggestions(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search/suggest?q=${encodeURIComponent(q)}&limit=8`);
+        const data = await res.json();
+        if (!cancelled) setSuggestions(Array.isArray(data?.data) ? data.data : []);
+      } catch {
+        if (!cancelled) setSuggestions([]);
+      } finally {
+        if (!cancelled) setIsLoadingSuggestions(false);
+      }
+    }, 220);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
+  const animeDisplayTitle = (anime) => (
+    anime?.titleZhTW || anime?.titleZh || anime?.titleZhCN ||
+    anime?.title?.chinese || anime?.title?.english || anime?.title?.romaji || anime?.title?.native || ''
+  );
+
+  const animeAltTitle = (anime) => {
+    const primary = animeDisplayTitle(anime);
+    const pool = [anime?.title?.romaji, anime?.title?.english, anime?.title?.native];
+    return pool.find(t => t && t !== primary) || '';
+  };
+
+  const handleSelectSuggestion = (anime) => {
+    if (!anime) return;
+    const title = animeDisplayTitle(anime);
+    if (title) saveToHistory(title);
+    setShowHistoryDropdown(false);
+    setActiveSuggestion(-1);
+    onOpenAnime(anime);
+  };
 
   // Notification center state
   const [notifications, setNotifications] = useState(() => getStoredNotifications());
@@ -140,9 +193,32 @@ function Navbar({
   }, [searchQuery]);
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && searchQuery.trim()) {
-      saveToHistory(searchQuery);
+    if (e.key === 'ArrowDown' && suggestions.length > 0) {
+      e.preventDefault();
+      setShowHistoryDropdown(true);
+      setActiveSuggestion(prev => (prev + 1) % suggestions.length);
+      return;
+    }
+    if (e.key === 'ArrowUp' && suggestions.length > 0) {
+      e.preventDefault();
+      setActiveSuggestion(prev => (prev - 1 + suggestions.length) % suggestions.length);
+      return;
+    }
+    if (e.key === 'Escape') {
       setShowHistoryDropdown(false);
+      setActiveSuggestion(-1);
+      return;
+    }
+    if (e.key === 'Enter') {
+      if (activeSuggestion >= 0 && suggestions[activeSuggestion]) {
+        e.preventDefault();
+        handleSelectSuggestion(suggestions[activeSuggestion]);
+        return;
+      }
+      if (searchQuery.trim()) {
+        saveToHistory(searchQuery);
+        setShowHistoryDropdown(false);
+      }
     }
   };
 
@@ -438,6 +514,60 @@ function Navbar({
           {/* Search History & Trending Suggestions Dropdown */}
           {showHistoryDropdown && (
             <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-[#16161a]/98 border border-white/[0.12] rounded-2xl shadow-[0_25px_50px_rgba(0,0,0,0.8)] backdrop-blur-2xl overflow-hidden z-50 p-2.5 animate-in fade-in zoom-in-95">
+              {/* Live anime suggestions: real matches for Japanese / English / short names */}
+              {searchQuery.trim() && (
+                <div className="mb-2 pb-2 border-b border-white/[0.08]">
+                  <div className="flex items-center justify-between px-2.5 py-1 text-[11px]">
+                    <span className="flex items-center gap-1.5 font-bold text-zinc-300">
+                      <Sparkles className="w-3.5 h-3.5 text-[#E50914]" />
+                      {isLoadingSuggestions ? '搜尋動漫中…' : '動漫建議'}
+                    </span>
+                    <span className="text-zinc-500">↑↓ 選擇 · Enter 開啟</span>
+                  </div>
+                  {suggestions.length > 0 ? (
+                    <div className="max-h-72 overflow-y-auto custom-scrollbar">
+                      {suggestions.map((anime, idx) => {
+                        const cover = anime?.coverImage?.large || anime?.coverImage?.medium || anime?.coverImage?.extraLarge;
+                        const alt = animeAltTitle(anime);
+                        const meta = [anime?.format, anime?.seasonYear, anime?.episodes ? `${anime.episodes} 集` : null]
+                          .filter(Boolean).join(' · ');
+                        return (
+                          <button
+                            key={anime?.id || idx}
+                            type="button"
+                            onMouseEnter={() => setActiveSuggestion(idx)}
+                            onClick={() => handleSelectSuggestion(anime)}
+                            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-left transition-colors ${
+                              activeSuggestion === idx ? 'bg-white/[0.12]' : 'hover:bg-white/[0.07]'
+                            }`}
+                          >
+                            <div className="w-8 h-11 rounded-md overflow-hidden bg-zinc-800 shrink-0">
+                              {cover ? (
+                                <img src={cover} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                              ) : null}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-xs font-semibold text-white">{animeDisplayTitle(anime) || alt}</div>
+                              <div className="truncate text-[10px] text-zinc-400">
+                                {alt && alt !== animeDisplayTitle(anime) ? alt : ''}
+                                {alt && meta ? ' · ' : ''}
+                                {meta}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    !isLoadingSuggestions && (
+                      <div className="px-2.5 py-2 text-xs text-zinc-500">
+                        沒有相符的動漫，仍可按下 Enter 搜尋完整目錄
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+
               {/* Recent Searches Section */}
               {matchingHistory.length > 0 ? (
                 <>

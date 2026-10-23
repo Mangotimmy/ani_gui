@@ -439,6 +439,15 @@ export async function searchAnime(keyword, page = 1, perPage = 50) {
     }
   }
 
+  // AniList unreachable / rate limited: never return an empty screen when we already
+  // have matching catalogue data cached locally.
+  if (results.length === 0) {
+    const local = fallbackSearchFromCache(cleanKeyword, perPage);
+    if (local.length > 0) {
+      return local;
+    }
+  }
+
   // If results are sparse and keyword contains Chinese characters, resolve via Bangumi
   const hasChinese = /[\u4e00-\u9fa5]/.test(cleanKeyword);
   if (results.length < 3 && hasChinese) {
@@ -502,6 +511,205 @@ export async function searchAnime(keyword, page = 1, perPage = 50) {
   if (enriched && enriched.length > 0) {
     searchCache.set(cacheKey, enriched);
     setCachedSearch(cacheKey, enriched);
+  }
+  return enriched;
+}
+
+// ---------------------------------------------------------------------------
+// Search typeahead / "smart" suggestions (Google-style hints)
+// Handles Japanese, English and Chinese titles plus short names ("aot", "jjk",
+// "sao 3") by expanding aliases and ranking every candidate title it can see.
+// ---------------------------------------------------------------------------
+const SUGGEST_FIELDS = `
+  id
+  title { english romaji native }
+  coverImage { large color }
+  format
+  seasonYear
+  episodes
+  status
+  isAdult
+`;
+
+const suggestCache = new BoundedCache(600, 10 * 60 * 1000);
+
+function suggestScore(query, media) {
+  const q = normalizeSuggestText(query);
+  if (!q) return 0;
+  const titles = [
+    media?.title?.romaji,
+    media?.title?.english,
+    media?.title?.native,
+    media?.titleZhTW,
+    media?.titleZhCN
+  ].filter(Boolean).map(normalizeSuggestText);
+
+  let best = 0;
+  for (const t of titles) {
+    if (!t) continue;
+    if (t === q) best = Math.max(best, 120);
+    else if (t.startsWith(q)) best = Math.max(best, 100 - Math.min(t.length - q.length, 30));
+    else if (t.includes(q)) best = Math.max(best, 80 - Math.min(t.length - q.length, 30));
+    else {
+      const qTokens = new Set(q.split(' ').filter(w => w.length > 1));
+      const tTokens = new Set(t.split(' ').filter(w => w.length > 1));
+      if (qTokens.size && tTokens.size) {
+        let common = 0;
+        for (const tok of qTokens) if (tTokens.has(tok)) common++;
+        if (common > 0) best = Math.max(best, (common / qTokens.size) * 60);
+      }
+    }
+  }
+  // Mild preference for popular / already finished shows and real series over OVAs.
+  if (media?.averageScore) best += Math.min(media.averageScore, 100) / 100;
+  if (media?.status === 'RELEASED') best += 2;
+  return best;
+}
+
+function normalizeSuggestText(str) {
+  return String(str || '')
+    .toLowerCase()
+    .normalize('NFKC')
+    .replace(/[!！?？:：;；,，.。・·'"“”‘’「」『』\[\](){}<>《》\-–—_/\\|+]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Local fallback index: whenever AniList is rate-limited / unreachable / slow we still
+// answer from the catalogue data already in memory, so the search bar never goes blank.
+function localCandidatePool() {
+  const pool = new Map();
+  const collect = (list) => {
+    if (Array.isArray(list)) {
+      for (const item of list) {
+        if (item && item.id !== undefined && item.id !== null) pool.set(item.id, item);
+      }
+    }
+  };
+  try { for (const [, value] of metadataListCache.entries()) collect(value); } catch {}
+  try { for (const [, value] of searchCache.entries()) collect(value); } catch {}
+  return Array.from(pool.values());
+}
+
+function fallbackSearchFromCache(query, limit = 8) {
+  const pool = localCandidatePool();
+  if (pool.length === 0) return [];
+  return pool
+    .map(media => ({ media, score: suggestScore(query, media) }))
+    .filter(entry => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(entry => entry.media);
+}
+
+function uniqueByProperty(list, keyFn) {
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    const key = keyFn(item);
+    if (key === undefined || key === null || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+export async function getSearchSuggestions(rawQuery, limit = 8) {
+  const query = String(rawQuery || '').trim();
+  if (!query) return [];
+  const cacheKey = `suggest_${query.toLowerCase()}_${limit}`;
+  const cached = suggestCache.get(cacheKey);
+  if (cached) return cached;
+
+  // 1. Build every alias / expansion we know about for this query.
+  const candidates = [query];
+  const alias = lookupAlias(normalizeSuggestText(query));
+  if (alias) {
+    candidates.push(alias.canonical, alias.romaji, alias.chinese);
+  }
+  try {
+    const smart = expandSmartQuery(query);
+    candidates.push(...(smart.queries || []));
+  } catch {}
+
+  // Seasonal suffixes and punctuation hurt AniList's prefix matcher.
+  const stripped = query
+    .replace(/(season\s*\d+|part\s*\d+|第[一二三四五六七八九十\d]+[季期]|\d+(st|nd|rd|th)\s*season)/gi, '')
+    .replace(/[!！?？:：\-–—]+$/g, '')
+    .trim();
+  if (stripped && stripped !== query) candidates.push(stripped);
+  if (/[\u3040-\u30ff]/.test(query)) {
+    // Kana-only queries: also try the katakana/hiragana counterpart.
+    const toKatakana = query.replace(/[\u3041-\u3096]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0x60));
+    if (toKatakana !== query) candidates.push(toKatakana);
+  }
+
+  const queryList = Array.from(new Set(candidates.map(c => (c || '').trim()).filter(Boolean))).slice(0, 5);
+
+  const gql = `query ($search: String, $perPage: Int) {
+    Page(page: 1, perPage: $perPage) {
+      media(search: $search, sort: SEARCH_MATCH, type: ANIME) {
+        ${SUGGEST_FIELDS}
+        averageScore
+      }
+    }
+  }`;
+
+  // Collect every candidate result, scoring against BOTH the raw query and the expanded
+  // alias text. Scoring only against the raw query dropped perfectly good matches for
+  // short names such as "jjk" or "aot" (the title never contains the abbreviation).
+  const collected = new Map();
+  for (let qi = 0; qi < queryList.length; qi++) {
+    const candidate = queryList[qi];
+    const data = await anilistQuery(gql, { search: candidate, perPage: Math.max(limit, 6) });
+    const media = data?.Page?.media || [];
+    for (const item of media) {
+      if (!item || item.id === undefined || item.id === null) continue;
+      const score = Math.max(suggestScore(query, item), suggestScore(candidate, item)) - qi * 0.75;
+      const existing = collected.get(item.id);
+      if (!existing || score > existing.score) {
+        collected.set(item.id, { media: item, score });
+      }
+    }
+    // Typeahead must stay cheap: if the literal query already produced enough matches
+    // there is no reason to fan out to alias variants (that burst is what used to trip
+    // the AniList rate limiter while the user was still typing).
+    if (qi === 0 && collected.size >= limit) break;
+    if (collected.size >= limit * 3) break;
+  }
+
+  let ranked = Array.from(collected.values())
+    .sort((a, b) => b.score - a.score)
+    .map(entry => ({ ...entry.media, _score: entry.score }))
+    .filter(m => Number.isFinite(m._score) && m._score > -100);
+
+  // 2a. Offline / rate-limited: answer from the catalogue already held in memory.
+  if (ranked.length === 0) {
+    const local = fallbackSearchFromCache(query, limit);
+    if (local.length > 0) ranked = local.map(m => ({ ...m, _score: 1 }));
+  }
+
+  // 2b. Still nothing: fall back to the local alias record.
+  if (ranked.length === 0 && alias) {
+    ranked = [{
+      id: alias.anilistId || alias.id || null,
+      title: { romaji: alias.romaji || alias.canonical, english: alias.canonical, native: null },
+      titleZhTW: alias.chinese || null,
+      coverImage: null,
+      _score: 10
+    }];
+  }
+
+  const top = ranked.slice(0, limit).map(({ _score, ...rest }) => rest);
+
+  // Attach cached Chinese titles so the typeahead reads the same in every UI language.
+  let enriched = top;
+  try {
+    enriched = enrichWithChineseTitles(top);
+  } catch {}
+
+  if (enriched.length > 0) {
+    suggestCache.set(cacheKey, enriched);
   }
   return enriched;
 }

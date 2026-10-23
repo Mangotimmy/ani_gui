@@ -1,7 +1,8 @@
 // server/services/proxy.js - High-performance HLS & Subtitle Streaming Proxy with Disk Caching
 import fs from 'fs';
-import { Readable, PassThrough } from 'stream';
+import { Readable } from 'stream';
 import { mediaCache } from './mediaCache.js';
+import { prefetchFromPlaylistText } from './segmentPrefetcher.js';
 
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const DEFAULT_REFERER = 'https://zokoanime.video/';
@@ -68,17 +69,27 @@ export async function handleProxyStream(req, res) {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Accept');
-        res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges, X-Cache-Status');
         const isFmp4 = targetUrl.includes('.mp4') || targetUrl.includes('.m4s');
         res.setHeader('Content-Type', isFmp4 ? 'video/mp4' : 'video/mp2t');
         res.setHeader('Accept-Ranges', 'bytes');
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         res.setHeader('X-Cache-Status', 'HIT');
 
+        if (req.method === 'HEAD') {
+          res.status(200).setHeader('Content-Length', cached.size);
+          return res.end();
+        }
+
         if (req.headers.range) {
-          const parts = req.headers.range.replace(/bytes=/, '').split('-');
-          const start = parseInt(parts[0], 10);
-          const end = parts[1] ? parseInt(parts[1], 10) : cached.size - 1;
+          const parts = String(req.headers.range).replace(/bytes=/, '').split('-');
+          const start = Math.max(0, parseInt(parts[0], 10) || 0);
+          let end = parts[1] ? parseInt(parts[1], 10) : cached.size - 1;
+          if (!Number.isFinite(end) || end >= cached.size) end = cached.size - 1;
+          if (start >= cached.size) {
+            res.status(416).setHeader('Content-Range', `bytes */${cached.size}`);
+            return res.end();
+          }
           res.status(206);
           res.setHeader('Content-Range', `bytes ${start}-${end}/${cached.size}`);
           res.setHeader('Content-Length', end - start + 1);
@@ -137,6 +148,17 @@ export async function handleProxyStream(req, res) {
       const text = await upstreamRes.text();
       const rewritten = rewriteM3U8(text, effectiveUrl, referer);
 
+      // Warm the disk cache ahead of the player: the first segments of the selected
+      // variant are downloaded in the background while the browser parses the playlist,
+      // which removes the cold-start stall on every episode/seek.
+      if (!req.query.noPrecache) {
+        const cookies = req.query.cookies ? String(req.query.cookies) : undefined;
+        const prefetchLimit = Math.max(1, Math.min(Number(process.env.ANIFLIX_PREFETCH_SEGMENTS || 6), 20));
+        setTimeout(() => {
+          prefetchFromPlaylistText(text, effectiveUrl, { referer, cookies, limit: prefetchLimit }).catch(() => {});
+        }, 0);
+      }
+
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       return res.status(upstreamRes.status).send(rewritten);
@@ -171,8 +193,18 @@ export async function handleProxyStream(req, res) {
     res.status(upstreamRes.status);
 
     // Stream and cache segment simultaneously (only cache complete 200 OK responses, not 206 Partial Content)
+    if (req.method === 'HEAD') {
+      req.on('close', () => { try { upstreamRes.body?.cancel?.(); } catch {} });
+      return res.end();
+    }
+
     const nodeStream = Readable.fromWeb(upstreamRes.body);
-    const shouldCache = upstreamRes.status === 200 && !req.headers.range && !targetUrl.includes('.mp4');
+    // Cache every complete 200 asset (TS, fMP4, MP4) — previously .mp4 was excluded so
+    // the replayed/downloaded video was re-fetched from the CDN on every single watch.
+    const upstreamLength = Number(contentLength || 0);
+    const tooLargeToCache = upstreamLength > mediaCache.maxSingleFileBytes;
+    const shouldCache = upstreamRes.status === 200 && !req.headers.range &&
+                        !targetUrl.includes('.m3u8') && !targetUrl.includes('.vtt') && !tooLargeToCache;
 
     if (shouldCache) {
       const cacheFilePath = mediaCache.getSegmentPath(targetUrl);
@@ -257,7 +289,9 @@ export async function handleProxyImage(req, res) {
       return fs.createReadStream(cached.filePath).pipe(res);
     }
 
-    // 2. Fetch upstream
+    // 2. Fetch upstream and stream it through while teeing to the disk cache.
+    // Previously the whole image had to download before the first byte reached the
+    // browser, which delayed the hero backdrop (the LCP element) on first view.
     const upstreamRes = await fetch(targetUrl, {
       headers: {
         'User-Agent': DEFAULT_USER_AGENT,
@@ -270,18 +304,50 @@ export async function handleProxyImage(req, res) {
     }
 
     const contentType = upstreamRes.headers.get('content-type') || 'image/jpeg';
-    const arrayBuffer = await upstreamRes.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    // Save to disk cache
-    mediaCache.saveImage(targetUrl, buffer, contentType);
+    const upstreamLength = Number(upstreamRes.headers.get('content-length') || 0);
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Length', buffer.length);
     res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
     res.setHeader('X-Cache-Status', 'MISS');
-    return res.send(buffer);
+    if (upstreamLength > 0) res.setHeader('Content-Length', upstreamLength);
+
+    if (!upstreamRes.body) return res.end();
+
+    const nodeStream = Readable.fromWeb(upstreamRes.body);
+    const tempPath = `${mediaCache.getImagePath(targetUrl)}.${process.pid}.${Date.now()}.tmp`;
+    const fileStream = fs.createWriteStream(tempPath);
+    let aborted = false;
+
+    nodeStream.on('error', () => {
+      aborted = true;
+      try { fileStream.destroy(); } catch {}
+      try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
+      if (!res.headersSent) res.status(502).end();
+    });
+
+    req.on('close', () => {
+      if (!res.writableEnded) {
+        aborted = true;
+        nodeStream.destroy();
+        try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
+      }
+    });
+
+    fileStream.on('error', () => {
+      aborted = true;
+      try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
+    });
+
+    fileStream.on('finish', () => {
+      if (aborted) return;
+      mediaCache.commitImageTemp(targetUrl, tempPath, contentType);
+    });
+
+    nodeStream.pipe(fileStream);
+    nodeStream.on('end', () => { try { fileStream.end(); } catch {} });
+
+    return nodeStream.pipe(res);
 
   } catch (err) {
     console.warn(`[ProxyImage] Failed for ${targetUrl}:`, err.message);

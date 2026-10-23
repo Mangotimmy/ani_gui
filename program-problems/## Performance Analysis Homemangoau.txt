@@ -1,0 +1,36 @@
+## Performance Analysis: Homemangoau (Synology.me)
+
+**Context**
+Technical analysis of the landing page at `https://me.homemangoau.synology.me/` focusing on Core Web Vitals (LCP, INP, CLS) and main thread bottlenecks during initial load.
+
+**Diagnostics**
+The session identified a Largest Contentful Paint (LCP) of **1,839 ms**. The LCP element was identified as `img.w-full.h-full.object-cover.object-center`.
+
+| Metric Component | Duration | % of LCP |
+| :--- | :--- | :--- |
+| Time to First Byte (TTFB) | 216 ms | 11.8% |
+| Resource Load Delay | 1,108 ms | 60.3% |
+| Resource Load Duration | 11 ms | 0.6% |
+| Element Render Delay | 503 ms | 27.4% |
+
+**Actionable Findings**
+*   **LCP Resource Discovery:** The image suffers from a significant load delay (1,108 ms). While the resource is present in the initial document, it is not requested promptly, indicating dependency on client-side script execution from `vendor-B3N8iKBC.js`.
+*   **Main Thread Blockage:** Heavy script evaluation and compilation (`vendor-B3N8iKBC.js` and `index-0K6IGNdk.js`) consume over **460 ms**.
+*   **Layout Inefficiency:** Rendering is delayed by expensive "Layout" tasks, one of which lasted **213 ms**. This suggests a complex DOM or inefficient CSS selectors impacting the render path.
+*   **Extension Interference:** Third-party browser extensions (e.g., Google Input Tools, Webpage to PDF Converter) added over **100 ms** of main thread activity during the critical path.
+
+**Actionable Recommendations**
+The following optimizations were identified as potential fixes to improve LCP and main thread responsiveness:
+
+*   **Preload LCP Image:** To eliminate the 1,108 ms load delay, implement a preload link in the document `<head>`.
+
+`````html
+<!-- Example: Place in the <head> to prioritize the LCP resource -->
+<link rel="preload" as="image" href="/api/proxy/image?url=..." fetchpriority="high">
+`````
+
+*   **Task Splitting:** Break up long JavaScript tasks in `vendor` and `index` bundles using `requestIdleCallback` or asynchronous chunking to allow the browser to prioritize Layout and Paint operations.
+*   **DOM/CSS Optimization:** Reduce DOM depth and simplify CSS selectors to lower the execution time of the `Recalculate Style` and `Layout` phases, which currently exceed 200 ms.
+*   **Environment Isolation:** Perform further performance audits in Incognito mode to remove the significant overhead caused by active browser extensions.
+
+*Note: The code fixes and findings above were identified on a live page in DevTools. When applying them to your codebase, please adapt them to your project's specific technical stack (e.g., Tailwind CSS classes, CSS modules, framework components) rather than applying them as literal CSS overrides.*

@@ -14,6 +14,13 @@ let appSettings = {
 try {
   const userDataDir = app.getPath('userData');
   process.env.ANIFLIX_USER_DATA = userDataDir;
+  // All server-side persistence (SQLite DB, user profiles, media/subtitle cache) must live
+  // in the writable userData folder. Without this the packaged app resolved paths against
+  // the install directory / read-only asar, so user sync failed and every replay missed
+  // the cache.
+  if (!process.env.ANIFLIX_DATA_DIR) {
+    process.env.ANIFLIX_DATA_DIR = userDataDir;
+  }
   const settingsPath = path.join(userDataDir, 'settings.json');
   const fallbackPath = path.join(__dirname, '..', 'server', 'data', 'settings.json');
 

@@ -63,6 +63,12 @@ class DownloadManager {
     });
   }
 
+  removeSubscriber(res) {
+    try {
+      this.listeners.delete(res);
+    } catch {}
+  }
+
   broadcast(event) {
     const payload = `data: ${JSON.stringify(event)}\n\n`;
     for (const res of this.listeners) {
