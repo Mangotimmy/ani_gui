@@ -1,8 +1,11 @@
 // metadata.js - AniList GraphQL API metadata provider
 import './dnsFallback.js';
+import fs from 'node:fs';
+import path from 'node:path';
 import * as OpenCC from 'opencc-js';
-import { enrichWithChineseTitles, enrichWithChineseTitlesAsync, resolveTitleZh, setMachineTranslator } from './chineseTitleService.js';
+import { enrichWithChineseTitles, enrichWithChineseTitlesAsync, resolveTitleZh, setMachineTranslator, getCachedTitleEntry } from './chineseTitleService.js';
 import { BoundedCache } from './cache.js';
+import { DATA_DIR } from './paths.js';
 import { lookupAlias, getCachedSearch, setCachedSearch } from './db.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
@@ -796,8 +799,143 @@ export function getCurrentSeasonInfo() {
   };
 }
 
+// ---------------------------------------------------------------------------
+// "Most popular" shelf (all-time popularity, not the airing buzz of TRENDING_DESC)
+// ---------------------------------------------------------------------------
+export async function getPopularNow(page = 1, perPage = 50) {
+  const cacheKey = `popularNow_${page}_${perPage}`;
+  const cached = metadataListCache.get(cacheKey);
+  if (cached) return cached;
+
+  const query = `
+    query ($page: Int, $perPage: Int) {
+      Page(page: $page, perPage: $perPage) {
+        media(sort: [POPULARITY_DESC], type: ANIME) {
+          ${MEDIA_FIELDS}
+        }
+      }
+    }
+  `;
+  const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
+  const result = await enrichWithChineseTitlesAsync(data?.Page?.media || [], { budgetMs: 2500 });
+  if (result && result.length > 0) metadataListCache.set(cacheKey, result);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Catalog year availability: future years are only shown when they have releases.
+// ---------------------------------------------------------------------------
+const availableYearsCache = new BoundedCache(8, 24 * 60 * 60 * 1000);
+
+export async function getAvailableCatalogYears() {
+  const cached = availableYearsCache.get('years');
+  if (cached) return cached;
+
+  const currentYear = new Date().getFullYear();
+  const future = [];
+  const probe = `query ($y: Int) { Page(page: 1, perPage: 1) { pageInfo { total } media(seasonYear: $y, type: ANIME) { id } } }`;
+
+  for (let year = currentYear + 1; year <= currentYear + 3; year++) {
+    const data = await anilistQuery(probe, { y: year });
+    const total = Number(data?.Page?.pageInfo?.total || 0);
+    if (total > 0) future.push({ year, total });
+  }
+
+  const result = { currentYear, future };
+  availableYearsCache.set('years', result, future.length > 0 ? undefined : 6 * 60 * 60 * 1000);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Cached Chinese titles for a list of AniList ids (client-side progressive patch)
+// ---------------------------------------------------------------------------
+export function getCachedTitlesForIds(ids = []) {
+  const out = {};
+  for (const id of (Array.isArray(ids) ? ids : []).slice(0, 200)) {
+    const entry = getCachedTitleEntry(id);
+    if (entry && (entry.titleZhTW || entry.titleZhCN)) {
+      out[String(id)] = entry;
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Recently aired episodes for the user's favorites (notification feed)
+// ---------------------------------------------------------------------------
+const airingNotificationCache = new BoundedCache(200, 10 * 60 * 1000);
+
+export async function getAiringNotifications(mediaIds = [], hours = 48) {
+  const ids = Array.from(new Set(
+    (Array.isArray(mediaIds) ? mediaIds : [])
+      .map(id => parseInt(id, 10))
+      .filter(id => Number.isFinite(id) && id > 0)
+  )).slice(0, 100);
+
+  if (ids.length === 0) return [];
+
+  const safeHours = Math.min(Math.max(parseInt(hours, 10) || 48, 1), 168);
+  const cacheKey = `${ids.slice().sort((a, b) => a - b).join(',')}_${safeHours}`;
+  const cached = airingNotificationCache.get(cacheKey);
+  if (cached) return cached;
+
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - safeHours * 3600;
+  const end = now + 3600;
+
+  const query = `
+    query ($ids: [Int], $start: Int, $end: Int, $page: Int) {
+      Page(page: $page, perPage: 50) {
+        pageInfo { hasNextPage }
+        airingSchedules(mediaId_in: $ids, airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
+          episode
+          airingAt
+          media { ${MEDIA_FIELDS} }
+        }
+      }
+    }
+  `;
+
+  const rows = [];
+  for (let page = 1; page <= 3; page++) {
+    const data = await anilistQuery(query, { ids, start, end, page });
+    const items = data?.Page?.airingSchedules || [];
+    rows.push(...items);
+    if (!data?.Page?.pageInfo?.hasNextPage) break;
+  }
+
+  const seen = new Set();
+  const deduped = [];
+  for (const row of rows.sort((a, b) => b.airingAt - a.airingAt)) {
+    if (!row?.media?.id || !row?.episode) continue;
+    const key = `${row.media.id}-ep${row.episode}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(row);
+  }
+
+  let enriched = [];
+  try {
+    enriched = await enrichWithChineseTitlesAsync(deduped.map(r => r.media), { budgetMs: 2500 });
+  } catch {
+    enriched = deduped.map(r => r.media);
+  }
+
+  const result = deduped.map((row, index) => ({
+    animeId: row.media.id,
+    episode: row.episode,
+    airingAt: row.airingAt,
+    media: enriched[index] || row.media
+  }));
+
+  if (result.length > 0) airingNotificationCache.set(cacheKey, result);
+  return result;
+}
+
 export async function getCatalog({
   year = new Date().getFullYear(),
+  yearFrom = null,
+  yearTo = null,
   season = null,
   sort = 'POPULARITY_DESC',
   page = 1,
@@ -855,7 +993,15 @@ export async function getCatalog({
     }
   }
 
-  if (year && year !== 'ALL') {
+  // Decade mode uses a real date range (startDate_greater/lesser) instead of a single
+  // seasonYear, so "1970s" means 1970-01-01 .. 1979-12-31 rather than just 1975.
+  const rangeFrom = Number(yearFrom) || null;
+  const rangeTo = Number(yearTo) || null;
+  const hasRange = Boolean(rangeFrom && rangeTo);
+  if (hasRange) {
+    variables.startGreater = rangeFrom * 10000 + 101;
+    variables.startLesser = rangeTo * 10000 + 1231;
+  } else if (year && year !== 'ALL') {
     variables.seasonYear = parseInt(year);
   }
 
@@ -871,7 +1017,7 @@ export async function getCatalog({
   variables.sort = Array.isArray(sort) ? sort : [sort];
 
   const query = `
-    query ($seasonYear: Int, $season: MediaSeason, $sort: [MediaSort], $isAdult: Boolean, $page: Int, $perPage: Int) {
+    query ($seasonYear: Int, $startGreater: FuzzyDateInt, $startLesser: FuzzyDateInt, $season: MediaSeason, $sort: [MediaSort], $isAdult: Boolean, $page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
         pageInfo {
           total
@@ -880,14 +1026,15 @@ export async function getCatalog({
           hasNextPage
           perPage
         }
-        media(seasonYear: $seasonYear, season: $season, sort: $sort, isAdult: $isAdult, type: ANIME) {
+        media(seasonYear: $seasonYear, startDate_greater: $startGreater, startDate_lesser: $startLesser, season: $season, sort: $sort, isAdult: $isAdult, type: ANIME) {
           ${MEDIA_FIELDS}
         }
       }
     }
   `;
 
-  const cacheKey = `catalog_${year}_${season}_${variables.sort.join(',')}_${page}_${perPage}_${variables.isAdult}`;
+  const rangeKey = hasRange ? `${rangeFrom}-${rangeTo}` : `${year}`;
+  const cacheKey = `catalog_${rangeKey}_${season}_${variables.sort.join(',')}_${page}_${perPage}_${variables.isAdult}`;
   const cached = metadataListCache.get(cacheKey);
   if (cached) return cached;
 
@@ -1220,23 +1367,76 @@ export async function translateText(text, targetLang = 'zh-TW') {
     // ignore
   }
 
-  // 3. Fallback: Return original clean text (never leak error messages!)
-  return clean;
+  // 3. Every engine failed. Return an empty string: callers must not present the source
+  //    text (often Japanese) as a successful Chinese translation. Empty == "not translated".
+  return '';
 }
 
 // Wire the machine-translation engine into the title resolver. Without this call the
 // resolver's MT fallback is dead code and untranslated Japanese titles reach the UI.
 setMachineTranslator(translateText);
 
-export async function getAnimeChineseInfo(animeId, { romaji = '', native = '', english = '', description = '' } = {}, targetLang = 'zh-TW') {
+// Persistent cache for translated synopses: translation providers are rate-limited and
+// expensive, so a successful translation must survive a server restart.
+const SUMMARY_CACHE_PATH = path.join(DATA_DIR, 'summary_translations.json');
+const SUMMARY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+let summaryDiskCache = null;
+let summarySaveTimer = null;
+
+function loadSummaryDiskCache() {
+  if (summaryDiskCache) return summaryDiskCache;
+  summaryDiskCache = {};
+  try {
+    if (fs.existsSync(SUMMARY_CACHE_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(SUMMARY_CACHE_PATH, 'utf-8'));
+      if (parsed && typeof parsed === 'object') summaryDiskCache = parsed;
+    }
+  } catch {}
+  return summaryDiskCache;
+}
+
+function persistSummaryCache() {
+  if (summarySaveTimer) clearTimeout(summarySaveTimer);
+  summarySaveTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(SUMMARY_CACHE_PATH, JSON.stringify(summaryDiskCache || {}), 'utf-8');
+    } catch {}
+    summarySaveTimer = null;
+  }, 1500);
+  if (typeof summarySaveTimer.unref === 'function') summarySaveTimer.unref();
+}
+
+function getDiskSummary(animeId, lang) {
+  const entry = loadSummaryDiskCache()[`${animeId}_${lang}`];
+  if (!entry || !entry.text) return '';
+  if (Date.now() - (entry.at || 0) > SUMMARY_TTL_MS) return '';
+  return entry.text;
+}
+
+function setDiskSummary(animeId, lang, text) {
+  loadSummaryDiskCache()[`${animeId}_${lang}`] = { text, at: Date.now() };
+  persistSummaryCache();
+}
+
+/** True when the text is already Chinese (no kana) so it needs no machine translation. */
+function looksChinese(text) {
+  const sample = String(text || '').slice(0, 2000);
+  if (!sample) return false;
+  const kana = (sample.match(/[\u3040-\u30ff]/g) || []).length;
+  const han = (sample.match(/[\u4e00-\u9fff]/g) || []).length;
+  return han > 0 && kana === 0;
+}
+
+export async function getAnimeChineseInfo(animeId, { romaji = '', native = '', english = '', description = '', refresh = false } = {}, targetLang = 'zh-TW') {
   const cacheKey = `${animeId}_${targetLang}`;
-  if (chineseInfoCache.has(cacheKey)) {
+  if (!refresh && chineseInfoCache.has(cacheKey)) {
     return chineseInfoCache.get(cacheKey);
   }
 
   const searchTitle = native || romaji || english;
   if (!searchTitle) {
-    return { id: animeId, titleZh: '', summaryZh: '' };
+    return { id: animeId, titleZh: '', summaryZh: '', titleOk: false, summaryOk: false };
   }
 
   // Validated resolution only: exact dictionary -> identity + season checked Bangumi match
@@ -1253,22 +1453,45 @@ export async function getAnimeChineseInfo(animeId, { romaji = '', native = '', e
 
   const titleZh = entry ? (targetLang === 'zh-CN' ? entry.cn : entry.tw) : '';
 
-  let summaryZh = targetLang === 'zh-CN' ? (entry?.summaryCn || '') : (entry?.summaryTw || '');
+  // Summary: validated Bangumi summary -> persistent disk cache -> machine translation.
+  let summaryZh = targetLang === 'zh-CN'
+    ? (entry?.summaryCn || entry?.summaryTw || '')
+    : (entry?.summaryTw || '');
+  if (!summaryZh) summaryZh = getDiskSummary(animeId, targetLang);
+
+  let summaryOk = Boolean(summaryZh);
   if (!summaryZh && description) {
-    try {
-      summaryZh = await translateText(description, targetLang);
-    } catch {}
+    if (looksChinese(description)) {
+      summaryZh = description;
+      summaryOk = true;
+    } else {
+      try {
+        const translated = await translateText(description, targetLang);
+        // translateText returns '' when every provider failed.
+        if (translated && translated.trim()) {
+          summaryZh = translated;
+          summaryOk = true;
+          setDiskSummary(animeId, targetLang, translated);
+        }
+      } catch {}
+    }
   }
 
   const result = {
     id: animeId,
     bgmId: entry?.bgmId || null,
     titleZh,
+    titleOk: Boolean(titleZh),
     titleZhSource: entry?.source || null,
-    summaryZh
+    // Never return the untranslated source as summaryZh.
+    summaryZh: summaryOk ? summaryZh : '',
+    summaryOk
   };
 
-  chineseInfoCache.set(cacheKey, result);
+  // Do not cache failures: a later open should retry the translation providers.
+  if (result.titleOk || result.summaryOk) {
+    chineseInfoCache.set(cacheKey, result);
+  }
   return result;
 }
 

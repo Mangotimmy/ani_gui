@@ -636,6 +636,14 @@ export function resolveTitleZh(anime) {
   return job;
 }
 
+/** Cache-only lookup by AniList id (used by the client title patch endpoint). */
+export function getCachedTitleEntry(animeId) {
+  if (!animeId) return null;
+  const cached = titleCache.get(String(animeId));
+  if (!cached) return null;
+  return { titleZhTW: cached.tw || '', titleZhCN: cached.cn || '' };
+}
+
 /** Synchronous lookup; kicks off a background resolve on a miss. */
 export function getCachedChineseTitle(anime) {
   if (!anime) return null;

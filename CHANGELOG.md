@@ -1,5 +1,62 @@
 # Changelog
 
+## 2.7.0 — desktop integration, catalog ranges, trending & Chinese-localization
+
+### Windows / desktop
+- **Integrated title bar**: `titleBarStyle: 'hidden'` + `titleBarOverlay` (Windows) and
+  `hiddenInset` (macOS). A 34 px drag strip is rendered above the navbar; native window
+  buttons and Windows 11 Snap Layouts stay available.
+- **App icon**: Windows windows now use `build/icon.ico`, `app.setName('AniFlix')` and
+  `app.setAppUserModelId('com.aniflix.desktop')` so the taskbar, title bar and toasts show
+  the real app identity instead of Electron defaults. Apple touch icon added for the PWA.
+- **Windows notifications**: new `electron/preload.cjs` bridge; the renderer calls native
+  `Notification` through IPC, clicking a toast focuses the window and opens the anime.
+  A "桌面通知：開/關" toggle lives in the notification center header.
+
+### Notifications
+- Favorites' newly aired episodes are now detected from **live AniList airing schedules**
+  (`/api/notifications/airing?ids=…&hours=48`), not from the frozen favorite snapshot.
+  The old implementation read `nextAiringEpisode` from data saved when the user favorited
+  the show, which is why the notification list stayed empty.
+
+### PiP / floating player
+- The PiP button now leaves the full-screen player, returns to the catalogue and keeps
+  playback in the in-app floating player; native OS PiP remains available from the
+  floating bar.
+
+### Catalog
+- **Decade quick-jump is a real range**: 1970s → 1970-01-01 … 1979-12-31
+  (`startDate_greater/lesser`), not a single representative year.
+- **Future years are data-driven**: `/api/catalog/years` probes the next three years and
+  hides years with no releases (2029 disappears; 2028 with one announced title stays).
+
+### Trending
+- "現正熱播" now uses all-time popularity (`/api/popular-now`) instead of AniList's
+  airing-buzz `TRENDING_DESC`. The season shelf has its own label (本季新番 / This Season)
+  and the duplicate "All-Time Popular" shelf was removed.
+
+### Chinese localization
+- New `src/utils/titles.js`: localized titles fall back zh → English → romaji → native
+  (previously Japanese `title.native` came before English/romaji, so a Chinese UI showed
+  kanji whenever translation had not finished). Applied to cards, hero, navbar, detail
+  sheet, player, schedule and notifications.
+- `translateText()` now returns `''` on failure instead of the source text, and
+  `getAnimeChineseInfo()` returns `{ titleOk, summaryOk, summaryZh }`. Untranslated
+  synopses are labelled 原文（翻譯暫時不可用） with a 重新翻譯 button; translated summaries
+  are cached on disk for 30 days.
+- `GET /api/anime/titles?ids=…` plus two delayed client patches let lists progressively
+  switch to Chinese titles as the server finishes resolving them.
+
+### Accessibility & polish (review pass)
+- Restored pinch-zoom (removed `maximum-scale`/`user-scalable=no`, WCAG 1.4.4).
+- Global `:focus-visible` ring, keyboard-accessible anime cards (real poster button),
+  keyboard-reachable notification rows, accessible names on icon buttons, and a real
+  `<button>` for the logo.
+- `prefers-reduced-motion` now disables the marquee, hover scale and transitions;
+  hover effects are gated behind `@media (hover: hover)`.
+- Scroll padding for the fixed header, `overscroll-behavior: contain` on menus/dialogs,
+  and a hairline outline on content images.
+
 ## 2.6.0 — reported-issues fix round
 
 Everything below applies to **both** the browser/server build and the Electron desktop build:

@@ -188,6 +188,45 @@ async function json(path, opts) {
   ok('catalogue JSON is gzipped', checked?.encoding === 'gzip', checked ? `${checked.path} encoding=${checked.encoding} bytes=${checked.bytes}` : 'no catalogue payload available (upstream rate limited)');
 }
 
+// ---- 10. Catalog decade ranges (#7) and future-year availability (#6)
+{
+  const ranged = await json('/api/catalog?yearFrom=1970&yearTo=1979&perPage=12&sort=POPULARITY_DESC');
+  const years = (ranged.data?.media || []).map(m => m.startDate?.year).filter(Boolean);
+  const inRange = years.length > 0 && years.every(y => y >= 1970 && y <= 1979);
+  ok('decade range returns only 1970s titles', ranged.data?.success !== false && inRange, 'years=' + JSON.stringify(years.slice(0, 6)));
+
+  const yearInfo = await json('/api/catalog/years');
+  const future = (yearInfo.data?.future || []).map(f => f.year);
+  ok('future year probe hides empty years', Array.isArray(future) && !future.includes(2029), 'future=' + JSON.stringify(future));
+}
+
+// ---- 11. Trending semantics (#8): popularity feed is available and distinct
+{
+  const popularNow = await json('/api/popular-now?perPage=10');
+  const ids = (popularNow.data?.data || []).map(a => a.id);
+  ok('popular-now feed returns all-time popularity', popularNow.data?.success === true && ids.length > 0, 'n=' + ids.length);
+}
+
+// ---- 12. Cached Chinese titles endpoint (#9)
+{
+  const titles = await json('/api/anime/titles?ids=21,16498,5114');
+  ok('cached title patch endpoint responds', titles.data?.success === true && typeof titles.data.data === 'object', 'keys=' + Object.keys(titles.data?.data || {}).length);
+}
+
+// ---- 13. Favorites airing notification feed (#4/#5)
+{
+  const airing = await json('/api/notifications/airing?ids=21&hours=48');
+  ok('airing notification feed responds', airing.data?.success === true && Array.isArray(airing.data.data), 'rows=' + (airing.data?.data?.length ?? 'n/a'));
+}
+
+// ---- 14. Chinese info never reports the source text as a translation (#10)
+{
+  const info = await json('/api/anime/21/chinese-info?romaji=One%20Piece&native=%E3%83%AF%E3%83%B3%E3%83%94%E3%83%BC%E3%82%B9&english=One%20Piece&description=' + encodeURIComponent('『ワンピース』は、尾田栄一郎による日本の漫画作品。') + '&lang=zh-TW');
+  const d = info.data || {};
+  const honest = typeof d.summaryOk === 'boolean' && (d.summaryOk === true ? typeof d.summaryZh === 'string' && d.summaryZh.length > 0 : d.summaryZh === '');
+  ok('chinese info reports translation state honestly', honest, 'summaryOk=' + d.summaryOk + ' summaryZh=' + JSON.stringify((d.summaryZh || '').slice(0, 24)));
+}
+
 const failed = results.filter(r => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
 if (failed.length > 0) process.exitCode = 1;

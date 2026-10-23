@@ -1,6 +1,7 @@
 import React, { useState, startTransition } from 'react';
 import { Play, Download, Info, Star, Heart, Sparkles } from 'lucide-react';
 import { getAnimeCoverUrl } from '../utils/image.js';
+import { pickAnimeTitle } from '../utils/titles.js';
 
 function AnimeCard({ 
   anime, 
@@ -13,15 +14,7 @@ function AnimeCard({
 }) {
   const [isHovered, setIsHovered] = useState(false);
 
-  const title = (
-    currentLang === 'ja'
-      ? (anime.title?.native || anime.title?.romaji || anime.title?.english)
-      : currentLang === 'zh-CN'
-      ? (anime.titleZhCN || anime.titleZh || anime.title?.native || anime.title?.english || anime.title?.romaji)
-      : currentLang === 'zh-TW'
-      ? (anime.titleZhTW || anime.titleZh || anime.title?.native || anime.title?.english || anime.title?.romaji)
-      : (anime.title?.english || anime.title?.romaji || anime.title?.native)
-  ) || 'Anime';
+  const title = pickAnimeTitle(anime, currentLang) || 'Anime';
   const poster = getAnimeCoverUrl(anime);
   const score = anime.averageScore ? `${anime.averageScore}%` : null;
 
@@ -33,12 +26,7 @@ function AnimeCard({
       onMouseLeave={() => setIsHovered(false)}
     >
       {/* Poster Image Container with Animata spotlight & better-ui outline */}
-      <div 
-        onClick={() => {
-          if (onMoreInfo) startTransition(() => onMoreInfo(anime));
-        }}
-        className="relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 shadow-md card-hover-effect transition-all duration-300 group-hover:border-red-500/50 outline outline-1 outline-white/10 -outline-offset-1"
-      >
+      <div className="relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 shadow-md card-hover-effect transition-all duration-300 group-hover:border-red-500/50 outline outline-1 outline-white/10 -outline-offset-1">
         <img
           src={poster}
           alt={title}
@@ -53,6 +41,14 @@ function AnimeCard({
           className="w-full h-auto aspect-[2/3] object-cover transition-transform duration-500 group-hover:scale-105"
         />
 
+        {/* Whole-poster action: a real button so keyboard users can open the details sheet. */}
+        <button
+          type="button"
+          onClick={() => { if (onMoreInfo) startTransition(() => onMoreInfo(anime)); }}
+          aria-label={`${title} — ${currentLang === 'ja' ? '詳細を見る' : currentLang.startsWith('zh') ? '查看詳細資訊與集數' : 'View details and episodes'}`}
+          className="absolute inset-0 z-[1] cursor-pointer rounded-xl focus-visible:ring-2 focus-visible:ring-[#E50914] focus-visible:ring-inset focus-visible:outline-none"
+        />
+
         {/* Favorite Heart Badge Top Left */}
         <button
           onClick={(e) => {
@@ -64,6 +60,10 @@ function AnimeCard({
               ? 'bg-red-600/80 text-white shadow-lg shadow-red-600/30'
               : 'bg-black/60 text-zinc-300 opacity-0 group-hover:opacity-100 hover:text-white hover:bg-black/80'
           }`}
+          aria-label={isFavorite 
+            ? (currentLang === 'ja' ? 'お気に入りから削除' : currentLang.startsWith('zh') ? '從收藏移除' : 'Remove from Favorites') 
+            : (currentLang === 'ja' ? 'お気に入りに追加' : currentLang.startsWith('zh') ? '加入我的收藏' : 'Add to Favorites')}
+          aria-pressed={isFavorite}
           title={isFavorite 
             ? (currentLang === 'ja' ? 'お気に入りから削除' : currentLang.startsWith('zh') ? '從收藏移除' : 'Remove from Favorites') 
             : (currentLang === 'ja' ? 'お気に入りに追加' : currentLang.startsWith('zh') ? '加入我的收藏' : 'Add to Favorites')}
@@ -92,7 +92,7 @@ function AnimeCard({
         ) : null}
 
         {/* Bottom Title Gradient Overlay on Card */}
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-2.5 pt-6 flex flex-col justify-end">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-2.5 pt-6 flex flex-col justify-end">
           {anime.recommendationReason && (
             <div className="text-[10px] text-amber-300 font-semibold line-clamp-1 mb-1 flex items-center gap-1 bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-500/30 shadow-sm backdrop-blur-sm">
               <Sparkles className="w-2.5 h-2.5 text-amber-400 shrink-0" />
@@ -130,8 +130,12 @@ function AnimeCard({
           </div>
         </div>
 
-        {/* Quick Action Overlay on Hover */}
-        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2">
+        {/* Quick Action Overlay on Hover (mouse convenience; the poster button is the keyboard path) */}
+        <div
+          role="presentation"
+          onClick={() => { if (onMoreInfo) startTransition(() => onMoreInfo(anime)); }}
+          className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2"
+        >
           {anime.status === 'NOT_YET_RELEASED' ? (
             <>
               {anime.trailer?.id ? (

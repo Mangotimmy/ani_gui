@@ -340,6 +340,31 @@ node scripts/repair-titles.mjs             # rewrite profiles (timestamped backu
 
 ---
 
+## 🚀 Release & Docker Image Automation
+
+Docker images are automatically built and published by GitHub Actions **only when a version tag is pushed** (`v*`):
+
+- **Automatic Git Tag & Push**:
+  ```bash
+  # Automatically stage changes, commit, tag current package.json version, and push to GitHub:
+  npm run release
+
+  # Bump patch version (e.g. 2.7.0 -> 2.7.1), commit, tag, and push:
+  npm run release patch
+
+  # Bump minor version (e.g. 2.7.0 -> 2.8.0), commit, tag, and push:
+  npm run release minor
+
+  # Preview with dry-run:
+  npm run release -- --dry-run
+  ```
+- **Workflows triggered on tag (`v*`)**:
+  - [`.github/workflows/docker.yml`](.github/workflows/docker.yml): Builds and publishes multi-arch images to GitHub Container Registry (`ghcr.io`).
+  - [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml): Builds and pushes images with tag metadata to Docker Hub.
+  - [`.github/workflows/release.yml`](.github/workflows/release.yml): Creates GitHub Release with **automated Release notes from commits** and builds cross-platform Electron packages.
+
+---
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).

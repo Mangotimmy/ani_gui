@@ -1,6 +1,6 @@
 {
   "name": "aniflix",
-  "version": "2.6.1",
+  "version": "2.7.0",
   "type": "module",
   "description": "Netflix-style GUI and Batch Downloader for ani-cli",
   "author": "AniFlix Team<aniflix@gmail.com>",
@@ -24,7 +24,13 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "desktop:start": "electron electron/main.cjs",
     "desktop:build": "npm run build && electron-builder --publish always",
-    "docker:deploy": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-docker.ps1"
+    "docker:deploy": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-docker.ps1",
+    "release": "node scripts/release.mjs",
+    "release:patch": "node scripts/release.mjs patch",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major",
+    "git:push-tag": "node scripts/release.mjs",
+    "postversion": "git push && git push --tags"
   },
   "build": {
     "appId": "com.aniflix.desktop",

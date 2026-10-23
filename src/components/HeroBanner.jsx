@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Download, Info, Star } from 'lucide-react';
 import { getAnimeBannerUrl } from '../utils/image.js';
+import { pickAnimeTitle } from '../utils/titles.js';
 
 const GENRE_MAP = {
   'Action': { 'zh-TW': '動作', 'zh-CN': '动作', 'ja': 'アクション' },
@@ -58,19 +59,17 @@ export default function HeroBanner({
   if (!anime) return null;
 
   const title = (
-    currentLang === 'ja'
-      ? (anime.title?.native || anime.title?.romaji || anime.title?.english)
-      : currentLang === 'zh-CN'
-      ? (chineseInfo?.titleZh || anime.titleZhCN || anime.titleZh || anime.titleZhTW || anime.title?.native || anime.title?.english)
-      : currentLang === 'zh-TW'
-      ? (chineseInfo?.titleZh || anime.titleZhTW || anime.titleZh || anime.titleZhCN || anime.title?.native || anime.title?.english)
-      : (anime.title?.english || anime.title?.romaji || anime.title?.native)
+    (currentLang === 'zh-TW' || currentLang === 'zh-CN')
+      ? (chineseInfo?.titleZh || pickAnimeTitle(anime, currentLang))
+      : pickAnimeTitle(anime, currentLang)
   ) || 'Anime';
 
   const backdrop = getAnimeBannerUrl(anime);
   
+  // Never present the untranslated description as Chinese: only use summaryZh when the
+  // server confirmed the translation actually happened.
   const rawSynopsis = (currentLang === 'zh-TW' || currentLang === 'zh-CN')
-    ? (chineseInfo?.summaryZh || anime.summaryZh || anime.description)
+    ? ((chineseInfo?.summaryZh && chineseInfo?.summaryOk !== false) ? chineseInfo.summaryZh : (anime.summaryZh || anime.description))
     : anime.description;
   const synopsis = rawSynopsis?.replace(/<[^>]*>/g, '') || (
     currentLang === 'ja' ? 'あらすじ情報はありません。' : currentLang.startsWith('zh') ? '暫無劇情簡介。' : 'No synopsis available.'

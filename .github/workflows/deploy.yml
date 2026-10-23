@@ -1,12 +1,9 @@
 name: Build and Push Docker Image
 
-# 定義何時觸發此工作流（此處設定為當 main 分支有 push 時觸發）
 on:
   push:
-    branches: [ main, master ]
     tags: [ 'v*' ]
   workflow_dispatch:
-
 
 jobs:
   build-and-push:
@@ -23,18 +20,21 @@ jobs:
     # 2. 設定 Docker Buildx（用於建置映像檔的高階工具）
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
+
     # 🔥 2. 自動擷取 Docker 標籤元數據
     - name: Extract Docker metadata
       id: meta
       uses: docker/metadata-action@v6
       with:
-          images: |
-            ${{ secrets.DOCKER_USERNAME }}/mangoau
-            ${{ secrets.DOCKER_USERNAME }}/aniflex
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
-            type=ref,event=tag
-            type=sha,format=short
+        images: |
+          ${{ secrets.DOCKER_USERNAME }}/mangoau
+          ${{ secrets.DOCKER_USERNAME }}/aniflex
+        tags: |
+          type=raw,value=latest
+          type=ref,event=tag
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,format=short
 
     # 3. 登入到 Docker Hub
     - name: Log in to Docker Hub
@@ -50,7 +50,5 @@ jobs:
         context: .
         file: ./Dockerfile
         push: true
-        # 請將「你的帳號」與「你的儲存庫名稱」替換為 Docker Hub 上的實際名稱
-        tags: |
-          ${{ secrets.DOCKER_USERNAME }}/mangoau:latest
-          ${{ secrets.DOCKER_USERNAME }}/aniflex:${{ github.sha }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}

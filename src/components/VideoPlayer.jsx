@@ -2571,24 +2571,20 @@ export default function VideoPlayer({
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <button
               onClick={onClose}
+              aria-label="關閉播放器"
               className="p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-white transition-colors shrink-0"
               title={`${t('close')} (Esc)`}
             >
               <X className="w-5 h-5 sm:w-6 sm:h-6" />
             </button>
 
-            {/* Floating mini player / native PiP */}
+            {/* PiP = leave the full-screen player, return to the catalogue and keep playing
+                in the in-app floating player (native OS PiP lives in the floating bar). */}
             <button
               onClick={toggleMiniPlayer}
-              className="hidden sm:flex p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-white transition-colors shrink-0"
-              title="浮動迷你播放器 (Floating player)"
-            >
-              <Minimize2 className="w-5 h-5 sm:w-5 sm:h-5" />
-            </button>
-            <button
-              onClick={togglePictureInPicture}
-              className="hidden sm:flex p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-white transition-colors shrink-0"
-              title="子母畫面 (Picture-in-Picture)"
+              aria-label="子母畫面：回到目錄並浮動播放"
+              className="flex p-1.5 sm:p-2 rounded-full hover:bg-white/20 text-white transition-colors shrink-0"
+              title="子母畫面：回到目錄並繼續在浮動播放器播放"
             >
               <PictureInPicture2 className="w-5 h-5 sm:w-5 sm:h-5" />
             </button>

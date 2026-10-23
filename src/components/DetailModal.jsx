@@ -43,6 +43,7 @@ export default function DetailModal({
   const [chineseInfo, setChineseInfo] = useState(null);
   const [isLoadingChinese, setIsLoadingChinese] = useState(false);
   const [synopsisLang, setSynopsisLang] = useState('zh'); // 'zh' (Traditional Chinese) | 'orig' (Original English)
+  const [chineseRefresh, setChineseRefresh] = useState(0);
 
   // BitTorrent / Magnet Resources
   const [allTorrents, setAllTorrents] = useState([]);
@@ -178,7 +179,8 @@ export default function DetailModal({
     const desc = synopsis || '';
     const targetLang = currentLang === 'zh-CN' ? 'zh-CN' : 'zh-TW';
 
-    fetch(`/api/anime/${anime.id}/chinese-info?romaji=${encodeURIComponent(romaji)}&native=${encodeURIComponent(native)}&english=${encodeURIComponent(english)}&description=${encodeURIComponent(desc)}&lang=${targetLang}`)
+    const refreshParam = chineseRefresh > 0 ? `&refresh=${chineseRefresh}` : '';
+    fetch(`/api/anime/${anime.id}/chinese-info?romaji=${encodeURIComponent(romaji)}&native=${encodeURIComponent(native)}&english=${encodeURIComponent(english)}&description=${encodeURIComponent(desc)}&lang=${targetLang}${refreshParam}`)
       .then(r => r.json())
       .then(d => {
         if (!isCancelled && d.success) {
@@ -191,7 +193,7 @@ export default function DetailModal({
       });
 
     return () => { isCancelled = true; };
-  }, [anime, currentLang, synopsis]);
+  }, [anime, currentLang, synopsis, chineseRefresh]);
 
   // 4. Fetch BitTorrent / Magnet releases across all alias candidates
   const loadTorrents = async (force = false, explicitQuery = null) => {
@@ -637,7 +639,7 @@ export default function DetailModal({
                   <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">
                     {t('overview') || 'Overview'}:
                   </span>
-                  {chineseInfo?.summaryZh && (
+                  {chineseInfo?.summaryZh && chineseInfo?.summaryOk !== false && (
                     <div className="flex items-center gap-1 bg-zinc-900/90 rounded-lg p-0.5 border border-zinc-800 text-[11px]">
                       <button
                         onClick={() => setSynopsisLang('zh')}
@@ -660,12 +662,28 @@ export default function DetailModal({
                 </div>
 
                 <p className="text-sm text-zinc-300 leading-relaxed max-w-2xl line-clamp-4">
-                  {synopsisLang === 'zh' && chineseInfo?.summaryZh ? chineseInfo.summaryZh : synopsis}
+                  {synopsisLang === 'zh' && chineseInfo?.summaryZh && chineseInfo?.summaryOk !== false
+                    ? chineseInfo.summaryZh
+                    : synopsis}
                 </p>
                 {isLoadingChinese && !chineseInfo?.summaryZh && (
                   <div className="flex items-center gap-1.5 text-xs text-amber-400">
                     <RefreshCw className="w-3 h-3 animate-spin" />
                     <span>{t('loadingChineseMeta')}</span>
+                  </div>
+                )}
+                {!isLoadingChinese && (currentLang === 'zh-TW' || currentLang === 'zh-CN') && chineseInfo?.summaryOk === false && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-amber-400/90" role="status">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>翻譯暫時不可用，目前顯示原文。</span>
+                    <button
+                      type="button"
+                      onClick={() => setChineseRefresh(n => n + 1)}
+                      className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-semibold text-amber-300 hover:bg-amber-500/20 focus-visible:ring-2 focus-visible:ring-[#E50914] focus-visible:outline-none"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      重新翻譯
+                    </button>
                   </div>
                 )}
               </div>

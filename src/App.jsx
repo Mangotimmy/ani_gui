@@ -49,14 +49,15 @@ const CURRENT_YEAR = new Date().getFullYear();
 const MAX_FUTURE_YEAR = CURRENT_YEAR + 3; // e.g. 2026 -> 2029
 const ALL_YEARS = Array.from({ length: MAX_FUTURE_YEAR - 1970 + 1 }, (_, i) => MAX_FUTURE_YEAR - i);
 const QUICK_YEARS = Array.from({ length: Math.min(18, MAX_FUTURE_YEAR - 2010 + 1) }, (_, i) => MAX_FUTURE_YEAR - i);
+// A decade is a RANGE (1970 -> 1970-01-01 .. 1979-12-31), not a single representative year.
 const DECADES = [
-  ...(MAX_FUTURE_YEAR >= 2030 ? [{ label: '2030s', year: 2030 }] : []),
-  { label: '2020s', year: Math.min(2025, CURRENT_YEAR) },
-  { label: '2010s', year: 2015 },
-  { label: '2000s', year: 2005 },
-  { label: '1990s', year: 1995 },
-  { label: '1980s', year: 1985 },
-  { label: '1970s', year: 1975 }
+  ...(MAX_FUTURE_YEAR >= 2030 ? [{ label: '2030s', from: 2030, to: 2039 }] : []),
+  { label: '2020s', from: 2020, to: Math.max(2029, CURRENT_YEAR) },
+  { label: '2010s', from: 2010, to: 2019 },
+  { label: '2000s', from: 2000, to: 2009 },
+  { label: '1990s', from: 1990, to: 1999 },
+  { label: '1980s', from: 1980, to: 1989 },
+  { label: '1970s', from: 1970, to: 1979 }
 ];
 
 export default function App() {
@@ -110,6 +111,9 @@ function hasHomeCache() {
   const [fantasyAnimes, setFantasyAnimes] = useState(() => getHomeCache('fantasyAnimes'));
   const [recommendations, setRecommendations] = useState([]);
   const [isLoading, setIsLoading] = useState(() => !hasHomeCache());
+  // Declared early: quickYears/availableFutureYears below read them during render.
+  const [futureYears, setFutureYears] = useState([]);
+  const [isDesktopShell, setIsDesktopShell] = useState(false);
 
   // Today's airing episodes for the announcement ticker (refreshed every 30 min)
   const [todayAiring, setTodayAiring] = useState([]);
@@ -125,6 +129,82 @@ function hasHomeCache() {
     const timer = setInterval(load, 30 * 60 * 1000);
     return () => { cancelled = true; clearInterval(timer); };
   }, []);
+
+  // Desktop shell (Electron): integrated title bar + native window controls
+  useEffect(() => {
+    const desktop = typeof window !== 'undefined' ? window.aniflixDesktop : null;
+    if (!desktop?.isDesktop) return undefined;
+    setIsDesktopShell(true);
+    document.body.classList.add('desktop-shell');
+    if (desktop.platform === 'darwin') document.body.classList.add('desktop-shell-mac');
+    return () => {
+      document.body.classList.remove('desktop-shell', 'desktop-shell-mac');
+    };
+  }, []);
+
+  // Future catalog years that actually have releases (hides empty pills such as 2029)
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/catalog/years')
+      .then(r => r.json())
+      .then(d => {
+        if (!cancelled && d?.success && Array.isArray(d.future)) setFutureYears(d.future);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Chinese titles resolve in the background server-side. Fetch the ones that finished and
+  // patch the already-rendered lists once, so a Chinese UI stops showing Japanese names.
+  useEffect(() => {
+    let cancelled = false;
+    const timers = [];
+    const patchTitles = async () => {
+      const lists = [trending, popular, topRated, actionAnimes, fantasyAnimes, upcoming, thisSeasonAnimes, catalogAnimes, recommendations, searchResults];
+      const ids = Array.from(new Set(
+        lists.flat().filter(a => a && a.id && !(a.titleZhTW || a.titleZh)).map(a => a.id)
+      )).slice(0, 150);
+      if (ids.length === 0) return;
+      try {
+        const res = await fetch(`/api/anime/titles?ids=${ids.join(',')}`);
+        const d = await res.json();
+        if (cancelled || !d?.success || !d.data || Object.keys(d.data).length === 0) return;
+        const apply = (list) => list.map(a => (
+          a && a.id && d.data[String(a.id)]
+            ? { ...a, ...d.data[String(a.id)], titleZhStatus: 'ok' }
+            : a
+        ));
+        setTrending(apply);
+        setPopular(apply);
+        setTopRated(apply);
+        setActionAnimes(apply);
+        setFantasyAnimes(apply);
+        setUpcoming(apply);
+        setThisSeasonAnimes(apply);
+        setCatalogAnimes(apply);
+        setRecommendations(apply);
+        setSearchResults(apply);
+      } catch {}
+    };
+    timers.push(setTimeout(patchTitles, 6000));
+    timers.push(setTimeout(patchTitles, 18000));
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+    };
+  }, [isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Quick year pills: current + future years that have releases + the recent past
+  const quickYears = useMemo(() => {
+    const years = new Set([...futureYears.map(f => f.year), CURRENT_YEAR]);
+    for (let y = CURRENT_YEAR - 1; y >= 2010 && years.size < 18; y--) years.add(y);
+    return Array.from(years).sort((a, b) => b - a);
+  }, [futureYears]);
+
+  const availableFutureYears = useMemo(
+    () => new Set(futureYears.map(f => f.year)),
+    [futureYears]
+  );
 
   // Infinite Horizontal Carousel Pagination State
   const [carouselPages, setCarouselPages] = useState({
@@ -156,7 +236,7 @@ function hasHomeCache() {
 
     try {
       let url = '';
-      if (category === 'trending') url = `/api/trending?page=${nextPage}&perPage=50`;
+      if (category === 'trending') url = `/api/popular-now?page=${nextPage}&perPage=50`;
       else if (category === 'topRated') url = `/api/top-rated?page=${nextPage}&perPage=50`;
       else if (category === 'popular') url = `/api/popular?page=${nextPage}&perPage=50`;
       else if (category === 'upcoming') url = `/api/upcoming?page=${nextPage}&perPage=50`;
@@ -194,6 +274,7 @@ function hasHomeCache() {
   const [currentSeasonInfo, setCurrentSeasonInfo] = useState({ year: CURRENT_YEAR, season: 'FALL', label: `Fall ${CURRENT_YEAR}` });
   const [thisSeasonAnimes, setThisSeasonAnimes] = useState(() => getHomeCache('thisSeasonAnimes'));
   const [catalogYear, setCatalogYear] = useState(CURRENT_YEAR);
+  const [catalogRange, setCatalogRange] = useState(null); // { from, to } | null
   const [catalogSeason, setCatalogSeason] = useState('ALL');
   const [catalogStudio, setCatalogStudio] = useState('ALL');
   const [catalogSort, setCatalogSort] = useState('POPULARITY_DESC');
@@ -392,7 +473,7 @@ function hasHomeCache() {
 
         // Fetch all 7 categories + this season catalog simultaneously in parallel (NO waterfall delay!)
         const [trendRes, popRes, topRes, actRes, fanRes, upRes, seasonRes, thisSeasonData] = await Promise.all([
-          fetch('/api/trending?perPage=50').then(r => r.json()).catch(() => ({ success: false })),
+          fetch('/api/popular-now?perPage=50').then(r => r.json()).catch(() => ({ success: false })),
           fetch('/api/popular?perPage=50').then(r => r.json()).catch(() => ({ success: false })),
           fetch('/api/top-rated?perPage=50').then(r => r.json()).catch(() => ({ success: false })),
           fetch('/api/genre/Action?perPage=50').then(r => r.json()).catch(() => ({ success: false })),
@@ -496,13 +577,14 @@ function hasHomeCache() {
   }, [favorites, watchHistory]);
 
   // 3. Catalog Fetching Handler
-  const loadCatalogData = async (year, season, sort, page = 1, append = false, studio = catalogStudio) => {
+  const loadCatalogData = async (year, season, sort, page = 1, append = false, studio = catalogStudio, range = catalogRange) => {
     setCatalogLoading(true);
     try {
       const sParam = season && season !== 'ALL' ? `&season=${season}` : '';
       const adultParam = `&isAdult=${!hideR18}`;
       const studioParam = studio && studio !== 'ALL' ? `&studio=${encodeURIComponent(studio)}` : '';
-      const url = `/api/catalog?year=${year}${sParam}&sort=${sort}&page=${page}&perPage=50${adultParam}${studioParam}`;
+      const rangeParam = range?.from && range?.to ? `&yearFrom=${range.from}&yearTo=${range.to}` : '';
+      const url = `/api/catalog?year=${year}${sParam}${rangeParam}&sort=${sort}&page=${page}&perPage=50${adultParam}${studioParam}`;
       const res = await fetch(url).then(r => r.json());
       if (res.success && Array.isArray(res.media)) {
         if (append) {
@@ -522,9 +604,9 @@ function hasHomeCache() {
 
   useEffect(() => {
     if (activeTab === 'catalog') {
-      loadCatalogData(catalogYear, catalogSeason, catalogSort, 1, false, catalogStudio);
+      loadCatalogData(catalogYear, catalogSeason, catalogSort, 1, false, catalogStudio, catalogRange);
     }
-  }, [activeTab, catalogYear, catalogSeason, catalogSort, catalogStudio, hideR18]);
+  }, [activeTab, catalogYear, catalogSeason, catalogSort, catalogStudio, hideR18, catalogRange]);
 
   // 3. Real-Time Downloader updates: SSE with an automatic polling fallback.
   // Reverse proxies that terminate HTTP/2 (Synology DSM nginx) intermittently reset
@@ -953,6 +1035,13 @@ function hasHomeCache() {
 
   return (
     <div className="min-h-screen bg-[#141414] text-white flex flex-col justify-between selection:bg-[#E50914] selection:text-white">
+      {/* Desktop title bar: drag strip under the native window controls */}
+      {isDesktopShell && (
+        <div className="desktop-titlebar" aria-hidden="true">
+          <span className="desktop-titlebar__brand">AniFlix</span>
+        </div>
+      )}
+
       {/* Top Navigation */}
       <Navbar
         searchQuery={searchQuery}
@@ -1135,7 +1224,7 @@ function hasHomeCache() {
                   <h2 className="text-2xl font-black text-white flex items-center gap-2">
                     Anime Catalog
                     <span className="text-xs font-semibold text-amber-400 bg-amber-950/60 px-2.5 py-0.5 rounded-full border border-amber-500/30">
-                      {catalogYear} {catalogSeason !== 'ALL' ? catalogSeason : 'All Seasons'}
+                      {catalogRange ? `${catalogRange.from}–${catalogRange.to}` : catalogYear} {catalogSeason !== 'ALL' ? catalogSeason : 'All Seasons'}
                     </span>
                   </h2>
                   <p className="text-xs text-zinc-400">Browse anime releases by year, seasonal broadcast, and popularity</p>
@@ -1174,9 +1263,15 @@ function hasHomeCache() {
                 {DECADES.map(d => (
                   <button
                     key={d.label}
-                    onClick={() => setCatalogYear(d.year)}
-                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0 transition-all ${
-                      catalogYear >= d.year - 4 && catalogYear <= d.year + 5
+                    type="button"
+                    aria-pressed={catalogRange?.from === d.from}
+                    onClick={() => {
+                      setCatalogRange({ from: d.from, to: d.to });
+                      if (catalogYear < d.from || catalogYear > d.to) setCatalogYear(d.from);
+                    }}
+                    title={`${d.from}–${d.to}`}
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 ${
+                      catalogRange?.from === d.from
                         ? 'bg-rose-600 text-white font-bold shadow'
                         : 'bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700'
                     }`}
@@ -1199,11 +1294,14 @@ function hasHomeCache() {
                     name="catalogYear"
                     aria-label={t('filterYear') || '年份篩選'}
                     value={catalogYear}
-                    onChange={(e) => setCatalogYear(e.target.value === 'ALL' ? 'ALL' : parseInt(e.target.value))}
+                    onChange={(e) => {
+                      setCatalogRange(null);
+                      setCatalogYear(e.target.value === 'ALL' ? 'ALL' : parseInt(e.target.value));
+                    }}
                     className="bg-transparent text-xs text-amber-400 font-bold focus:outline-none cursor-pointer"
                   >
                     <option value="ALL" className="bg-zinc-900 text-white">{t('allYears')}</option>
-                    {ALL_YEARS.map((yr) => (
+                    {ALL_YEARS.filter((yr) => yr <= CURRENT_YEAR || availableFutureYears.has(yr)).map((yr) => (
                       <option key={yr} value={yr} className="bg-zinc-900 text-white">
                         {yr === currentSeasonInfo.year ? `${yr} (${t('thisYear')})` : `${yr}`}
                       </option>
@@ -1212,12 +1310,17 @@ function hasHomeCache() {
                 </div>
 
                 {/* Quick Year Pills (2026 down to 2010) */}
-                {QUICK_YEARS.map((yr) => (
+                {quickYears.map((yr) => (
                   <button
                     key={yr}
-                    onClick={() => setCatalogYear(yr)}
-                    className={`px-3 py-1 rounded-full text-xs font-semibold shrink-0 transition-all ${
-                      catalogYear === yr
+                    type="button"
+                    aria-pressed={!catalogRange && catalogYear === yr}
+                    onClick={() => {
+                      setCatalogRange(null);
+                      setCatalogYear(yr);
+                    }}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold shrink-0 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E50914] ${
+                      !catalogRange && catalogYear === yr
                         ? 'bg-[#E50914] text-white shadow-md shadow-red-600/30 font-bold'
                         : 'bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-white border border-zinc-700/50'
                     }`}
@@ -1323,7 +1426,7 @@ function hasHomeCache() {
                 {hasMoreCatalog && (
                   <div className="mt-8 mb-12 flex justify-center">
                     <button
-                      onClick={() => loadCatalogData(catalogYear, catalogSeason, catalogSort, catalogPage + 1, true, catalogStudio)}
+                      onClick={() => loadCatalogData(catalogYear, catalogSeason, catalogSort, catalogPage + 1, true, catalogStudio, catalogRange)}
                       disabled={catalogLoading}
                       className="px-6 py-2.5 rounded-full bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-xs border border-zinc-700 flex items-center gap-2 transition-colors motion-safe:active:scale-[0.96] disabled:opacity-50"
                     >
@@ -1530,8 +1633,8 @@ function hasHomeCache() {
                 {/* 2. This Season's Anime Carousel */}
                 {activeTab === 'home' && thisSeasonAnimes.length > 0 && (
                   <AnimeCarousel
-                    title={`${t('trendingNow')} (${currentSeasonInfo.label})`}
-                    subtitle={t('trendingNowSub')}
+                    title={`${t('seasonNow')} (${currentSeasonInfo.label})`}
+                    subtitle={t('seasonNowSub')}
                     icon={Compass}
                     animes={filteredThisSeason}
                     currentLang={currentLang}
@@ -1581,25 +1684,6 @@ function hasHomeCache() {
                     onLoadMore={() => handleLoadMoreCarousel('topRated')}
                     isLoadingMore={Boolean(carouselLoadingMore.topRated)}
                     hasMore={Boolean(carouselHasMore.topRated)}
-                  />
-                )}
-
-                {/* 5. Popular This Season */}
-                {activeTab === 'home' && (
-                  <AnimeCarousel
-                    title={t('allTimePopular')}
-                    subtitle={t('allTimePopularSub')}
-                    icon={Star}
-                    animes={filteredPopular}
-                    currentLang={currentLang}
-                    onPlay={handlePlay}
-                    onDownload={handleOpenBatchDownload}
-                    onMoreInfo={handleMoreInfo}
-                    favoriteIds={favoriteIds}
-                    onToggleFavorite={handleToggleFavorite}
-                    onLoadMore={() => handleLoadMoreCarousel('popular')}
-                    isLoadingMore={Boolean(carouselLoadingMore.popular)}
-                    hasMore={Boolean(carouselHasMore.popular)}
                   />
                 )}
 

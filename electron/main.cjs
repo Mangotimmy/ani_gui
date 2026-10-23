@@ -1,5 +1,5 @@
 // electron/main.cjs - Electron Main Process for AniFlix Desktop
-const { app, BrowserWindow, shell, session, Menu, MenuItem } = require('electron');
+const { app, BrowserWindow, shell, session, Menu, MenuItem, Notification, ipcMain } = require('electron');
 const path = require('path');
 const http = require('http');
 
@@ -71,8 +71,49 @@ if (fs.existsSync(scoopShims)) {
   process.env.PATH = `${scoopShims};${process.env.PATH}`;
 }
 
+// Windows uses the AppUserModelID for taskbar grouping and toast attribution.
+// Without it the window groups under "Electron" and toasts may be silently dropped.
+const APP_ID = 'com.aniflix.desktop';
+app.setName('AniFlix');
+if (process.platform === 'win32') {
+  app.setAppUserModelId(APP_ID);
+}
+
 const PORT = 3001;
 let mainWindow = null;
+
+// Native notification IPC (renderer -> main)
+ipcMain.handle('desktop:notifications-supported', () => Notification.isSupported());
+
+ipcMain.handle('desktop:notify', (_event, payload = {}) => {
+  try {
+    if (!Notification.isSupported()) return false;
+    const notification = new Notification({
+      title: String(payload.title || 'AniFlix'),
+      body: String(payload.body || ''),
+      icon: payload.icon || path.join(__dirname, '..', 'build', 'icon.png'),
+      silent: false
+    });
+
+    notification.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+        mainWindow.webContents.send('desktop:notification-clicked', {
+          animeId: payload.animeId || null,
+          episode: payload.episode || null
+        });
+      }
+    });
+
+    notification.show();
+    return true;
+  } catch (err) {
+    console.warn('Failed to show native notification:', err.message);
+    return false;
+  }
+});
 
 // Start embedded Express server
 async function startServer() {
@@ -117,16 +158,36 @@ async function waitForServer(port, maxAttempts = 30) {
 }
 
 async function createWindow() {
+  // Windows/Linux accept .ico for crisp title-bar + taskbar rendering; macOS uses .png.
+  const windowIcon = process.platform === 'win32'
+    ? path.join(__dirname, '..', 'build', 'icon.ico')
+    : path.join(__dirname, '..', 'build', 'icon.png');
+
   mainWindow = new BrowserWindow({
     width: 1366,
     height: 850,
     minWidth: 1024,
     minHeight: 650,
     title: 'AniFlix',
-    icon: path.join(__dirname, '..', 'build', 'icon.png'),
+    icon: windowIcon,
     backgroundColor: '#141414',
     show: false, // Show once ready-to-show to prevent white flash
+    // Integrated title bar: web content extends into the title bar area, native window
+    // buttons (and Windows 11 Snap Layouts) stay available as an overlay.
+    ...(process.platform === 'win32'
+      ? {
+          titleBarStyle: 'hidden',
+          titleBarOverlay: {
+            color: '#12111a',
+            symbolColor: '#cbd5e1',
+            height: 34
+          }
+        }
+      : process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 12 } }
+      : {}),
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false // allow streaming m3u8 playlists without CORS issues

@@ -79,13 +79,11 @@
 
 /* Card Zoom & Glow Effect */
 .card-hover-effect {
-  transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.3s ease;
+  transition-property: transform, box-shadow;
+  transition-duration: 0.3s;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
-.card-hover-effect:hover {
-  transform: scale(1.05) translateY(-4px);
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.8), 0 0 15px 1px rgba(229, 9, 20, 0.2);
-  z-index: 20;
-}
+/* The :hover rule lives inside @media (hover: hover) further down. */
 
 /* Animata Infinite Marquee Keyframe */
 @keyframes marquee {
@@ -127,4 +125,107 @@
   .animate-marquee:hover {
     animation-play-state: running;
   }
+}
+
+/* ─── Focus visibility (WCAG 2.4.7 / 2.4.13) ──────────────────────────────────
+   Many inputs use Tailwind's focus:outline-none. This global ring restores a
+   visible, high-contrast indicator for keyboard users without affecting the
+   mouse path (focus-visible only). #E50914 on #141414 ≈ 4.6:1. */
+*:focus-visible {
+  outline: 2px solid #E50914 !important;
+  outline-offset: 2px !important;
+}
+
+/* Anchored targets and focused elements must never land under the fixed header. */
+html {
+  scroll-padding-top: 96px;
+}
+
+/* Scroll containers inside menus/dialogs must not scroll the page behind them. */
+.custom-scrollbar,
+.hide-scrollbar,
+[role="dialog"],
+[role="menu"] {
+  overscroll-behavior: contain;
+}
+
+/* Content images get a hairline outline so dark artwork keeps a visible edge. */
+img {
+  outline: 1px solid rgba(255, 255, 255, 0.1);
+  outline-offset: -1px;
+}
+
+/* ─── Hover only on hover-capable pointers (better-ui) ─────────────────────── */
+@media (hover: hover) and (pointer: fine) {
+  .card-hover-effect:hover {
+    transform: scale(1.05) translateY(-4px);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.8), 0 0 15px 1px rgba(229, 9, 20, 0.2);
+    z-index: 20;
+  }
+}
+
+/* ─── Reduced motion (WCAG 2.3.3 / better-ui) ──────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .card-hover-effect:hover {
+    transform: none;
+  }
+}
+
+/* ─── Desktop shell: integrated title bar (Electron titleBarOverlay) ───────── */
+body.desktop-shell {
+  --titlebar-h: 34px;
+}
+body.desktop-shell-mac {
+  --titlebar-h: 28px;
+}
+
+.desktop-titlebar {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  height: var(--titlebar-h, 34px);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  padding-inline-start: 14px;
+  background: rgba(18, 17, 26, 0.92);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
+  pointer-events: auto;
+}
+
+body.desktop-shell-mac .desktop-titlebar {
+  padding-inline-start: 84px;
+}
+
+.desktop-titlebar__brand {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Push the fixed app chrome below the native title-bar overlay. */
+body.desktop-shell .app-header {
+  top: var(--titlebar-h);
+}
+body.desktop-shell main {
+  padding-top: var(--titlebar-h);
+}
+body.desktop-shell .marquee-offset {
+  padding-top: calc(58px + var(--titlebar-h));
+}
+body.desktop-shell .desktop-titlebar ~ .app-header {
+  top: var(--titlebar-h);
 }

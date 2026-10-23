@@ -10,7 +10,10 @@ import {
   markAllNotificationsAsRead, 
   clearAllNotifications,
   getNotificationPermission,
-  requestNotificationPermission 
+  requestNotificationPermission,
+  isDesktopApp,
+  isDesktopNotificationsEnabled,
+  setDesktopNotificationsEnabled
 } from '../utils/notifications.js';
 import { toCachedImageUrl } from '../utils/image.js';
 
@@ -113,12 +116,19 @@ function Navbar({
 
   // Notification center state
   const [notifications, setNotifications] = useState(() => getStoredNotifications());
+  const [liveAnnouncement, setLiveAnnouncement] = useState('');
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [notifPermission, setNotifPermission] = useState(() => getNotificationPermission());
+  const [desktopNotificationsOn, setDesktopNotificationsOn] = useState(() => isDesktopNotificationsEnabled());
   const notifDropdownRef = useRef(null);
 
   useEffect(() => {
-    const handleUpdate = () => setNotifications(getStoredNotifications());
+    const handleUpdate = () => {
+      const items = getStoredNotifications();
+      setNotifications(items);
+      // Announce the newest item politely so screen-reader users hear new arrivals.
+      if (items[0]) setLiveAnnouncement(`${items[0].title}。${items[0].body || ''}`);
+    };
     window.addEventListener('aniflix:notification', handleUpdate);
     window.addEventListener('aniflix:notification_read', handleUpdate);
     return () => {
@@ -281,7 +291,11 @@ function Navbar({
 
   return (
     <>
-    <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 px-3 sm:px-5 md:px-10 ${
+    {/* Polite status region: new notifications and their text are announced once. */}
+    <div role="status" aria-live="polite" className="sr-only">
+      {liveAnnouncement}
+    </div>
+    <header className={`app-header fixed top-0 left-0 right-0 z-50 transition-all duration-300 px-3 sm:px-5 md:px-10 ${
       isScrolled 
         ? 'py-2 bg-[#0e0e11]/95 backdrop-blur-2xl border-b border-white/[0.08] shadow-[0_12px_40px_rgba(0,0,0,0.7)]' 
         : 'py-3 bg-[#121216]/90 backdrop-blur-xl border-b border-white/[0.05] shadow-[0_4px_30px_rgba(0,0,0,0.4)]'
@@ -300,9 +314,11 @@ function Navbar({
           <Menu className="w-5 h-5" />
         </button>
 
-        <div 
+        <button
+          type="button"
           onClick={() => { setActiveTab('home'); onSearch(''); setShowMobileMenu(false); }}
-          className="flex items-center gap-2 cursor-pointer group select-none shrink-0"
+          aria-label="AniFlix — 回到首頁 / Home"
+          className="flex items-center gap-2 cursor-pointer group select-none shrink-0 rounded-lg focus-visible:ring-2 focus-visible:ring-[#E50914] focus-visible:outline-none"
         >
           <div className="relative">
             <img 
@@ -322,7 +338,7 @@ function Navbar({
           <span className="hidden sm:inline-flex items-center text-[10px] tracking-wider bg-red-500/10 text-red-400 px-2 py-0.5 rounded-full border border-red-500/25 font-bold font-mono shadow-sm">
             v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.8'}
           </span>
-        </div>
+        </button>
 
         {/* Primary Navigation Pills — desktop only */}
         <nav className="hidden md:flex items-center gap-1.5 p-1 rounded-full bg-white/[0.03] border border-white/[0.06] backdrop-blur-md">
@@ -659,6 +675,9 @@ function Navbar({
             }}
             className="relative flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-white/[0.06] hover:bg-white/[0.12] active:scale-95 text-zinc-300 hover:text-white rounded-full border border-white/[0.08] hover:border-white/20 transition-all shadow-sm"
             title="通知中心 (Notifications)"
+            aria-label={unreadCount > 0 ? `通知中心，${unreadCount} 則未讀` : '通知中心'}
+            aria-expanded={showNotificationsDropdown}
+            aria-haspopup="menu"
           >
             <Bell className="w-4 h-4 text-amber-400" />
             {unreadCount > 0 && (
@@ -687,7 +706,26 @@ function Navbar({
                       清空
                     </button>
                   )}
-                  {notifPermission !== 'granted' && (
+                  {isDesktopApp() && (
+                    <button
+                      type="button"
+                      aria-pressed={desktopNotificationsOn}
+                      onClick={() => {
+                        const next = !desktopNotificationsOn;
+                        setDesktopNotificationsOn(next);
+                        setDesktopNotificationsEnabled(next);
+                      }}
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition-all border ${
+                        desktopNotificationsOn
+                          ? 'bg-emerald-600/25 text-emerald-300 border-emerald-500/40 hover:bg-emerald-600/40'
+                          : 'bg-zinc-700/40 text-zinc-300 border-zinc-600/50 hover:bg-zinc-700/70'
+                      }`}
+                      title="開啟或關閉 Windows 桌面通知"
+                    >
+                      {desktopNotificationsOn ? '桌面通知：開' : '桌面通知：關'}
+                    </button>
+                  )}
+                  {notifPermission !== 'granted' && !isDesktopApp() && (
                     <button
                       type="button"
                       onClick={async () => {
@@ -712,7 +750,8 @@ function Navbar({
                   </div>
                 ) : (
                   notifications.map(item => (
-                    <div
+                    <button
+                      type="button"
                       key={item.id}
                       onClick={() => {
                         if (item.animeId) {
@@ -720,7 +759,7 @@ function Navbar({
                           setShowNotificationsDropdown(false);
                         }
                       }}
-                      className={`p-3 flex items-start gap-2.5 hover:bg-white/[0.06] transition-colors cursor-pointer ${
+                      className={`w-full text-left p-3 flex items-start gap-2.5 hover:bg-white/[0.06] focus-visible:bg-white/[0.08] transition-colors cursor-pointer ${
                         item.read ? 'opacity-75' : 'bg-red-500/[0.05]'
                       }`}
                     >
@@ -762,7 +801,7 @@ function Navbar({
                           {new Date(item.timestamp).toLocaleString()}
                         </span>
                       </div>
-                    </div>
+                    </button>
                   ))
                 )}
               </div>

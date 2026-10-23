@@ -2,15 +2,69 @@ name: Cross-Platform Release Builder
 
 on:
   push:
-    branches: [ main, master ]
-    tags: [ 'v*' ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  create-release:
+    name: Create Release & Notes from Commits
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # 關鍵：拉取完整 Git 歷史與 Tags，計算 commit 差異
+
+      - name: Extract Commit Log Since Last Tag
+        id: commit_log
+        shell: bash
+        run: |
+          # 找出上一個版本 Tag
+          PREV_TAG=$(git tag --sort=-creatordate | grep -E '^v[0-9]' | grep -v "^${GITHUB_REF_NAME}$" | head -n 1 || echo "")
+          echo "Previous tag detected: $PREV_TAG"
+
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"* %s (%h)" "${PREV_TAG}..HEAD")
+          else
+            COMMITS=$(git log --pretty=format:"* %s (%h)" -n 50)
+          fi
+
+          {
+            echo "## 📝 Commits in this Release"
+            echo ""
+            if [ -n "$COMMITS" ]; then
+              echo "$COMMITS"
+            else
+              echo "* Maintenance release and updates."
+            fi
+            echo ""
+          } > release_notes.md
+
+          echo "Generated release notes:"
+          cat release_notes.md
+
+      - name: Create GitHub Release with Notes from Commits
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body_path: release_notes.md
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-and-release:
     name: Build & Release on ${{ matrix.os }}
+    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -41,7 +95,7 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      # 關鍵：傳入 --publish always 強制執行上傳
+      # 關鍵：傳入 --publish always 強制執行上傳至已建立的 Release
       - name: Build & Publish Application
         run: npm run desktop:build -- --publish always
         env:

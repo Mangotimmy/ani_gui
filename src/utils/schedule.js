@@ -1,5 +1,6 @@
 // src/utils/schedule.js - Helpers for the weekly airing schedule
 import { getAnimeCoverUrl } from './image.js';
+import { pickAnimeTitle } from './titles.js';
 
 /** Monday 00:00 (local) of the week containing `date`. */
 export function getWeekStart(date = new Date()) {
@@ -38,11 +39,8 @@ export async function fetchSchedule(start, end, signal) {
 }
 
 export function pickTitle(anime, lang) {
-  const t = anime?.title || {};
-  if (lang === 'ja') return t.native || t.romaji || t.english || '';
-  if (lang === 'zh-CN') return anime.titleZhCN || anime.titleZh || t.native || t.english || t.romaji || '';
-  if (lang === 'zh-TW') return anime.titleZhTW || anime.titleZh || t.native || t.english || t.romaji || '';
-  return t.english || t.romaji || t.native || '';
+  // Shared ordering: Chinese -> English -> romaji -> Japanese native.
+  return pickAnimeTitle(anime, lang);
 }
 
 export function pickCover(anime) {

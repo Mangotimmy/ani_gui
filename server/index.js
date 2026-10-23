@@ -15,6 +15,10 @@ import {
   getAnimeDetails,
   getRecommendationsForAnime,
   getCatalog,
+  getPopularNow,
+  getAvailableCatalogYears,
+  getCachedTitlesForIds,
+  getAiringNotifications,
   getCurrentSeasonInfo,
   getAnimeMediaVideos,
   searchTorrents,
@@ -177,6 +181,18 @@ app.get('/api/popular', async (req, res) => {
   }
 });
 
+// "Most popular" shelf: all-time popularity (the UI's 現正熱播), not the airing buzz.
+app.get('/api/popular-now', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const perPage = Math.min(parseInt(req.query.perPage) || 50, 50);
+    const list = await getPopularNow(page, perPage);
+    res.json({ success: true, data: list });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/top-rated', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -240,9 +256,11 @@ app.delete('/api/anime/:id/comments/:cid', (req, res) => {
 // Seasonal & Year Catalog Routes
 app.get('/api/catalog', async (req, res) => {
   try {
-    const { year, season, sort, page = 1, perPage = 24, isAdult, studio } = req.query;
+    const { year, yearFrom, yearTo, season, sort, page = 1, perPage = 24, isAdult, studio } = req.query;
     const catalogData = await getCatalog({
       year: year || new Date().getFullYear(),
+      yearFrom: yearFrom ? parseInt(yearFrom, 10) : null,
+      yearTo: yearTo ? parseInt(yearTo, 10) : null,
       season: season || null,
       sort: sort || 'POPULARITY_DESC',
       page: parseInt(page),
@@ -253,6 +271,16 @@ app.get('/api/catalog', async (req, res) => {
     res.json({ success: true, ...catalogData });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message, media: [] });
+  }
+});
+
+// Which future years actually have releases (hides empty pills such as 2029)
+app.get('/api/catalog/years', async (req, res) => {
+  try {
+    const info = await getAvailableCatalogYears();
+    res.json({ success: true, ...info });
+  } catch (err) {
+    res.status(200).json({ success: false, error: err.message, currentYear: new Date().getFullYear(), future: [] });
   }
 });
 
@@ -327,6 +355,19 @@ app.get('/api/anime/torrents', async (req, res) => {
   }
 });
 
+// Cached Chinese titles for already-loaded list items (no outbound requests).
+app.get('/api/anime/titles', (req, res) => {
+  try {
+    const ids = String(req.query.ids || '')
+      .split(',')
+      .map(s => parseInt(s, 10))
+      .filter(n => Number.isFinite(n) && n > 0);
+    res.json({ success: true, data: getCachedTitlesForIds(ids) });
+  } catch (err) {
+    res.status(200).json({ success: false, error: err.message, data: {} });
+  }
+});
+
 app.get('/api/anime/:id', async (req, res) => {
   try {
     const anime = await getAnimeDetails(req.params.id);
@@ -375,8 +416,12 @@ app.get('/api/anime/:id/media-videos', async (req, res) => {
 // Chinese Metadata & Summary
 app.get('/api/anime/:id/chinese-info', async (req, res) => {
   try {
-    const { romaji = '', native = '', english = '', description = '', lang = 'zh-TW' } = req.query;
-    const info = await getAnimeChineseInfo(req.params.id, { romaji, native, english, description }, lang);
+    const { romaji = '', native = '', english = '', description = '', lang = 'zh-TW', refresh } = req.query;
+    const info = await getAnimeChineseInfo(
+      req.params.id,
+      { romaji, native, english, description, refresh: refresh === '1' || Number(refresh) > 0 },
+      lang
+    );
     res.json({ success: true, ...info });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -553,6 +598,25 @@ app.post('/api/play/mpv', (req, res) => {
     enableUpscale: effectiveUpscale
   });
   res.json(result);
+});
+
+// Recently aired episodes of the user's favorites (notification feed)
+app.get('/api/notifications/airing', async (req, res) => {
+  try {
+    const ids = String(req.query.ids || '')
+      .split(',')
+      .map(s => parseInt(s, 10))
+      .filter(n => Number.isFinite(n) && n > 0)
+      .slice(0, 100);
+    if (ids.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+    const hours = parseInt(req.query.hours, 10) || 48;
+    const data = await getAiringNotifications(ids, hours);
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(200).json({ success: false, error: err.message, data: [] });
+  }
 });
 
 // --- Downloader Routes ---
