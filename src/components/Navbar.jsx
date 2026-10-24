@@ -295,10 +295,10 @@ function Navbar({
     <div role="status" aria-live="polite" className="sr-only">
       {liveAnnouncement}
     </div>
-    <header className={`app-header fixed top-0 left-0 right-0 z-50 transition-all duration-300 px-3 sm:px-5 md:px-10 ${
+    <header className={`app-header fixed top-0 left-0 right-0 z-50 transition-all duration-300 px-2 min-[360px]:px-3 sm:px-5 md:px-10 ${
       isScrolled 
-        ? 'py-2 bg-[#0e0e11]/95 backdrop-blur-2xl border-b border-white/[0.08] shadow-[0_12px_40px_rgba(0,0,0,0.7)]' 
-        : 'py-3 bg-[#121216]/90 backdrop-blur-xl border-b border-white/[0.05] shadow-[0_4px_30px_rgba(0,0,0,0.4)]'
+        ? 'py-2 bg-[#0e0e11] border-b border-white/[0.08] shadow-[0_12px_40px_rgba(0,0,0,0.7)]' 
+        : 'py-3 bg-[#0e0e11] backdrop-blur-xl border-b border-white/[0.05] shadow-[0_4px_30px_rgba(0,0,0,0.4)]'
     } flex items-center justify-between gap-2`}>
       {/* Top subtle ambient highlight */}
       <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-red-500/30 to-transparent pointer-events-none" />
@@ -307,7 +307,7 @@ function Navbar({
       <div className="flex items-center gap-3 min-w-0 shrink-0">
         {/* Hamburger - mobile only */}
         <button
-          className="md:hidden p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+          className="xl:hidden p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
           onClick={() => setShowMobileMenu(v => !v)}
           aria-label="Menu"
         >
@@ -332,16 +332,16 @@ function Navbar({
               className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl shadow-md shadow-red-600/20 group-hover:scale-105 group-hover:shadow-red-600/40 transition-all object-cover ring-1 ring-white/10" 
             />
           </div>
-          <span className="text-xl sm:text-2xl font-black tracking-wider bg-gradient-to-r from-red-500 via-rose-400 to-amber-200 bg-clip-text text-transparent uppercase drop-shadow group-hover:brightness-110 transition-all">
+          <span className="max-[420px]:hidden text-xl sm:text-2xl font-black tracking-wider bg-gradient-to-r from-red-500 via-rose-400 to-amber-200 bg-clip-text text-transparent uppercase drop-shadow group-hover:brightness-110 transition-all">
             AniFlix
           </span>
-          <span className="hidden sm:inline-flex items-center text-[10px] tracking-wider bg-red-500/10 text-red-400 px-2 py-0.5 rounded-full border border-red-500/25 font-bold font-mono shadow-sm">
+          <span className="hidden lg:inline-flex items-center text-[10px] tracking-wider bg-red-500/10 text-red-400 px-2 py-0.5 rounded-full border border-red-500/25 font-bold font-mono shadow-sm">
             v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.8'}
           </span>
         </button>
 
         {/* Primary Navigation Pills — desktop only */}
-        <nav className="hidden md:flex items-center gap-1.5 p-1 rounded-full bg-white/[0.03] border border-white/[0.06] backdrop-blur-md">
+        <nav className="hidden xl:flex items-center gap-1.5 p-1 rounded-full bg-white/[0.03] border border-white/[0.06] backdrop-blur-md">
           <button 
             onClick={() => { setActiveTab('home'); onSearch(''); }}
             className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
@@ -478,7 +478,7 @@ function Navbar({
       </div>
 
       {/* Right Side: Search, Downloader, Language & Settings */}
-      <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+      <div className="flex items-center gap-1 min-[360px]:gap-1.5 sm:gap-2.5 shrink-0">
         {/* Search Bar & Dropdown */}
         <div className="relative flex items-center" ref={searchContainerRef}>
           <div className={`flex items-center transition-all duration-300 rounded-full ${
@@ -875,7 +875,7 @@ function Navbar({
 
     {/* Mobile Navigation Drawer */}
     {showMobileMenu && (
-      <div className="fixed top-[52px] left-0 right-0 z-40 md:hidden bg-[#0e0e11]/98 backdrop-blur-2xl border-b border-white/[0.08] shadow-2xl px-4 py-3 flex flex-col gap-1 animate-in fade-in slide-in-from-top-2">
+      <div className="fixed top-[52px] left-0 right-0 z-40 xl:hidden bg-[#0e0e11]/98 backdrop-blur-2xl border-b border-white/[0.08] shadow-2xl px-4 py-3 flex flex-col gap-1 animate-in fade-in slide-in-from-top-2">
         <button onClick={() => { setActiveTab('home'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'home' && !searchQuery ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}>{t('home')}</button>
         <button onClick={() => { setActiveTab('trending'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'trending' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Flame className="w-4 h-4 text-amber-400" />{t('trending')}</button>
         <button onClick={() => { setActiveTab('upcoming'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'upcoming' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Clock className="w-4 h-4 text-cyan-400" />{t('upcoming')}</button>

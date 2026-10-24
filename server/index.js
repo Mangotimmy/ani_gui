@@ -23,8 +23,10 @@ import {
   getAnimeMediaVideos,
   searchTorrents,
   getAnimeChineseInfo,
-  getAiringSchedule
+  getAiringSchedule,
+  getAnimeRelations
 } from './services/metadata.js';
+import { getSkipTimes } from './services/aniskip.js';
 import { listComments, addComment, deleteComment } from './services/commentsService.js';
 import { resolveStream, getAvailableEpisodes } from './services/streamResolver.js';
 import { launchMpv, openFolder, openMagnetLink } from './services/playerLauncher.js';
@@ -365,6 +367,28 @@ app.get('/api/anime/titles', (req, res) => {
     res.json({ success: true, data: getCachedTitlesForIds(ids) });
   } catch (err) {
     res.status(200).json({ success: false, error: err.message, data: {} });
+  }
+});
+
+// Franchise relations (prequels / sequels / other seasons / side stories)
+app.get('/api/anime/:id/relations', async (req, res) => {
+  try {
+    const relations = await getAnimeRelations(req.params.id);
+    res.json({ success: true, relations });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message, relations: [] });
+  }
+});
+
+// AniSkip intro/outro timestamps (needs the AniList -> MAL mapping)
+app.get('/api/anime/:id/skip-times', async (req, res) => {
+  try {
+    const episode = parseInt(req.query.episode, 10) || 1;
+    const length = parseFloat(req.query.length) || 0;
+    const result = await getSkipTimes(req.params.id, episode, length);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.json({ success: false, found: false, intervals: [], error: err.message });
   }
 });
 

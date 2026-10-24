@@ -194,18 +194,6 @@ function hasHomeCache() {
     };
   }, [isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Quick year pills: current + future years that have releases + the recent past
-  const quickYears = useMemo(() => {
-    const years = new Set([...futureYears.map(f => f.year), CURRENT_YEAR]);
-    for (let y = CURRENT_YEAR - 1; y >= 2010 && years.size < 18; y--) years.add(y);
-    return Array.from(years).sort((a, b) => b - a);
-  }, [futureYears]);
-
-  const availableFutureYears = useMemo(
-    () => new Set(futureYears.map(f => f.year)),
-    [futureYears]
-  );
-
   // Infinite Horizontal Carousel Pagination State
   const [carouselPages, setCarouselPages] = useState({
     thisSeason: 1,
@@ -274,7 +262,39 @@ function hasHomeCache() {
   const [currentSeasonInfo, setCurrentSeasonInfo] = useState({ year: CURRENT_YEAR, season: 'FALL', label: `Fall ${CURRENT_YEAR}` });
   const [thisSeasonAnimes, setThisSeasonAnimes] = useState(() => getHomeCache('thisSeasonAnimes'));
   const [catalogYear, setCatalogYear] = useState(CURRENT_YEAR);
-  const [catalogRange, setCatalogRange] = useState(null); // { from, to } | null
+  const [catalogRange, setCatalogRange] = useState(null);
+
+  const availableFutureYears = useMemo(
+    () => new Set(futureYears.map(f => f.year)),
+    [futureYears]
+  );
+
+  // Quick year pills: dynamically adapts to the selected decade or year range!
+  const quickYears = useMemo(() => {
+    if (catalogRange?.from && catalogRange?.to) {
+      const decadeYears = [];
+      for (let y = catalogRange.to; y >= catalogRange.from; y--) {
+        if (y <= CURRENT_YEAR || availableFutureYears.has(y)) {
+          decadeYears.push(y);
+        }
+      }
+      return decadeYears;
+    }
+    // If a specific past year is active (e.g. 1975) that's not in the 2010s/2020s:
+    if (typeof catalogYear === 'number' && catalogYear < 2010) {
+      const decadeStart = Math.floor(catalogYear / 10) * 10;
+      const decadeEnd = Math.min(CURRENT_YEAR, decadeStart + 9);
+      const decadeYears = [];
+      for (let y = decadeEnd; y >= decadeStart; y--) {
+        decadeYears.push(y);
+      }
+      return decadeYears;
+    }
+    // Default current/recent era:
+    const years = new Set([...futureYears.map(f => f.year), CURRENT_YEAR]);
+    for (let y = CURRENT_YEAR - 1; y >= 2010 && years.size < 18; y--) years.add(y);
+    return Array.from(years).sort((a, b) => b - a);
+  }, [futureYears, catalogRange, catalogYear, availableFutureYears]);
   const [catalogSeason, setCatalogSeason] = useState('ALL');
   const [catalogStudio, setCatalogStudio] = useState('ALL');
   const [catalogSort, setCatalogSort] = useState('POPULARITY_DESC');
@@ -1288,7 +1308,7 @@ function hasHomeCache() {
                 </label>
 
                 {/* Full Year Dropdown Picker (1970 - 2026 + ALL) */}
-                <div className="flex items-center gap-1.5 bg-zinc-800/90 border border-zinc-700 px-2.5 py-1 rounded-full shrink-0">
+                <div className="flex items-center gap-1.5 bg-zinc-800/90 border border-zinc-700 px-3.5 py-1 rounded-full shrink-0 min-w-[100px]">
                   <select
                     id="catalog-year-select"
                     name="catalogYear"
@@ -1314,13 +1334,12 @@ function hasHomeCache() {
                   <button
                     key={yr}
                     type="button"
-                    aria-pressed={!catalogRange && catalogYear === yr}
+                    aria-pressed={catalogYear === yr}
                     onClick={() => {
-                      setCatalogRange(null);
                       setCatalogYear(yr);
                     }}
                     className={`px-3 py-1 rounded-full text-xs font-semibold shrink-0 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E50914] ${
-                      !catalogRange && catalogYear === yr
+                      catalogYear === yr
                         ? 'bg-[#E50914] text-white shadow-md shadow-red-600/30 font-bold'
                         : 'bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-white border border-zinc-700/50'
                     }`}

@@ -196,7 +196,7 @@ body.desktop-shell-mac {
   display: flex;
   align-items: center;
   padding-inline-start: 14px;
-  background: rgba(18, 17, 26, 0.92);
+  background: #0e0e11 !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   -webkit-app-region: drag;
   app-region: drag;
@@ -228,4 +228,46 @@ body.desktop-shell .marquee-offset {
 }
 body.desktop-shell .desktop-titlebar ~ .app-header {
   top: var(--titlebar-h);
+}
+
+/* UI scale & readability (WCAG 1.4.4 / 1.4.12 / 2.5.8) */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Raise micro text (10/11px) to a readable 12px floor; scales with user zoom. */
+.text-\[10px\],
+.text-\[11px\] {
+  font-size: 0.75rem !important;
+  line-height: 1.25 !important;
+}
+
+/* Touch targets: >= 32px on coarse pointers (WCAG 2.5.8 needs 24px; 32 keeps dense rows intact). */
+@media (pointer: coarse) {
+  button,
+  [role="button"],
+  select {
+    min-block-size: 32px;
+    min-inline-size: 32px;
+  }
+  .text-\[10px\],
+  .text-\[11px\] {
+    font-size: 0.8125rem !important;
+  }
+}
+
+/* Long strings must wrap instead of overflowing when text is enlarged. */
+h1, h2, h3, p, .line-clamp-1, .line-clamp-2 {
+  overflow-wrap: anywhere;
+}
+
+/* Windows high-contrast / forced-colors: keep focus and borders visible. */
+@media (forced-colors: active) {
+  *:focus-visible {
+    outline: 2px solid Highlight !important;
+  }
+  img {
+    outline: none;
+  }
 }

@@ -222,6 +222,20 @@ async function createWindow() {
       if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
         mainWindow.webContents.toggleDevTools();
         event.preventDefault();
+        return;
+      }
+      // UI scale: Ctrl +/-/0 (menu bar is hidden, so wire the shortcuts manually).
+      if ((input.control || input.meta) && !input.alt) {
+        const wc = mainWindow.webContents;
+        const cur = wc.getZoomFactor();
+        let next = null;
+        if (input.key === '+' || input.key === '=') next = Math.min(2, cur + 0.1);
+        else if (input.key === '-' || input.key === '_') next = Math.max(0.6, cur - 0.1);
+        else if (input.key === '0') next = 1;
+        if (next !== null) {
+          wc.setZoomFactor(Math.round(next * 10) / 10);
+          event.preventDefault();
+        }
       }
     }
   });

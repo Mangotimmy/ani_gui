@@ -717,20 +717,110 @@ export async function getSearchSuggestions(rawQuery, limit = 8) {
   return enriched;
 }
 
+// ───────────────────────── Transitive Franchise Relations (Prequels, Sequels, Seasons) ─────────────────────────
+export async function getAnimeFranchiseRelations(rootId, maxDepth = 4) {
+  const visited = new Set([Number(rootId)]);
+  const queue = [{ id: Number(rootId), depth: 0 }];
+  const allNodes = new Map();
+
+  const query = `
+    query ($id: Int) {
+      Media(id: $id, type: ANIME) {
+        id
+        relations {
+          edges {
+            relationType
+            node {
+              id
+              idMal
+              type
+              format
+              status
+              title { english romaji native }
+              coverImage { large extraLarge }
+              startDate { year }
+              episodes
+              averageScore
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  while (queue.length > 0) {
+    const { id: currId, depth } = queue.shift();
+    if (depth >= maxDepth) continue;
+
+    let media = null;
+    try {
+      const data = await anilistQuery(query, { id: currId });
+      media = data?.Media;
+    } catch {}
+
+    if (!media) continue;
+
+    const edges = media.relations?.edges || [];
+    for (const edge of edges) {
+      const n = edge?.node;
+      if (!n || n.type !== 'ANIME') continue;
+      const targetId = Number(n.id);
+      if (!visited.has(targetId)) {
+        visited.add(targetId);
+        queue.push({ id: targetId, depth: depth + 1 });
+        allNodes.set(targetId, {
+          ...n,
+          relationType: edge.relationType
+        });
+      }
+    }
+  }
+
+  const nodes = Array.from(allNodes.values());
+  const priorityMap = { PREQUEL: 1, SEQUEL: 2, PARENT: 3, SIDE_STORY: 4, SPIN_OFF: 5, ALTERNATIVE: 6 };
+  nodes.sort((a, b) => {
+    const oA = priorityMap[a.relationType] || 99;
+    const oB = priorityMap[b.relationType] || 99;
+    if (oA !== oB) return oA - oB;
+    return (a.startDate?.year || 0) - (b.startDate?.year || 0);
+  });
+
+  return nodes.length > 0 ? await enrichWithChineseTitlesAsync(nodes, { budgetMs: 3000 }) : [];
+}
+
 export async function getAnimeDetails(id) {
   const numId = parseInt(id, 10);
   if (!numId || isNaN(numId)) return null;
 
   const cached = detailsCache.get(numId);
-  if (cached) return cached;
+  if (cached && Array.isArray(cached.relations)) return cached;
 
   const query = `
     query ($id: Int) {
       Media(id: $id, type: ANIME) {
         ${MEDIA_FIELDS}
+        idMal
+        format
         studios(isMain: true) {
           nodes {
             name
+          }
+        }
+        relations {
+          edges {
+            relationType
+            node {
+              id
+              idMal
+              type
+              format
+              status
+              title { english romaji native }
+              coverImage { large extraLarge }
+              startDate { year }
+              episodes
+              averageScore
+            }
           }
         }
       }
@@ -739,10 +829,129 @@ export async function getAnimeDetails(id) {
   const data = await anilistQuery(query, { id: numId });
   const media = data?.Media || null;
   if (!media) return null;
-  const enriched = await enrichWithChineseTitlesAsync([media], { budgetMs: 3000 });
-  const result = enriched[0] || media;
+  const rawEdges = media.relations?.edges || [];
+  const animeNodes = [];
+  const priorityMap = { PREQUEL: 1, SEQUEL: 2, PARENT: 3, SIDE_STORY: 4, SPIN_OFF: 5, ALTERNATIVE: 6 };
+  for (const edge of rawEdges) {
+    if (edge?.node?.type === "ANIME") {
+      animeNodes.push({
+        ...edge.node,
+        relationType: edge.relationType,
+        _order: priorityMap[edge.relationType] || 99
+      });
+    }
+  }
+  animeNodes.sort((a, b) => {
+    if (a._order !== b._order) return a._order - b._order;
+    return (a.startDate?.year || 0) - (b.startDate?.year || 0);
+  });
+  const enrichedMain = await enrichWithChineseTitlesAsync([media], { budgetMs: 2500 });
+  const enrichedRelations = animeNodes.length > 0 ? await enrichWithChineseTitlesAsync(animeNodes, { budgetMs: 2500 }) : [];
+  let allRelations = enrichedRelations;
+  try {
+    const fullFranchise = await getAnimeFranchiseRelations(numId, 4);
+    if (Array.isArray(fullFranchise) && fullFranchise.length > 0) {
+      allRelations = fullFranchise;
+    }
+  } catch (err) {
+    console.warn("[Relations] Full franchise traversal failed, using direct relations:", err.message);
+  }
+  const result = {
+    ...(enrichedMain[0] || media),
+    relations: allRelations
+  };
   detailsCache.set(numId, result);
   return result;
+}
+
+// ───────────────────────── Franchise relations (prequels / sequels / other seasons) ─────────────────────────
+const RELATION_FIELDS = `
+  ${MEDIA_FIELDS}
+  idMal
+  format
+  type
+`;
+const relationsCache = new BoundedCache(300, 6 * 60 * 60 * 1000);
+const ORDERED_TYPES = ['PARENT', 'PREQUEL', 'SEQUEL'];
+const EXTRA_TYPES = ['SIDE_STORY', 'ALTERNATIVE', 'SPIN_OFF', 'SUMMARY', 'FULL_STORY'];
+
+async function fetchRelationEdges(mediaId) {
+  const query = `
+    query ($id: Int) {
+      Media(id: $id, type: ANIME) {
+        relations {
+          edges {
+            relationType
+            node { ${RELATION_FIELDS} }
+          }
+        }
+      }
+    }
+  `;
+  const data = await anilistQuery(query, { id: mediaId });
+  return data?.Media?.relations?.edges || [];
+}
+
+/**
+ * Whole franchise around an anime: walks PREQUEL / SEQUEL links transitively (so Re:Zero S4
+ * lists S1, S2 and S3, not only S3), plus direct side stories / spin-offs / alternatives.
+ * Returns a timeline-sorted list with a `relationType` on every entry.
+ */
+export async function getAnimeRelations(id, { maxNodes = 12 } = {}) {
+  const numId = parseInt(id, 10);
+  if (!numId || isNaN(numId)) return [];
+  const cached = relationsCache.get(numId);
+  if (cached) return cached;
+
+  const found = new Map(); // id -> entry
+  const visited = new Set([numId]);
+  let fetches = 0;
+
+  // Frontier of nodes still to expand, each with the only edge type we may follow from it.
+  let frontier = [{ id: numId, follow: null, depth: 0 }];
+  try {
+    while (frontier.length && fetches < maxNodes) {
+      const batch = frontier.splice(0, 4);
+      const results = await Promise.all(batch.map(async (n) => {
+        fetches++;
+        try { return { n, edges: await fetchRelationEdges(n.id) }; } catch { return { n, edges: [] }; }
+      }));
+      for (const { n, edges } of results) {
+        for (const e of edges) {
+          const node = e?.node;
+          if (!node?.id || node.type !== 'ANIME') continue;
+          const type = e.relationType;
+          const isOrigin = n.id === numId;
+          const isChain = type === 'PREQUEL' || type === 'SEQUEL';
+          // From the origin follow everything useful; from chain nodes only keep walking the same direction.
+          if (!isOrigin && type !== n.follow) continue;
+          if (isOrigin && !ORDERED_TYPES.includes(type) && !EXTRA_TYPES.includes(type)) continue;
+          if (visited.has(node.id)) continue;
+          visited.add(node.id);
+          found.set(node.id, { ...node, relationType: type });
+          if (isChain && n.depth < 8) frontier.push({ id: node.id, follow: type, depth: n.depth + 1 });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Relations] AniList walk failed:', err.message);
+  }
+
+  const dateKey = (a) => (a.startDate?.year || 9999) * 10000 + (a.startDate?.month || 0) * 100 + (a.startDate?.day || 0);
+  const all = [...found.values()];
+  const timeline = all.filter(a => ORDERED_TYPES.includes(a.relationType)).sort((a, b) => dateKey(a) - dateKey(b));
+  const extras = all.filter(a => !ORDERED_TYPES.includes(a.relationType)).sort((a, b) => dateKey(a) - dateKey(b));
+  const list = [...timeline, ...extras];
+
+  let enriched = list;
+  try {
+    const withTitles = await enrichWithChineseTitlesAsync(list, { budgetMs: 2500 });
+    const byId = new Map(list.map(a => [a.id, a.relationType]));
+    enriched = withTitles.map(a => ({ ...a, relationType: byId.get(a.id) }));
+  } catch {}
+
+  if (enriched.length > 0) relationsCache.set(numId, enriched);
+  return enriched;
 }
 
 export async function getRecommendationsForAnime(id, limit = 10) {

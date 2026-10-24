@@ -3,7 +3,7 @@ import Hls from 'hls.js';
 import { 
   X, Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, 
   Maximize, Minimize, SkipBack, SkipForward, MonitorPlay, 
-  Settings, Loader2, Copy, Check, Link2, ExternalLink, SlidersHorizontal,
+  Settings, Loader2, Copy, Check, Link2, ExternalLink, SlidersHorizontal, FastForward,
   Subtitles, Upload, FileUp, Tv, Smartphone, Zap, Sparkles,
   MoreVertical, Film, AlertTriangle, Radio, ChevronDown,
   PictureInPicture2, Minimize2, Maximize2
@@ -153,12 +153,19 @@ export default function VideoPlayer({
   const [streamUrl, setStreamUrl] = useState('');
   const [rawStreamUrl, setRawStreamUrl] = useState('');
   const [referer, setReferer] = useState('https://zokoanime.video/');
+
   const [subtitles, setSubtitles] = useState([]);
   const [selectedSubIndex, setSelectedSubIndex] = useState(0);
   const [showSubtitlesMenu, setShowSubtitlesMenu] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(true);
+  const [bufferPercent, setBufferPercent] = useState(0);
+  const [skipTimes, setSkipTimes] = useState(null);
+  const [activeSkipType, setActiveSkipType] = useState(null);
+  const [showEndScreen, setShowEndScreen] = useState(false);
+  const [endScreenCountdown, setEndScreenCountdown] = useState(10);
+  const [endScreenRecommendations, setEndScreenRecommendations] = useState([]);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
@@ -841,6 +848,52 @@ export default function VideoPlayer({
     }
   }, [autoPlayCountdown, onNextEpisode]);
 
+    // Load AniSkip intervals (OP / ED timestamps)
+  useEffect(() => {
+    let cancelled = false;
+    const animeId = anime?.id;
+    if (!animeId) return;
+    fetch("/api/anime/" + animeId + "/skip-times?episode=" + episode + "&duration=" + (duration || 1440))
+      .then(r => r.json())
+      .then(d => {
+        if (!cancelled && d.success && Array.isArray(d.intervals)) {
+          const op = d.intervals.find(i => i.type === "op");
+          const ed = d.intervals.find(i => i.type === "ed");
+          setSkipTimes({ op: op || null, ed: ed || null });
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [anime?.id, episode, duration]);
+
+  // Handle Skip OP / Skip ED action
+  const handleSkipOpOrEd = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (activeSkipType === "op" && skipTimes?.op) {
+      video.currentTime = skipTimes.op.end + 0.5;
+      setActiveSkipType(null);
+    } else if (activeSkipType === "ed" && skipTimes?.ed) {
+      video.currentTime = skipTimes.ed.end + 0.5;
+      setActiveSkipType(null);
+    }
+  };
+
+    // End-Screen recommendation auto-play countdown effect
+  useEffect(() => {
+    if (!showEndScreen) return;
+    if (endScreenCountdown > 0) {
+      const t = setTimeout(() => setEndScreenCountdown(c => c - 1), 1000);
+      return () => clearTimeout(t);
+    } else if (endScreenCountdown === 0) {
+      if (endScreenRecommendations.length > 0) {
+        const nextTarget = endScreenRecommendations[0];
+        setShowEndScreen(false);
+        if (onSelectEpisode) onSelectEpisode(nextTarget, 1);
+      }
+    }
+  }, [showEndScreen, endScreenCountdown, endScreenRecommendations, onSelectEpisode]);
+
   const cancelAutoPlay = () => {
     if (countdownTimerRef.current) clearTimeout(countdownTimerRef.current);
     setAutoPlayCountdown(null);
@@ -883,6 +936,30 @@ export default function VideoPlayer({
     if (!video) return;
     const cur = video.currentTime;
     setCurrentTime(cur);
+
+    // Buffer percentage calculation: forward buffer ahead of current playhead
+    if (video.buffered && video.buffered.length > 0) {
+      let curBufEnd = cur;
+      for (let i = 0; i < video.buffered.length; i++) {
+        if (video.buffered.start(i) <= cur + 0.5 && video.buffered.end(i) >= cur) {
+          curBufEnd = video.buffered.end(i);
+          break;
+        }
+      }
+      const aheadSec = Math.max(0, curBufEnd - cur);
+      const targetSec = 20;
+      const pct = Math.min(100, Math.round((aheadSec / targetSec) * 100));
+      setBufferPercent(pct);
+    }
+
+    // Skip OP / ED detection
+    if (skipTimes?.op && cur >= skipTimes.op.start && cur < skipTimes.op.end - 1) {
+      setActiveSkipType("op");
+    } else if (skipTimes?.ed && cur >= skipTimes.ed.start && cur < skipTimes.ed.end - 1) {
+      setActiveSkipType("ed");
+    } else {
+      setActiveSkipType(null);
+    }
     setDuration(video.duration || 0);
 
     // Track buffered range for seekbar
@@ -1352,6 +1429,13 @@ export default function VideoPlayer({
       if (!video) return;
 
       switch (e.key) {
+        case 's':
+        case 'S':
+          if (activeSkipType) {
+            e.preventDefault();
+            handleSkipOpOrEd();
+          }
+          break;
         case ' ':
         case 'k':
         case 'K':
@@ -2472,13 +2556,117 @@ export default function VideoPlayer({
             gpuSettings?.enableBackdropBlur ? 'bg-black/40 backdrop-blur-sm' : 'bg-zinc-900/90'
           } p-4 rounded-2xl ring-1 ring-white/10 shadow-2xl`}>
             <Loader2 className="w-10 h-10 text-[#E50914] animate-spin drop-shadow-xl" />
-            <span className="text-xs font-semibold text-zinc-300 tracking-wider uppercase">
+            <span className="text-xs font-semibold text-zinc-300 tracking-wider uppercase flex items-center gap-1.5">
               {currentTime > 0 || (videoRef.current && videoRef.current.readyState >= 2)
-                ? 'Buffering...'
-                : 'Loading HLS Stream...'}
+                ? `${currentLang.startsWith('zh') ? '緩衝中' : 'Buffering'} ${bufferPercent}%`
+                : (currentLang.startsWith('zh')
+                    ? `HLS 串流載入中${bufferPercent > 0 ? ` ${bufferPercent}%` : ''}`
+                    : `Loading HLS Stream...${bufferPercent > 0 ? ` ${bufferPercent}%` : ''}`)}
             </span>
           </div>
         </div>
+      )}
+
+      {/* End-of-Movie / End-of-Season Recommendation Overlay */}
+      {showEndScreen && (
+        <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
+          <div className="max-w-2xl w-full flex flex-col items-center">
+            <h2 className="text-xl sm:text-2xl font-black text-white mb-2 flex items-center gap-2">
+              <Sparkles className="w-6 h-6 text-rose-500" />
+              {currentLang.startsWith("zh") ? "播放完畢 · 為您推薦下一部精彩作品" : "Finished · Recommended for you"}
+            </h2>
+            <p className="text-xs text-zinc-400 mb-6">
+              {endScreenCountdown > 0 
+                ? (currentLang.startsWith("zh") ? (endScreenCountdown + " 秒後將自動播放推薦作品...") : ("Auto-playing next recommended title in " + endScreenCountdown + "s..."))
+                : ""}
+            </p>
+
+            {/* Recommendations Grid */}
+            {endScreenRecommendations.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full mb-6">
+                {endScreenRecommendations.map((item) => {
+                  const itTitle = pickAnimeTitle(item, currentLang) || item.title?.romaji || item.title?.english || "Anime";
+                  const itCover = getAnimeCoverUrl(item);
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => {
+                        setShowEndScreen(false);
+                        if (onSelectEpisode) onSelectEpisode(item, 1);
+                      }}
+                      className="group/end cursor-pointer bg-zinc-900 rounded-xl overflow-hidden border border-zinc-800 hover:border-rose-500 transition-all hover:scale-105 shadow-xl flex flex-col"
+                    >
+                      <div className="aspect-[2/3] relative overflow-hidden bg-zinc-950">
+                        {itCover && (
+                          <img
+                            src={itCover}
+                            alt={itTitle}
+                            className="w-full h-full object-cover group-hover/end:scale-110 transition-transform duration-300"
+                          />
+                        )}
+                      </div>
+                      <div className="p-2 text-left">
+                        <p className="text-xs font-semibold text-white line-clamp-1 group-hover/end:text-rose-400">
+                          {itTitle}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEndScreen(false);
+                  if (videoRef.current) {
+                    videoRef.current.currentTime = 0;
+                    videoRef.current.play();
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs border border-zinc-700 transition-all"
+              >
+                {currentLang.startsWith("zh") ? "重播本片" : "Replay"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEndScreen(false);
+                  if (onClose) onClose();
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-lg shadow-rose-600/30 transition-all"
+              >
+                {currentLang.startsWith("zh") ? "回到目錄 / 首頁" : "Back to Catalog"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowEndScreen(false)}
+                className="px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white text-xs border border-zinc-800 transition-all"
+              >
+                {currentLang.startsWith("zh") ? "取消" : "Cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Skip OP / Skip ED Button */}
+      {activeSkipType && (
+        <button
+          type="button"
+          onClick={handleSkipOpOrEd}
+          className="absolute bottom-24 right-6 z-40 bg-white/95 hover:bg-white text-black font-extrabold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 transition-all hover:scale-105 active:scale-95 border border-white/20 animate-in fade-in slide-in-from-bottom-3"
+          aria-label={activeSkipType === "op" ? "跳過片頭" : "跳過片尾"}
+        >
+          <FastForward className="w-4 h-4 fill-black" />
+          <span className="text-xs tracking-wider">
+            {activeSkipType === "op" ? (currentLang.startsWith("zh") ? "跳過片頭 (Skip OP)" : "Skip Intro") : (currentLang.startsWith("zh") ? "跳過片尾 (Skip ED)" : "Skip Outro")}
+          </span>
+          <span className="text-[10px] bg-black/10 px-1.5 py-0.5 rounded font-mono font-bold text-zinc-700">S</span>
+        </button>
       )}
 
       {/* Custom M3U8 Link Modal */}
@@ -2843,8 +3031,13 @@ export default function VideoPlayer({
               />
             </div>
 
-            <span className="text-[11px] sm:text-xs text-zinc-300 font-mono w-10 sm:w-12 shrink-0">
+            <span className="text-[11px] sm:text-xs text-zinc-300 font-mono shrink-0 text-right">
               {formatTime(duration)}
+              {duration > 0 && (
+                <span className="hidden sm:inline ms-2 text-zinc-400" title="Buffered" aria-label={`Buffered ${Math.min(100, Math.round((bufferedEnd / duration) * 100))} percent`}>
+                  {Math.min(100, Math.round((bufferedEnd / duration) * 100))}%
+                </span>
+              )}
             </span>
           </div>
 

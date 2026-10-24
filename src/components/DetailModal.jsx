@@ -7,6 +7,7 @@ import {
   Users, HardDrive, Radio, Languages, Compass, Search, Zap, MessageSquare
 } from 'lucide-react';
 import { getAnimeCoverUrl, getAnimeBannerUrl, toCachedImageUrl } from '../utils/image.js';
+import { pickAnimeTitle } from '../utils/titles.js';
 import AnimeComments from './AnimeComments';
 import AnimeInfoLinks from './AnimeInfoLinks';
 
@@ -30,6 +31,7 @@ export default function DetailModal({
   const [uploadedEpisodes, setUploadedEpisodes] = useState([]);
   const [isSyncingEpisodes, setIsSyncingEpisodes] = useState(false);
   const [similarAnime, setSimilarAnime] = useState([]);
+  const [relations, setRelations] = useState(() => anime?.relations || []);
   const [lastRefreshed, setLastRefreshed] = useState(null);
 
   // Content Tabs: 'episodes' | 'trailers' | 'themes' | 'torrents'
@@ -147,6 +149,21 @@ export default function DetailModal({
     loadEpisodes(false);
     loadMediaVideos();
     setActiveMedia(null); // Reset player when changing anime
+
+    // Load franchise relations (prequels / sequels / other seasons) for this title
+    if (Array.isArray(anime.relations) && anime.relations.length > 0) {
+      setRelations(anime.relations);
+    } else {
+      setRelations([]);
+      fetch(`/api/anime/${anime.id}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d?.success && Array.isArray(d.data?.relations)) {
+            setRelations(d.data.relations);
+          }
+        })
+        .catch(() => {});
+    }
 
     // 3. Load "More Like This" recommendations
     async function loadSimilar() {
@@ -1374,6 +1391,77 @@ export default function DetailModal({
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Franchise Relations Shelf: Prequels, Sequels, Seasons */}
+          {Array.isArray(relations) && relations.length > 0 && (
+            <div className="mt-8 pt-6 border-t border-zinc-800">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Film className="w-4 h-4 text-rose-500" />
+                  <h3 className="text-base font-bold text-white">
+                    {currentLang === 'ja' ? 'シリーズ作品・他のシーズン' : currentLang.startsWith('zh') ? '系列作品與其他季度 (Seasons & Relations)' : 'Franchise & Other Seasons'}
+                  </h3>
+                </div>
+                <span className="text-xs text-zinc-400 font-mono">
+                  {relations.length} {currentLang === 'ja' ? '作品' : currentLang.startsWith('zh') ? '部作品' : 'entries'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                {relations.map((rel) => {
+                  const relTitle = pickAnimeTitle(rel, currentLang) || rel.title?.romaji || rel.title?.english || 'Anime';
+                  const relCover = getAnimeCoverUrl(rel);
+                  const badgeMap = {
+                    PREQUEL: { zh: '前傳 / 前一季', cls: 'bg-indigo-900/60 text-indigo-300 border-indigo-700/50' },
+                    SEQUEL: { zh: '續篇 / 下一季', cls: 'bg-rose-900/60 text-rose-300 border-rose-700/50' },
+                    PARENT: { zh: '本篇系列', cls: 'bg-amber-900/60 text-amber-300 border-amber-700/50' },
+                    SIDE_STORY: { zh: '外傳 / OVA', cls: 'bg-cyan-900/60 text-cyan-300 border-cyan-700/50' },
+                    SPIN_OFF: { zh: '衍生作', cls: 'bg-purple-900/60 text-purple-300 border-purple-700/50' },
+                    ALTERNATIVE: { zh: '平行世界/劇場版', cls: 'bg-zinc-800 text-zinc-300 border-zinc-700' }
+                  };
+                  const badge = badgeMap[rel.relationType] || { zh: '關聯作品', cls: 'bg-zinc-800 text-zinc-300 border-zinc-700' };
+
+                  return (
+                    <div
+                      key={rel.id}
+                      onClick={() => onSelectAnime && onSelectAnime(rel)}
+                      className="group/rel cursor-pointer bg-zinc-900/90 rounded-xl overflow-hidden border border-zinc-800/80 hover:border-rose-500/60 transition-all hover:scale-105 shadow-md flex flex-col justify-between"
+                    >
+                      <div className="aspect-[2/3] relative overflow-hidden bg-zinc-950">
+                        {relCover && (
+                          <img
+                            src={relCover}
+                            alt={relTitle}
+                            width="200"
+                            height="300"
+                            loading="lazy"
+                            decoding="async"
+                            style={{ aspectRatio: '2/3' }}
+                            className="w-full h-auto aspect-[2/3] object-cover group-hover/rel:scale-110 transition-transform duration-300"
+                          />
+                        )}
+                        <div className="absolute top-1.5 left-1.5">
+                          <span className={"text-[9px] font-bold px-1.5 py-0.5 rounded border backdrop-blur-md " + badge.cls}>
+                            {badge.zh}
+                          </span>
+                        </div>
+                        {rel.startDate?.year && (
+                          <div className="absolute bottom-1.5 right-1.5 bg-black/80 px-1.5 py-0.5 rounded text-[10px] font-mono text-zinc-300">
+                            {rel.startDate.year}
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-2">
+                        <p className="text-xs font-semibold text-white line-clamp-2 leading-tight group-hover/rel:text-rose-400 transition-colors">
+                          {relTitle}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 

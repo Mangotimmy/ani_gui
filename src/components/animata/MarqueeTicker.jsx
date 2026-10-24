@@ -96,7 +96,7 @@ export default function MarqueeTicker({
             type="button"
             tabIndex={hidden ? -1 : 0}
             onClick={() => onOpenAnime(item.media)}
-            className="group flex items-center gap-2 rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            className="group flex items-center gap-2 min-h-6 rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
           >
             {content}
           </button>

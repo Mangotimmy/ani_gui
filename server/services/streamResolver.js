@@ -292,7 +292,7 @@ export async function resolveStream({
       activeSource: 'anime1',
       availableSources: buildSourceList('anime1'),
       error: a1Res?.error || `Anime1 找不到《${animeTitle}》第 ${episode} 集。`,
-      suggestedFallback: 'framextv'
+      suggestedFallback: 'hianime'
     };
   }
 

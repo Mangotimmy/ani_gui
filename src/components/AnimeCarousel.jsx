@@ -48,6 +48,26 @@ function AnimeCarousel({
     }
   };
 
+  // Mouse wheel over carousel: when user scrolls vertically with mouse wheel,
+  // ensure the window scrolls smoothly up and down instead of trapping cursor!
+  React.useEffect(() => {
+    const el = rowRef.current;
+    if (!el) return undefined;
+    const onWheel = (e) => {
+      if (e.ctrlKey) return; // allow pinch zoom
+      // If user is intentionally scrolling horizontally (trackpad or shift+wheel), let native handle it
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) * 1.2) {
+        return;
+      }
+      // Vertical wheel scroll: forward to window vertical scroll so page scrolls up/down!
+      if (Math.abs(e.deltaY) > 0) {
+        window.scrollBy({ top: e.deltaY, behavior: 'auto' });
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: true });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [animes.length]);
+
   if (!animes || animes.length === 0) return null;
 
   return (

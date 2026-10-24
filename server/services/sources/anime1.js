@@ -41,6 +41,57 @@ function extractEpNumber(titleStr) {
 }
 
 /**
+ * Reduce a title to its "core" for comparison: Traditional script, lower-case, without
+ * bracketed episode/quality tags, parenthesised aliases, season/part markers and punctuation.
+ * "銀魂 第三季 [01]" -> "銀魂", "鎮魂街 風花雪月篇 (鎮魂街 第三季)" -> "鎮魂街風花雪月篇"
+ */
+export function titleCore(str) {
+  if (!str) return '';
+  return s2t(String(str))
+    .toLowerCase()
+    .replace(/\[[^\]]*\]|【[^】]*】/g, ' ')
+    .replace(/\([^)]*\)|（[^）]*）/g, ' ')
+    .replace(/第\s*[一二三四五六七八九十百\d]+\s*[季期部]/g, ' ')
+    .replace(/\b(?:season|part|cour)\s*\d+\b|\b\d+(?:st|nd|rd|th)\s+season\b/g, ' ')
+    .replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+/**
+ * Verify that a search-result title really is the anime we asked for.
+ * Anime1's search is full-text, so "銀魂 第三季" also returns 《鎮魂街 風花雪月篇》
+ * (it only shares the "第三季" token). Returns 0 = reject, 1 = contains the title,
+ * 2 = starts with the title, 3 = identical core title.
+ */
+const TAIL_OK = /篇|章|編|编|季|期|續|续|完結|完结|劇場版|剧场版|final|season|part|cour|movie|ova|oad|^\d+$/i;
+
+export function verifyTitleMatch(queries, articleTitle) {
+  const list = (Array.isArray(queries) ? queries : [queries]).filter(Boolean);
+  const articleCore = titleCore(articleTitle);
+  // Aliases inside parentheses, e.g. "… (鎮魂街 第三季)", are valid names too.
+  const aliasCores = [...String(articleTitle || '').matchAll(/[(（]([^)）]+)[)）]/g)].map(m => titleCore(m[1]));
+  const targets = [articleCore, ...aliasCores].filter(t => t.length >= 2);
+  if (!targets.length) return 0;
+
+  let best = 0;
+  for (const q of list) {
+    const qCore = titleCore(q);
+    if (qCore.length < 2) continue;
+    for (const t of targets) {
+      let score = 0;
+      if (t === qCore) score = 3;
+      else if (qCore.startsWith(t)) score = 2; // we asked for a longer/more specific name
+      else if (t.startsWith(qCore)) {
+        // The result continues our title. Only a season/arc/movie continuation is the same
+        // franchise entry; anything else is a spin-off ("銀魂 3年Z班銀八老師" is not 銀魂).
+        score = TAIL_OK.test(t.slice(qCore.length)) ? 2 : 0;
+      } else if (qCore.length >= 4 && (t.includes(qCore) || (t.length >= 4 && qCore.includes(t)))) score = 1;
+      if (score > best) best = score;
+    }
+  }
+  return best;
+}
+
+/**
  * Build rich candidate queries covering multi-regional Chinese variations (TW, HK, CN)
  */
 function buildQueryList(title, candidates = []) {
@@ -100,12 +151,23 @@ async function resolveFromAnime1Me(queryList, epNum) {
       const articleMatches = [...html.matchAll(/<h2 class="entry-title">\s*<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)];
       if (articleMatches.length === 0) continue;
 
+      // Only keep articles whose title is really the requested anime, best match first.
+      const verified = articleMatches
+        .map(m => ({ url: m[1], title: m[2], score: verifyTitleMatch(queryList, m[2]) }))
+        .filter(a => a.score > 0);
+      if (verified.length === 0) {
+        console.warn(`[Anime1.me] Rejected unrelated results for "${q}": ${articleMatches.slice(0, 3).map(m => m[2]).join(' | ')}`);
+        continue;
+      }
+      const topScore = Math.max(...verified.map(a => a.score));
+      const pool = verified.filter(a => a.score === topScore);
+
       let targetArticle = null;
 
       // 1. Direct search page match
-      for (const m of articleMatches) {
-        if (extractEpNumber(m[2]) === epNum) {
-          targetArticle = { url: m[1], title: m[2] };
+      for (const a of pool) {
+        if (extractEpNumber(a.title) === epNum) {
+          targetArticle = { url: a.url, title: a.title };
           break;
         }
       }
@@ -126,7 +188,7 @@ async function resolveFromAnime1Me(queryList, epNum) {
               const catHtml = await catRes.text();
               const catArticles = [...catHtml.matchAll(/<h2 class="entry-title">\s*<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)];
               for (const cm of catArticles) {
-                if (extractEpNumber(cm[2]) === epNum) {
+                if (verifyTitleMatch(queryList, cm[2]) > 0 && extractEpNumber(cm[2]) === epNum) {
                   targetArticle = { url: cm[1], title: cm[2] };
                   break;
                 }
@@ -137,9 +199,9 @@ async function resolveFromAnime1Me(queryList, epNum) {
         }
       }
 
-      // 3. Fallback: if requesting episode 1 and only 1 post found
-      if (!targetArticle && epNum === 1 && articleMatches.length > 0) {
-        targetArticle = { url: articleMatches[articleMatches.length - 1][1], title: articleMatches[articleMatches.length - 1][2] };
+      // 3. Fallback: if requesting episode 1, use the earliest verified post
+      if (!targetArticle && epNum === 1 && pool.length > 0) {
+        targetArticle = { url: pool[pool.length - 1].url, title: pool[pool.length - 1].title };
       }
 
       if (!targetArticle) continue;
@@ -240,11 +302,22 @@ async function resolveFromAnime1One(queryList, epNum) {
       if (!searchRes.ok) continue;
       const html = await searchRes.text();
 
-      // Extract series slug from post matches, e.g. /199902074-11180000 or /199902074/
-      const seriesMatch = html.match(/\/(\d{8,10})[-/]/);
-      if (!seriesMatch) continue;
-
-      const seriesId = seriesMatch[1];
+      // Collect series links with their titles, e.g. /199902074-11180000 or /199902074/
+      const seen = new Map();
+      for (const m of html.matchAll(/<a[^>]+href="(?:https?:\/\/anime1\.one)?\/(\d{8,10})(?:[-/][^"]*)?"[^>]*>([\s\S]*?)<\/a>/g)) {
+        const text = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!text) continue;
+        const score = verifyTitleMatch(queryList, text);
+        if (score > 0 && (!seen.has(m[1]) || seen.get(m[1]).score < score)) {
+          seen.set(m[1], { id: m[1], title: text, score });
+        }
+      }
+      if (seen.size === 0) {
+        console.warn(`[Anime1.one] Rejected unrelated results for "${q}"`);
+        continue;
+      }
+      const best = [...seen.values()].sort((a, b) => b.score - a.score)[0];
+      const seriesId = best.id;
       // Deterministic episode calculation on anime1.one
       const epCode = 10000000 + (epNum * 1000);
       const epSlug = `https://anime1.one/${seriesId}-${epCode}`;
