@@ -11,6 +11,26 @@ import { pickAnimeTitle } from '../utils/titles.js';
 import AnimeComments from './AnimeComments';
 import AnimeInfoLinks from './AnimeInfoLinks';
 
+const GENRE_MAP = {
+  'Action': { 'zh-TW': '動作', 'zh-CN': '动作', 'ja': 'アクション' },
+  'Adventure': { 'zh-TW': '冒險', 'zh-CN': '冒险', 'ja': '冒険' },
+  'Comedy': { 'zh-TW': '搞笑', 'zh-CN': '搞笑', 'ja': 'コメディ' },
+  'Drama': { 'zh-TW': '劇情', 'zh-CN': '剧情', 'ja': 'ドラマ' },
+  'Fantasy': { 'zh-TW': '奇幻', 'zh-CN': '奇幻', 'ja': 'ファンタジー' },
+  'Supernatural': { 'zh-TW': '超自然', 'zh-CN': '超自然', 'ja': '超常' },
+  'Mystery': { 'zh-TW': '懸疑', 'zh-CN': '悬疑', 'ja': 'ミステリー' },
+  'Romance': { 'zh-TW': '戀愛', 'zh-CN': '恋爱', 'ja': '恋愛' },
+  'Sci-Fi': { 'zh-TW': '科幻', 'zh-CN': '科幻', 'ja': 'SF' },
+  'Slice of Life': { 'zh-TW': '日常', 'zh-CN': '日常', 'ja': '日常' },
+  'Sports': { 'zh-TW': '體育', 'zh-CN': '体育', 'ja': 'スポーツ' },
+  'Thriller': { 'zh-TW': '驚悚', 'zh-CN': '惊悚', 'ja': 'スリラー' },
+  'Horror': { 'zh-TW': '恐怖', 'zh-CN': '恐怖', 'ja': 'ホラー' },
+  'Psychological': { 'zh-TW': '心理', 'zh-CN': '心理', 'ja': 'サイコ' },
+  'Mecha': { 'zh-TW': '機戰', 'zh-CN': '机战', 'ja': 'メカ' },
+  'Music': { 'zh-TW': '音樂', 'zh-CN': '音乐', 'ja': '音楽' },
+  'Ecchi': { 'zh-TW': '福利', 'zh-CN': '福利', 'ja': 'エッチ' },
+};
+
 export default function DetailModal({ 
   anime, 
   onClose, 
@@ -46,6 +66,7 @@ export default function DetailModal({
   const [isLoadingChinese, setIsLoadingChinese] = useState(false);
   const [synopsisLang, setSynopsisLang] = useState('zh'); // 'zh' (Traditional Chinese) | 'orig' (Original English)
   const [chineseRefresh, setChineseRefresh] = useState(0);
+  const [isSynopsisExpanded, setIsSynopsisExpanded] = useState(false);
 
   // BitTorrent / Magnet Resources
   const [allTorrents, setAllTorrents] = useState([]);
@@ -57,6 +78,18 @@ export default function DetailModal({
   // Dynamic Top Player Media State: null or { type: 'trailer' | 'theme' | 'episode', id, url, title, tag, episode }
   const [activeMedia, setActiveMedia] = useState(null);
   const playerContainerRef = useRef(null);
+
+  // Complete Media Metadata from /api/anime/:id (studios, format, externalLinks, idMal, duration)
+  const [detailedAnime, setDetailedAnime] = useState(null);
+  const activeAnime = useMemo(() => ({
+    ...anime,
+    ...(detailedAnime || {}),
+    titleZh: chineseInfo?.titleZh || anime?.titleZh || detailedAnime?.titleZh
+  }), [anime, detailedAnime, chineseInfo]);
+
+  useEffect(() => {
+    setDetailedAnime(null);
+  }, [anime?.id]);
 
   if (!anime) return null;
 
@@ -158,8 +191,11 @@ export default function DetailModal({
       fetch(`/api/anime/${anime.id}`)
         .then(r => r.json())
         .then(d => {
-          if (d?.success && Array.isArray(d.data?.relations)) {
-            setRelations(d.data.relations);
+          if (d?.success && d?.data) {
+            setDetailedAnime(d.data);
+            if (Array.isArray(d.data.relations)) {
+              setRelations(d.data.relations);
+            }
           }
         })
         .catch(() => {});
@@ -257,8 +293,11 @@ export default function DetailModal({
   }, [chineseInfo, anime]);
 
   const filteredTorrents = useMemo(() => {
+    if (torrentFilter === 'cantonese') {
+      return allTorrents.filter(r => r.lang === 'cantonese' || /(粵語|粤语|粵配|粤配|粵日雙語|粤日双语|Viu OTT|TVB|J2|YUE|Cantonese)/i.test(r.title));
+    }
     if (torrentFilter === 'zh-TW') {
-      return allTorrents.filter(r => r.lang === 'zh-TW' || /(繁體|繁体|CHT|BIG5|繁中|HK|TW|簡繁|简繁|雙語|双语)/i.test(r.title));
+      return allTorrents.filter(r => r.lang === 'zh-TW' || r.lang === 'cantonese' || /(繁體|繁体|CHT|BIG5|繁中|HK|TW|簡繁|简繁|雙語|双语)/i.test(r.title));
     }
     if (torrentFilter === 'zh-CN') {
       return allTorrents.filter(r => r.lang === 'zh-CN' || /(簡體|简体|CHS|GB|简中|CN|簡繁|简繁|雙語|双语)/i.test(r.title));
@@ -275,7 +314,8 @@ export default function DetailModal({
   const torrentCounts = useMemo(() => {
     return {
       all: allTorrents.length,
-      tw: allTorrents.filter(r => r.lang === 'zh-TW' || /(繁體|繁体|CHT|BIG5|繁中|HK|TW|簡繁|简繁|雙語|双语)/i.test(r.title)).length,
+      cantonese: allTorrents.filter(r => r.lang === 'cantonese' || /(粵語|粤语|粵配|粤配|粵日雙語|粤日双语|Viu OTT|TVB|J2|YUE|Cantonese)/i.test(r.title)).length,
+      tw: allTorrents.filter(r => r.lang === 'zh-TW' || r.lang === 'cantonese' || /(繁體|繁体|CHT|BIG5|繁中|HK|TW|簡繁|简繁|雙語|双语)/i.test(r.title)).length,
       cn: allTorrents.filter(r => r.lang === 'zh-CN' || /(簡體|简体|CHS|GB|简中|CN|簡繁|简繁|雙語|双语)/i.test(r.title)).length,
       raw: allTorrents.filter(r => r.lang === 'raw' || /(RAW|Raws|Non-Sub|NC-RAW|WEB-DL|AMZN|HIDIVE|U-NEXT|ABEMA|B-Global|CR|Crunchyroll|UNCENSORED|Uncensored)/i.test(r.title)).length,
       en: allTorrents.filter(r => r.lang === 'en' || /(English|Eng\s*Sub|\[ENG\]|SubsPlease|Erai-raws|HorribleSubs|Judas|ASW|SubsPlus|ToonsHub|Ironclad|DKB)/i.test(r.title)).length,
@@ -349,7 +389,7 @@ export default function DetailModal({
 
   return (
     <div 
-      className={`fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto ${
+      className={`fixed inset-0 z-50 flex items-start sm:items-center justify-center p-3 sm:p-6 overflow-y-auto ${
         gpuSettings?.enableBackdropBlur ? 'bg-black/85 backdrop-blur-sm' : 'bg-black/92'
       }`}
       onClick={onClose}
@@ -606,12 +646,17 @@ export default function DetailModal({
             {/* Left 2 Cols: Details & Synopsis */}
             <div className="md:col-span-2 space-y-4">
               <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
-                {anime.averageScore && (
+                {anime.matchPercent ? (
                   <span className="text-emerald-400 flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
-                    <Star className="w-3.5 h-3.5 fill-emerald-400" />
-                    {anime.averageScore}% {currentLang.startsWith('zh') ? '契合度' : currentLang === 'ja' ? '一致' : 'Match'}
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                    {anime.matchPercent}% {currentLang.startsWith('zh') ? '推薦契合度' : currentLang === 'ja' ? 'おすすめ一致度' : 'Match'}
                   </span>
-                )}
+                ) : anime.averageScore ? (
+                  <span className="text-amber-400 flex items-center gap-1 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30">
+                    <Star className="w-3.5 h-3.5 fill-amber-400" />
+                    {anime.averageScore}% {currentLang.startsWith('zh') ? '社群好評' : currentLang === 'ja' ? '高評価' : 'Rating'}
+                  </span>
+                ) : null}
                 {anime.seasonYear && <span className="text-zinc-400">{anime.seasonYear}</span>}
                 {anime.startDate?.year && (
                   <span className="text-indigo-400 flex items-center gap-1 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-500/30">
@@ -678,11 +723,28 @@ export default function DetailModal({
                   )}
                 </div>
 
-                <p className="text-sm text-zinc-300 leading-relaxed max-w-2xl line-clamp-4">
-                  {synopsisLang === 'zh' && chineseInfo?.summaryZh && chineseInfo?.summaryOk !== false
+                {(() => {
+                  const activeText = (synopsisLang === 'zh' && chineseInfo?.summaryZh && chineseInfo?.summaryOk !== false)
                     ? chineseInfo.summaryZh
-                    : synopsis}
-                </p>
+                    : synopsis;
+                  const isLong = (activeText || '').length > 200;
+                  return (
+                    <div>
+                      <p className={`text-sm text-zinc-300 leading-relaxed max-w-2xl whitespace-pre-line ${isSynopsisExpanded ? '' : 'line-clamp-4'}`}>
+                        {activeText}
+                      </p>
+                      {isLong && (
+                        <button
+                          type="button"
+                          onClick={() => setIsSynopsisExpanded(prev => !prev)}
+                          className="mt-1 text-xs text-red-400 hover:text-red-300 font-medium inline-block focus-visible:outline-none focus-visible:underline"
+                        >
+                          {isSynopsisExpanded ? (t('showLess') || '收起全文') : (t('showMore') || '展開全文')}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
                 {isLoadingChinese && !chineseInfo?.summaryZh && (
                   <div className="flex items-center gap-1.5 text-xs text-amber-400">
                     <RefreshCw className="w-3 h-3 animate-spin" />
@@ -706,7 +768,7 @@ export default function DetailModal({
               </div>
 
               {/* Audio Mode Toggle */}
-              <div className="pt-2 flex items-center gap-4">
+              <div className="pt-2 flex flex-wrap items-center gap-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Audio Mode:</span>
                 <div className="inline-flex rounded-lg p-0.5 bg-zinc-900 border border-zinc-800">
                   <button
@@ -715,7 +777,7 @@ export default function DetailModal({
                       audioMode === 'sub' ? 'bg-[#E50914] text-white shadow' : 'text-zinc-400 hover:text-white'
                     }`}
                   >
-                    SUB (Japanese)
+                    {currentLang.startsWith('zh') ? '日語原聲 (SUB)' : 'SUB (Japanese)'}
                   </button>
                   <button
                     onClick={() => setAudioMode('dub')}
@@ -723,40 +785,73 @@ export default function DetailModal({
                       audioMode === 'dub' ? 'bg-[#E50914] text-white shadow' : 'text-zinc-400 hover:text-white'
                     }`}
                   >
-                    DUB (English)
+                    {currentLang.startsWith('zh') ? '英語配音 (DUB)' : 'DUB (English)'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAudioMode('cantonese');
+                      setTorrentFilter('cantonese');
+                    }}
+                    className={`px-3 py-1 rounded text-xs font-bold transition-colors ${
+                      audioMode === 'cantonese' ? 'bg-[#E50914] text-white shadow' : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    🇭🇰 粵語配音 (Cantonese)
                   </button>
                 </div>
               </div>
+              {audioMode === 'cantonese' && (
+                <div className="mt-2 text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 flex items-start gap-2 animate-in fade-in">
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="leading-relaxed">
+                    已切換為<strong>粵語配音</strong>模式。系統已在下方「BT / 磁力下載」自動篩選出所有香港 Viu OTT / TVB 雙語 1080p 粵配版本，亦可點擊右側香港 Viu 與 Ani-One 專區線上觀看！
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right Col: Poster & Attributes */}
             <div className="space-y-3 border-t md:border-t-0 md:border-l border-zinc-800 pt-4 md:pt-0 md:pl-6 text-xs text-zinc-400">
-              {anime.genres && (
+              {activeAnime.genres && (
                 <div>
-                  <span className="text-zinc-500 block mb-1 font-semibold uppercase text-[10px]">Genres:</span>
+                  <span className="text-zinc-500 block mb-1 font-semibold uppercase text-[10px]">{currentLang.startsWith('zh') ? '類型標籤 (Genres)' : 'Genres'}:</span>
                   <div className="flex flex-wrap gap-1.5">
-                    {anime.genres.map(g => (
+                    {activeAnime.genres.map(g => (
                       <span key={g} className="bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded-full text-[11px]">
-                        {g}
+                        {GENRE_MAP[g]?.[currentLang] || GENRE_MAP[g]?.['zh-TW'] || g}
                       </span>
                     ))}
                   </div>
                 </div>
               )}
-              {anime.duration && (
+              {activeAnime.format && (
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-500 font-semibold uppercase text-[10px]">{currentLang.startsWith('zh') ? '作品規格' : 'Format'}:</span>
+                  <span className="text-zinc-200 font-bold px-2 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/60 text-[11px]">
+                    {activeAnime.format === 'MOVIE' ? (currentLang.startsWith('zh') ? '🎬 劇場版 MOVIE' : 'Movie') : activeAnime.format}
+                  </span>
+                </div>
+              )}
+              {activeAnime.duration && (
                 <div>
-                  <span className="text-zinc-500 font-semibold uppercase text-[10px]">Duration:</span>
-                  <span className="text-zinc-300 ml-1.5">{anime.duration} mins / ep</span>
+                  <span className="text-zinc-500 font-semibold uppercase text-[10px]">{currentLang.startsWith('zh') ? '片長 / 時長' : 'Duration'}:</span>
+                  <span className="text-zinc-300 ml-1.5">{activeAnime.duration} {currentLang.startsWith('zh') ? '分鐘' : 'mins'}</span>
+                </div>
+              )}
+              {activeAnime.studios?.nodes?.[0]?.name && (
+                <div>
+                  <span className="text-zinc-500 font-semibold uppercase text-[10px]">{currentLang.startsWith('zh') ? '動畫製作' : 'Studio'}:</span>
+                  <span className="text-zinc-300 ml-1.5">{activeAnime.studios.nodes[0].name}</span>
                 </div>
               )}
               {nextAiring && (
                 <div className="bg-amber-950/30 border border-amber-600/30 p-2.5 rounded-lg text-amber-300">
                   <span className="block font-bold text-[11px] mb-0.5 flex items-center gap-1">
                     <Clock className="w-3.5 h-3.5" />
-                    Episode {nextAiring.episode} Airing Soon
+                    {currentLang.startsWith('zh') ? `第 ${nextAiring.episode} 集 即將播出` : `Episode ${nextAiring.episode} Airing Soon`}
                   </span>
                   <span className="text-[10px] text-zinc-300">
-                    Airs in {formatTimeUntilAiring(nextAiring.timeUntilAiring)}
+                    {currentLang.startsWith('zh') ? `距離開播還剩 ${formatTimeUntilAiring(nextAiring.timeUntilAiring)}` : `Airs in ${formatTimeUntilAiring(nextAiring.timeUntilAiring)}`}
                   </span>
                 </div>
               )}
@@ -764,16 +859,16 @@ export default function DetailModal({
                 <div className="bg-indigo-950/30 border border-indigo-600/30 p-2.5 rounded-lg text-indigo-300">
                   <span className="block font-bold text-[11px] mb-0.5 flex items-center gap-1">
                     <Calendar className="w-3.5 h-3.5" />
-                    Upcoming Anime Release
+                    {currentLang.startsWith('zh') ? '即將上映 / 開播新番' : 'Upcoming Anime Release'}
                   </span>
                   <span className="text-[10px] text-zinc-300">
-                    {anime.startDate?.year 
-                      ? `Expected Premiere: ${anime.startDate.year}${anime.startDate.month ? '/' + anime.startDate.month : ''}`
-                      : 'Broadcast date to be announced'}
+                    {activeAnime.startDate?.year 
+                      ? (currentLang.startsWith('zh') ? `預計開播：${activeAnime.startDate.year}年${activeAnime.startDate.month ? activeAnime.startDate.month + '月' : ''}` : `Expected Premiere: ${activeAnime.startDate.year}${activeAnime.startDate.month ? '/' + activeAnime.startDate.month : ''}`)
+                      : (currentLang.startsWith('zh') ? '具體開播日期即將公佈' : 'Broadcast date to be announced')}
                   </span>
                 </div>
               )}
-              <AnimeInfoLinks anime={anime} t={t} />
+              <AnimeInfoLinks anime={activeAnime} t={t} chineseInfo={chineseInfo} />
             </div>
           </div>
 
@@ -1254,6 +1349,7 @@ export default function DetailModal({
                   </span>
                   {[
                     { id: 'all', label: t('allTorrents'), count: torrentCounts.all },
+                    { id: 'cantonese', label: '🇭🇰 粵語配音 (Cantonese)', count: torrentCounts.cantonese },
                     { id: 'zh-TW', label: t('filterTW'), count: torrentCounts.tw },
                     { id: 'zh-CN', label: t('filterCN'), count: torrentCounts.cn },
                     { id: 'raw', label: t('filterRAW'), count: torrentCounts.raw },

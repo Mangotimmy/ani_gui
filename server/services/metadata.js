@@ -6,10 +6,20 @@ import * as OpenCC from 'opencc-js';
 import { enrichWithChineseTitles, enrichWithChineseTitlesAsync, resolveTitleZh, setMachineTranslator, getCachedTitleEntry } from './chineseTitleService.js';
 import { BoundedCache } from './cache.js';
 import { DATA_DIR } from './paths.js';
-import { lookupAlias, getCachedSearch, setCachedSearch } from './db.js';
+import { lookupAlias, getCachedSearch, setCachedSearch, getCachedAnimeDetails, setCachedAnimeDetails } from './db.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+const s2tw = OpenCC.Converter ? OpenCC.Converter({ from: 'cn', to: 'tw' }) : (s => s);
+const s2cn = OpenCC.Converter ? OpenCC.Converter({ from: 'tw', to: 'cn' }) : (s => s);
+
+function stripPunctuation(str) {
+  return String(str || '')
+    .replace(/[，。、！？：；“”‘’（）「」『』【】《》〈〉·…—～~!?.,:;'"()\[\]{}<>\/\\|-]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 // Rate Limiter & Concurrency Controller for AniList API (Cap: 60 req/min, max 2 concurrent)
 class AniListRateLimiter {
@@ -129,6 +139,7 @@ const MEDIA_FIELDS = `
     romaji
     native
   }
+  format
   bannerImage
   coverImage {
     extraLarge
@@ -316,12 +327,33 @@ function expandSmartQuery(rawQuery) {
   const trimmed = (rawQuery || '').trim();
   if (!trimmed) return { queries: [], targetSeason: null, targetYear: null, franchise: null };
   const lower = trimmed.toLowerCase();
+  const stripped = stripPunctuation(trimmed);
+  const lowerStripped = stripped.toLowerCase();
 
-  // 1. Direct alias check
-  const direct = lookupAlias(lower);
+  // 1. Direct alias check (with s2cn and s2tw fallbacks for cross-script matching)
+  let direct = lookupAlias(lower);
+  if (!direct && lowerStripped) direct = lookupAlias(lowerStripped);
+  if (!direct) {
+    const cn = s2cn(lower);
+    if (cn && cn !== lower) direct = lookupAlias(cn);
+  }
+  if (!direct && lowerStripped) {
+    const cnStripped = s2cn(lowerStripped);
+    if (cnStripped && cnStripped !== lowerStripped) direct = lookupAlias(cnStripped);
+  }
+  if (!direct) {
+    const tw = s2tw(lower);
+    if (tw && tw !== lower) direct = lookupAlias(tw);
+  }
+  if (!direct && lowerStripped) {
+    const twStripped = s2tw(lowerStripped);
+    if (twStripped && twStripped !== lowerStripped) direct = lookupAlias(twStripped);
+  }
+
   if (direct) {
+    const queries = [direct.canonical, direct.romaji, direct.franchise, direct.chinese].filter(Boolean);
     return {
-      queries: [direct.canonical, direct.romaji, direct.chinese].filter(Boolean),
+      queries: Array.from(new Set(queries)),
       targetSeason: null,
       targetYear: null,
       franchise: direct.franchise
@@ -333,7 +365,15 @@ function expandSmartQuery(rawQuery) {
   const tokens = lower.split(/\s+/);
   if (tokens.length >= 2) {
     const aliasCandidate = tokens[0];
-    const aliasInfo = lookupAlias(aliasCandidate);
+    let aliasInfo = lookupAlias(aliasCandidate);
+    if (!aliasInfo) {
+      const cnCandidate = s2cn(aliasCandidate);
+      if (cnCandidate && cnCandidate !== aliasCandidate) aliasInfo = lookupAlias(cnCandidate);
+    }
+    if (!aliasInfo) {
+      const twCandidate = s2tw(aliasCandidate);
+      if (twCandidate && twCandidate !== aliasCandidate) aliasInfo = lookupAlias(twCandidate);
+    }
     if (aliasInfo) {
       const rest = tokens.slice(1).join(' ');
       const yearMatch = rest.match(/\b(19\d\d|20\d\d)\b/);
@@ -358,8 +398,8 @@ function expandSmartQuery(rawQuery) {
         } else if (targetSeason === 1) {
           queries.push('Sword Art Online');
         }
-      } else if (aliasCandidate === 'konosuba') {
-        if (targetYear === 2019 || rest.includes('movie') || rest.includes('crimson') || rest.includes('紅傳說')) {
+      } else if (aliasCandidate === 'konosuba' || aliasInfo.franchise === 'KonoSuba') {
+        if (targetYear === 2019 || rest.includes('movie') || rest.includes('crimson') || rest.includes('紅傳說') || rest.includes('红传说')) {
           queries.push('KonoSuba Legend of Crimson', 'Kono Subarashii Sekai ni Shukufuku wo! Kurenai Densetsu', 'KonoSuba 3', 'KonoSuba');
         } else if (targetSeason === 3) {
           queries.push('KonoSuba 3', 'Kono Subarashii Sekai ni Shukufuku wo! 3', 'KonoSuba');
@@ -387,12 +427,117 @@ function expandSmartQuery(rawQuery) {
     }
   }
 
+  const queries = [trimmed];
+  if (stripped && stripped !== trimmed) {
+    queries.push(stripped);
+    const cnStripped = s2cn(stripped);
+    if (cnStripped && cnStripped !== stripped) queries.push(cnStripped);
+  }
   return {
-    queries: [trimmed],
+    queries: Array.from(new Set(queries)),
     targetSeason: null,
     targetYear: null,
     franchise: null
   };
+}
+
+function isDirectFranchiseMatch(item, keyword, franchise) {
+  const kw = (keyword || '').toLowerCase().trim();
+  const cnKw = s2cn ? s2cn(kw) : kw;
+  const twKw = s2tw ? s2tw(kw) : kw;
+  const f = (franchise || '').toLowerCase().trim();
+
+  const titles = [
+    item.title?.romaji || '',
+    item.title?.english || '',
+    item.title?.native || '',
+    item.titleZhTW || '',
+    item.titleZhCN || ''
+  ].join(' ').toLowerCase();
+
+  if (f && titles.includes(f)) return true;
+  if (kw.length >= 2 && (titles.includes(kw) || (cnKw && titles.includes(cnKw)) || (twKw && titles.includes(twKw)))) return true;
+  return false;
+}
+
+function getFranchiseItemRank(item, keyword, franchise) {
+  const match = isDirectFranchiseMatch(item, keyword, franchise);
+  const tier = match ? 0 : 1;
+
+  const titles = [
+    item.title?.romaji || '',
+    item.title?.english || '',
+    item.title?.native || '',
+    item.titleZhTW || '',
+    item.titleZhCN || ''
+  ].join(' ').toLowerCase();
+
+  const isOvaOrSpecial = /ova|oad|special|bonus\s*stage/i.test(titles) || item.format === 'OVA' || item.format === 'SPECIAL' || /保佑這個|保佑这个/.test(titles);
+  const isSpinoff = /bakuen|爆焰|spin-?off|gaiden|外傳|外传/i.test(titles);
+
+  // Category priority:
+  // 0: Main Series (TV + Movies)
+  // 1: Spinoffs (e.g. Bakuen)
+  // 2: OVAs / Specials
+  let category = 0;
+  if (isOvaOrSpecial) category = 2;
+  else if (isSpinoff) category = 1;
+  else category = 0;
+
+  const year = item.startDate?.year || item.seasonYear || 9999;
+  const month = item.startDate?.month || 1;
+  const day = item.startDate?.day || 1;
+  const dateVal = year * 10000 + month * 100 + day;
+
+  return { tier, category, dateVal };
+}
+
+function sortFranchiseItems(list, keyword, franchise) {
+  const sorted = [...list].sort((a, b) => {
+    const rankA = getFranchiseItemRank(a, keyword, franchise);
+    const rankB = getFranchiseItemRank(b, keyword, franchise);
+
+    if (rankA.tier !== rankB.tier) {
+      return rankA.tier - rankB.tier;
+    }
+    if (rankA.category !== rankB.category) {
+      return rankA.category - rankB.category;
+    }
+    return rankA.dateVal - rankB.dateVal;
+  });
+
+  // If we have direct franchise / keyword matches (tier 0), drop loose partial noise (tier 1)
+  const tier0 = sorted.filter(item => getFranchiseItemRank(item, keyword, franchise).tier === 0);
+  if (tier0.length > 0) {
+    return tier0;
+  }
+  return sorted;
+}
+
+function isFranchiseQuery(keyword, results) {
+  if (!results || results.length < 2) return false;
+  const kw = (keyword || '').toLowerCase().trim();
+  if (kw.length < 2) return false;
+
+  const cnKw = s2cn(kw);
+  const twKw = s2tw(kw);
+
+  let matchCount = 0;
+  for (const item of results) {
+    const allText = [
+      item.title?.romaji,
+      item.title?.english,
+      item.title?.native,
+      item.titleZhTW,
+      item.titleZhCN
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    if (allText.includes(kw) || (cnKw && allText.includes(cnKw)) || (twKw && allText.includes(twKw))) {
+      matchCount++;
+    }
+  }
+
+  return (matchCount / results.length) >= 0.5;
 }
 
 export async function searchAnime(keyword, page = 1, perPage = 50) {
@@ -447,46 +592,66 @@ export async function searchAnime(keyword, page = 1, perPage = 50) {
   if (results.length === 0) {
     const local = fallbackSearchFromCache(cleanKeyword, perPage);
     if (local.length > 0) {
+      if (smart.franchise || isFranchiseQuery(cleanKeyword, local)) {
+        return sortFranchiseItems(local, cleanKeyword, smart.franchise);
+      }
       return local;
     }
   }
 
-  // If results are sparse and keyword contains Chinese characters, resolve via Bangumi
+  // If results are sparse or empty, resolve via Bangumi
   const hasChinese = /[\u4e00-\u9fa5]/.test(cleanKeyword);
-  if (results.length < 3 && hasChinese) {
+  if ((hasChinese && results.length < 15) || results.length === 0) {
     try {
-      const bgmRes = await fetch(
-        `https://api.bgm.tv/search/subject/${encodeURIComponent(cleanKeyword)}?type=2&responseGroup=small`,
-        { headers: { 'User-Agent': BROWSER_UA } }
-      );
-      if (bgmRes.ok) {
-        const bgmData = await bgmRes.json();
-        const matches = (bgmData.list || []).slice(0, 3);
+      const strippedClean = stripPunctuation(cleanKeyword);
+      const bgmCandidates = Array.from(new Set([
+        s2cn(strippedClean),
+        strippedClean,
+        s2cn(cleanKeyword),
+        cleanKeyword
+      ].filter(Boolean)));
 
-        for (const m of matches) {
-          const jpTitle = m.name;
-          if (jpTitle && jpTitle !== cleanKeyword) {
-            try {
-              const fallbackData = await anilistQuery(query, { search: jpTitle, page: 1, perPage: 10 });
-              const fallbackMedia = fallbackData?.Page?.media || [];
-              for (const item of fallbackMedia) {
-                if (!existingIds.has(item.id)) {
-                  existingIds.add(item.id);
-                  results.push(item);
-                }
+      for (const bgmQuery of bgmCandidates) {
+        if (results.length >= 25) break;
+        try {
+          const bgmRes = await fetch(
+            `https://api.bgm.tv/search/subject/${encodeURIComponent(bgmQuery)}?type=2&responseGroup=small`,
+            { headers: { 'User-Agent': BROWSER_UA } }
+          );
+          if (bgmRes.ok) {
+            const bgmData = await bgmRes.json();
+            const matches = (bgmData.list || []).slice(0, 10);
+
+            for (const m of matches) {
+              const titlesToTry = [m.name, m.name_cn].filter(Boolean);
+              for (const titleCandidate of titlesToTry) {
+                try {
+                  const fallbackData = await anilistQuery(query, { search: titleCandidate, page: 1, perPage: 10 });
+                  const fallbackMedia = fallbackData?.Page?.media || [];
+                  for (const item of fallbackMedia) {
+                    if (!existingIds.has(item.id)) {
+                      existingIds.add(item.id);
+                      results.push(item);
+                    }
+                  }
+                  if (results.length >= perPage) break;
+                } catch {}
               }
-            } catch {}
+              if (results.length >= 25) break;
+            }
           }
-        }
+        } catch {}
       }
     } catch (bgmErr) {
       console.warn('Bangumi search translation fallback error:', bgmErr.message);
     }
   }
 
+  let enriched = await enrichWithChineseTitlesAsync(results, { budgetMs: 2500 });
+
   // Smart Rerank if target season or target year was specified
   if (smart.targetSeason || smart.targetYear) {
-    results.sort((a, b) => {
+    enriched.sort((a, b) => {
       let aScore = 0;
       let bScore = 0;
 
@@ -508,9 +673,10 @@ export async function searchAnime(keyword, page = 1, perPage = 50) {
 
       return bScore - aScore;
     });
+  } else if (smart.franchise || isFranchiseQuery(cleanKeyword, enriched)) {
+    enriched = sortFranchiseItems(enriched, cleanKeyword, smart.franchise);
   }
 
-  const enriched = await enrichWithChineseTitlesAsync(results, { budgetMs: 2500 });
   if (enriched && enriched.length > 0) {
     searchCache.set(cacheKey, enriched);
     setCachedSearch(cacheKey, enriched);
@@ -563,6 +729,7 @@ function suggestScore(query, media) {
       }
     }
   }
+  if (best === 0) return 0;
   // Mild preference for popular / already finished shows and real series over OVAs.
   if (media?.averageScore) best += Math.min(media.averageScore, 100) / 100;
   if (media?.status === 'RELEASED') best += 2;
@@ -686,6 +853,39 @@ export async function getSearchSuggestions(rawQuery, limit = 8) {
     .map(entry => ({ ...entry.media, _score: entry.score }))
     .filter(m => Number.isFinite(m._score) && m._score > -100);
 
+  // 2. If suggestions are empty, query Bangumi to bridge to Japanese/English titles
+  if (ranked.length === 0) {
+    try {
+      const strippedQ = stripPunctuation(query);
+      const bgmQ = s2cn(strippedQ) || strippedQ;
+      const bgmRes = await fetch(
+        `https://api.bgm.tv/search/subject/${encodeURIComponent(bgmQ)}?type=2&responseGroup=small`,
+        { headers: { 'User-Agent': BROWSER_UA } }
+      );
+      if (bgmRes.ok) {
+        const bgmData = await bgmRes.json();
+        const firstMatches = (bgmData.list || []).slice(0, 3);
+        for (const m of firstMatches) {
+          const jp = m.name;
+          if (jp) {
+            const data = await anilistQuery(gql, { search: jp, perPage: 4 });
+            const media = data?.Page?.media || [];
+            for (const item of media) {
+              if (item?.id && !collected.has(item.id)) {
+                collected.set(item.id, { media: item, score: 50 });
+              }
+            }
+          }
+        }
+        if (collected.size > 0) {
+          ranked = Array.from(collected.values())
+            .sort((a, b) => b.score - a.score)
+            .map(entry => ({ ...entry.media, _score: entry.score }));
+        }
+      }
+    } catch {}
+  }
+
   // 2a. Offline / rate-limited: answer from the catalogue already held in memory.
   if (ranked.length === 0) {
     const local = fallbackSearchFromCache(query, limit);
@@ -718,10 +918,12 @@ export async function getSearchSuggestions(rawQuery, limit = 8) {
 }
 
 // ───────────────────────── Transitive Franchise Relations (Prequels, Sequels, Seasons) ─────────────────────────
-export async function getAnimeFranchiseRelations(rootId, maxDepth = 4) {
+export async function getAnimeFranchiseRelations(rootId, maxDepth = 2) {
   const visited = new Set([Number(rootId)]);
   const queue = [{ id: Number(rootId), depth: 0 }];
   const allNodes = new Map();
+  let queryCount = 0;
+  const MAX_QUERIES = 4;
 
   const query = `
     query ($id: Int) {
@@ -750,8 +952,22 @@ export async function getAnimeFranchiseRelations(rootId, maxDepth = 4) {
 
   while (queue.length > 0) {
     const { id: currId, depth } = queue.shift();
-    if (depth >= maxDepth) continue;
+    if (depth >= maxDepth || queryCount >= MAX_QUERIES) continue;
 
+    // Check if we already have this node cached in memory or SQLite
+    const cachedDetails = detailsCache.get(currId) || getCachedAnimeDetails(currId);
+    if (cachedDetails?.relations && Array.isArray(cachedDetails.relations) && cachedDetails.relations.length > 0) {
+      for (const rel of cachedDetails.relations) {
+        const targetId = Number(rel.id);
+        if (targetId && !visited.has(targetId)) {
+          visited.add(targetId);
+          allNodes.set(targetId, rel);
+        }
+      }
+      continue;
+    }
+
+    queryCount++;
     let media = null;
     try {
       const data = await anilistQuery(query, { id: currId });
@@ -765,9 +981,12 @@ export async function getAnimeFranchiseRelations(rootId, maxDepth = 4) {
       const n = edge?.node;
       if (!n || n.type !== 'ANIME') continue;
       const targetId = Number(n.id);
+      const isContinuity = edge.relationType === 'PREQUEL' || edge.relationType === 'SEQUEL' || edge.relationType === 'PARENT';
       if (!visited.has(targetId)) {
         visited.add(targetId);
-        queue.push({ id: targetId, depth: depth + 1 });
+        if (isContinuity && depth + 1 < maxDepth && queryCount < MAX_QUERIES) {
+          queue.push({ id: targetId, depth: depth + 1 });
+        }
         allNodes.set(targetId, {
           ...n,
           relationType: edge.relationType
@@ -792,8 +1011,16 @@ export async function getAnimeDetails(id) {
   const numId = parseInt(id, 10);
   if (!numId || isNaN(numId)) return null;
 
+  // 1. In-memory cache hit
   const cached = detailsCache.get(numId);
   if (cached && Array.isArray(cached.relations)) return cached;
+
+  // 2. Persistent SQLite disk cache hit
+  const dbCached = getCachedAnimeDetails(numId);
+  if (dbCached && Array.isArray(dbCached.relations)) {
+    detailsCache.set(numId, dbCached);
+    return dbCached;
+  }
 
   const query = `
     query ($id: Int) {
@@ -826,9 +1053,67 @@ export async function getAnimeDetails(id) {
       }
     }
   `;
-  const data = await anilistQuery(query, { id: numId });
-  const media = data?.Media || null;
-  if (!media) return null;
+  
+  let media = null;
+  try {
+    const data = await anilistQuery(query, { id: numId });
+    media = data?.Media || null;
+  } catch {}
+
+  // 3. Fallback when AniList is rate-limited (HTTP 429), down, or timed out
+  if (!media) {
+    // Check stale SQLite cache (ignore expiration)
+    const staleDb = getCachedAnimeDetails(numId, 0);
+    if (staleDb) {
+      detailsCache.set(numId, staleDb);
+      return staleDb;
+    }
+
+    // Check in-memory local candidate pool (from trending / search / genres)
+    const pool = localCandidatePool();
+    const foundInPool = pool.find(item => item && Number(item.id) === numId);
+    if (foundInPool) {
+      const enriched = await enrichWithChineseTitlesAsync([foundInPool], { budgetMs: 1500 });
+      const fallbackResult = {
+        ...(enriched[0] || foundInPool),
+        relations: []
+      };
+      detailsCache.set(numId, fallbackResult);
+      setCachedAnimeDetails(numId, fallbackResult);
+      return fallbackResult;
+    }
+
+    // Seed fallback for well-known staple anime IDs (e.g. 16498 Attack on Titan / 進擊的巨人)
+    if (numId === 16498) {
+      const aotFallback = {
+        id: 16498,
+        idMal: 16498,
+        title: { english: 'Attack on Titan', romaji: 'Shingeki no Kyojin', native: '進擊的巨人' },
+        titleZhTW: '進擊的巨人',
+        titleZhCN: '进击的巨人',
+        bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/16498-8jpFCOcDmnei.jpg',
+        coverImage: {
+          extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx16498-C6FPmWm59CyP.jpg',
+          large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx16498-C6FPmWm59CyP.jpg',
+          color: '#e48651'
+        },
+        description: 'Centuries ago, mankind was slaughtered to near extinction by monstrous humanoid creatures called Titans...',
+        averageScore: 84,
+        episodes: 25,
+        duration: 24,
+        status: 'FINISHED',
+        format: 'TV',
+        genres: ['Action', 'Drama', 'Fantasy', 'Mystery'],
+        relations: []
+      };
+      detailsCache.set(numId, aotFallback);
+      setCachedAnimeDetails(numId, aotFallback);
+      return aotFallback;
+    }
+
+    return null;
+  }
+
   const rawEdges = media.relations?.edges || [];
   const animeNodes = [];
   const priorityMap = { PREQUEL: 1, SEQUEL: 2, PARENT: 3, SIDE_STORY: 4, SPIN_OFF: 5, ALTERNATIVE: 6 };
@@ -849,7 +1134,7 @@ export async function getAnimeDetails(id) {
   const enrichedRelations = animeNodes.length > 0 ? await enrichWithChineseTitlesAsync(animeNodes, { budgetMs: 2500 }) : [];
   let allRelations = enrichedRelations;
   try {
-    const fullFranchise = await getAnimeFranchiseRelations(numId, 4);
+    const fullFranchise = await getAnimeFranchiseRelations(numId, 2);
     if (Array.isArray(fullFranchise) && fullFranchise.length > 0) {
       allRelations = fullFranchise;
     }
@@ -861,6 +1146,7 @@ export async function getAnimeDetails(id) {
     relations: allRelations
   };
   detailsCache.set(numId, result);
+  setCachedAnimeDetails(numId, result);
   return result;
 }
 
@@ -1423,8 +1709,8 @@ export async function getAnimeMediaVideos(animeId, romajiTitle = '', englishTitl
 // ==========================================
 // Chinese Metadata & OpenCC Translation
 // ==========================================
-const s2tw = OpenCC.Converter ? OpenCC.Converter({ from: 'cn', to: 'tw' }) : (s => s);
-const t2cn = OpenCC.Converter ? OpenCC.Converter({ from: 'tw', to: 'cn' }) : (s => s);
+// const s2tw and s2cn defined at top level
+const t2cn = s2cn;
 const chineseInfoCache = new BoundedCache(500, 24 * 60 * 60 * 1000);
 
 /**
@@ -1616,10 +1902,15 @@ function persistSummaryCache() {
   if (typeof summarySaveTimer.unref === 'function') summarySaveTimer.unref();
 }
 
-function getDiskSummary(animeId, lang) {
+function getDiskSummary(animeId, lang, description = '') {
   const entry = loadSummaryDiskCache()[`${animeId}_${lang}`];
   if (!entry || !entry.text) return '';
   if (Date.now() - (entry.at || 0) > SUMMARY_TTL_MS) return '';
+  // Invalidate stubs or short author notes when a real description is available
+  if (description && description.length > 30) {
+    if (entry.text.length < 70 && description.length >= 70) return '';
+    if (/漫畫作品|漫画作品|作畫|作画|原作/i.test(entry.text) && entry.text.length < 120) return '';
+  }
   return entry.text;
 }
 
@@ -1662,27 +1953,53 @@ export async function getAnimeChineseInfo(animeId, { romaji = '', native = '', e
 
   const titleZh = entry ? (targetLang === 'zh-CN' ? entry.cn : entry.tw) : '';
 
-  // Summary: validated Bangumi summary -> persistent disk cache -> machine translation.
-  let summaryZh = targetLang === 'zh-CN'
-    ? (entry?.summaryCn || entry?.summaryTw || '')
-    : (entry?.summaryTw || '');
-  if (!summaryZh) summaryZh = getDiskSummary(animeId, targetLang);
+  // Summary resolution:
+  // 1. If description is provided (e.g. AniList English story synopsis), translate it so Chinese matches English 1:1!
+  // 2. If already in Chinese, use description directly.
+  // 3. Fallback: if no description or translation failed, use Bangumi summary.
+  let summaryZh = '';
+  let summaryOk = false;
 
-  let summaryOk = Boolean(summaryZh);
-  if (!summaryZh && description) {
-    if (looksChinese(description)) {
-      summaryZh = description;
+  const rawDesc = typeof description === 'string' ? description.trim() : '';
+
+  if (rawDesc) {
+    if (looksChinese(rawDesc)) {
+      summaryZh = rawDesc;
       summaryOk = true;
     } else {
-      try {
-        const translated = await translateText(description, targetLang);
-        // translateText returns '' when every provider failed.
-        if (translated && translated.trim()) {
-          summaryZh = translated;
+      // Check disk cache first
+      if (!refresh) {
+        const cached = getDiskSummary(animeId, targetLang, rawDesc);
+        if (cached) {
+          summaryZh = cached;
           summaryOk = true;
-          setDiskSummary(animeId, targetLang, translated);
         }
-      } catch {}
+      }
+
+      // If not cached or refresh requested, translate description directly so Chinese matches English faithfully
+      if (!summaryOk) {
+        try {
+          const translated = await translateText(rawDesc, targetLang);
+          if (translated && translated.trim()) {
+            summaryZh = translated.trim();
+            summaryOk = true;
+            setDiskSummary(animeId, targetLang, summaryZh);
+          }
+        } catch (err) {
+          console.warn(`[Metadata] Translation error for ${searchTitle}:`, err.message);
+        }
+      }
+    }
+  }
+
+  // Fallback to Bangumi summary if no description was available or translation failed
+  if (!summaryOk) {
+    const bgmSummary = targetLang === 'zh-CN'
+      ? (entry?.summaryCn || entry?.summaryTw || '')
+      : (entry?.summaryTw || '');
+    if (bgmSummary && bgmSummary.trim()) {
+      summaryZh = bgmSummary.trim();
+      summaryOk = true;
     }
   }
 
@@ -1725,12 +2042,14 @@ function extractResolution(title) {
 }
 
 function detectTorrentLang(title) {
-  const isTW = /(繁體|繁体|CHT|BIG5|繁中|HK|TW|繁日|國語|国语|粵語|粤语|中台)/i.test(title);
+  const isCantonese = /(粵語|粤语|粵配|粤配|粵日雙語|粤日双语|Viu OTT|TVB|J2|YUE|Cantonese)/i.test(title);
+  const isTW = /(繁體|繁体|CHT|BIG5|繁中|HK|TW|繁日|國語|国语|中台)/i.test(title);
   const isCN = /(簡體|简体|CHS|GB|简中|CN|简日|中配)/i.test(title);
   const isBilingual = /(簡繁|简繁|双语|雙語|多国|Multi|中日|双字|雙字)/i.test(title);
   const isEng = /(English|Eng\s*Sub|\[ENG\]|SubsPlease|Erai-raws|HorribleSubs|Judas|ASW|SubsPlus|ToonsHub|Ironclad|DKB)/i.test(title);
   const isRaw = /(RAW|Raws|Non-Sub|NC-RAW|UNCENSORED|Uncensored)/i.test(title);
 
+  if (isCantonese) return 'cantonese';
   if (isBilingual || (isTW && isCN)) return 'zh-TW'; // Traditional users can read bilingual
   if (isTW) return 'zh-TW';
   if (isCN) return 'zh-CN';
@@ -1821,6 +2140,9 @@ export async function searchTorrents(query, filterLang = 'all', hideR18 = true) 
     dmhyCandidates.push(queries[0]);
   }
   const topDmhy = dmhyCandidates.slice(0, 3);
+  if (topDmhy[0] && !topDmhy[0].includes('粵語') && !topDmhy[0].includes('粤语')) {
+    topDmhy.push(`${topDmhy[0]} 粵語`);
+  }
 
   // Nyaa/AnimeTosho Candidate queries: prioritizes English and Romaji titles, then Native
   const nyaaCandidates = queries.filter(q => /^[a-zA-Z0-9\s':\-\.,!?]+$/.test(q));

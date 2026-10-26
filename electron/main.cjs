@@ -8,7 +8,8 @@ const fs = require('fs');
 // Read saved user settings to apply optimal GPU acceleration & Super Resolution flags
 let appSettings = {
   gpuProfile: 'igpu',
-  enableUpscale: false
+  enableUpscale: false,
+  uiScale: 1.0
 };
 
 try {
@@ -82,8 +83,44 @@ if (process.platform === 'win32') {
 const PORT = 3001;
 let mainWindow = null;
 
+// UI Zoom Scale persistence helper
+function saveZoomSetting(scale) {
+  try {
+    appSettings.uiScale = scale;
+    const userDataDir = process.env.ANIFLIX_USER_DATA || app.getPath('userData');
+    const settingsPath = path.join(userDataDir, 'settings.json');
+    let current = {};
+    if (fs.existsSync(settingsPath)) {
+      try { current = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}
+    }
+    current.uiScale = scale;
+    fs.writeFileSync(settingsPath, JSON.stringify(current, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('Failed to persist uiScale in settings.json:', err.message);
+  }
+}
+
 // Native notification IPC (renderer -> main)
 ipcMain.handle('desktop:notifications-supported', () => Notification.isSupported());
+
+// UI Scale & Zoom IPC (renderer <-> main)
+ipcMain.handle('desktop:get-zoom-factor', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return mainWindow.webContents.getZoomFactor();
+  }
+  return Number(appSettings.uiScale) || 1.0;
+});
+
+ipcMain.handle('desktop:set-zoom-factor', (_event, factor) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const f = Math.max(0.6, Math.min(2.0, Math.round((Number(factor) || 1.0) * 100) / 100));
+    mainWindow.webContents.setZoomFactor(f);
+    saveZoomSetting(f);
+    mainWindow.webContents.send('desktop:zoom-changed', f);
+    return f;
+  }
+  return 1.0;
+});
 
 ipcMain.handle('desktop:notify', (_event, payload = {}) => {
   try {
@@ -202,6 +239,9 @@ async function createWindow() {
   await mainWindow.loadURL(targetUrl);
 
   mainWindow.once('ready-to-show', () => {
+    if (appSettings.uiScale && typeof appSettings.uiScale === 'number' && appSettings.uiScale > 0) {
+      mainWindow.webContents.setZoomFactor(appSettings.uiScale);
+    }
     mainWindow.show();
   });
 
@@ -233,7 +273,10 @@ async function createWindow() {
         else if (input.key === '-' || input.key === '_') next = Math.max(0.6, cur - 0.1);
         else if (input.key === '0') next = 1;
         if (next !== null) {
-          wc.setZoomFactor(Math.round(next * 10) / 10);
+          const factor = Math.round(next * 100) / 100;
+          wc.setZoomFactor(factor);
+          saveZoomSetting(factor);
+          wc.send('desktop:zoom-changed', factor);
           event.preventDefault();
         }
       }

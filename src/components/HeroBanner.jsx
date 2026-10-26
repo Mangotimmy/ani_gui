@@ -173,7 +173,7 @@ export default function HeroBanner({
               {anime.trailer?.id ? (
                 <button
                   onClick={() => onMoreInfo(activeAnimeObj)}
-                  className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold px-6 py-2.5 rounded-md transition-all shadow-lg shadow-red-600/30 hover:scale-105 active:scale-95"
+                  className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold px-6 py-2.5 rounded-md transition-[transform,background-color,box-shadow] duration-200 shadow-lg shadow-red-600/30 hover:scale-105 motion-safe:active:scale-[0.96]"
                 >
                   <Play className="w-5 h-5 fill-white" />
                   <span>{currentLang === 'ja' ? '予告編 / PV を再生' : currentLang.startsWith('zh') ? '播放預告片 / PV' : 'Play Trailer / PV'}</span>
@@ -181,7 +181,7 @@ export default function HeroBanner({
               ) : null}
               <button
                 onClick={() => onMoreInfo(activeAnimeObj)}
-                className="flex items-center gap-2 bg-zinc-700/80 hover:bg-zinc-600/80 text-white font-medium px-5 py-2.5 rounded-md transition-all backdrop-blur-sm hover:scale-105 active:scale-95"
+                className="flex items-center gap-2 bg-zinc-700/80 hover:bg-zinc-600/80 text-white font-medium px-5 py-2.5 rounded-md transition-[transform,background-color] duration-200 backdrop-blur-sm hover:scale-105 motion-safe:active:scale-[0.96]"
               >
                 <Info className="w-5 h-5" />
                 <span>{currentLang === 'ja' ? '公開スケジュール' : currentLang.startsWith('zh') ? '開播排期與詳情' : 'Release Schedule'}</span>
@@ -191,7 +191,7 @@ export default function HeroBanner({
             <>
               <button
                 onClick={() => onPlay(activeAnimeObj, 1)}
-                className="flex items-center gap-2 bg-white hover:bg-zinc-200 text-black font-bold px-6 py-2.5 rounded-md transition-all shadow-lg hover:scale-105 active:scale-95"
+                className="flex items-center gap-2 bg-white hover:bg-zinc-200 text-black font-bold px-6 py-2.5 rounded-md transition-[transform,background-color,box-shadow] duration-200 shadow-lg hover:scale-105 motion-safe:active:scale-[0.96]"
               >
                 <Play className="w-5 h-5 fill-black" />
                 <span>{currentLang === 'ja' ? '第 1 話を再生' : currentLang.startsWith('zh') ? '立即播放 第 1 集' : 'Play Ep 1'}</span>
@@ -199,7 +199,7 @@ export default function HeroBanner({
 
               <button
                 onClick={() => onDownload(activeAnimeObj)}
-                className="flex items-center gap-2 bg-[#E50914] hover:bg-[#B81D24] text-white font-bold px-5 py-2.5 rounded-md transition-all shadow-lg shadow-red-600/30 hover:scale-105 active:scale-95"
+                className="flex items-center gap-2 bg-[#E50914] hover:bg-[#B81D24] text-white font-bold px-5 py-2.5 rounded-md transition-[transform,background-color,box-shadow] duration-200 shadow-lg shadow-red-600/30 hover:scale-105 motion-safe:active:scale-[0.96]"
               >
                 <Download className="w-5 h-5" />
                 <span>{currentLang === 'ja' ? 'ダウンロード' : t('downloads') || '下載管理'}</span>
@@ -207,7 +207,7 @@ export default function HeroBanner({
 
               <button
                 onClick={() => onMoreInfo(activeAnimeObj)}
-                className="flex items-center gap-2 bg-zinc-700/80 hover:bg-zinc-600/80 text-white font-medium px-4 py-2.5 rounded-md transition-all backdrop-blur-sm hover:scale-105 active:scale-95"
+                className="flex items-center gap-2 bg-zinc-700/80 hover:bg-zinc-600/80 text-white font-medium px-4 py-2.5 rounded-md transition-[transform,background-color] duration-200 backdrop-blur-sm hover:scale-105 motion-safe:active:scale-[0.96]"
               >
                 <Info className="w-5 h-5" />
                 <span>{t('moreInfo') || '詳細情報'}</span>

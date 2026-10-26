@@ -10,7 +10,8 @@ function AnimeCard({
   onMoreInfo,
   isFavorite = false,
   onToggleFavorite,
-  currentLang = 'zh-TW'
+  currentLang = 'zh-TW',
+  isRecommendation = false
 }) {
   const [isHovered, setIsHovered] = useState(false);
 
@@ -72,7 +73,7 @@ function AnimeCard({
         </button>
 
         {/* Match Percentage or Rating or Upcoming Badge Top Right */}
-        {anime.matchPercent ? (
+        {isRecommendation && anime.matchPercent ? (
           <div className="absolute top-2 right-2 flex items-center gap-1 bg-emerald-950/85 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold text-emerald-400 border border-emerald-500/30 shadow-md">
             <span>{anime.matchPercent}% {currentLang === 'ja' ? '一致' : currentLang.startsWith('zh') ? '契合度' : 'Match'}</span>
           </div>
@@ -93,7 +94,7 @@ function AnimeCard({
 
         {/* Bottom Title Gradient Overlay on Card */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-2.5 pt-6 flex flex-col justify-end">
-          {anime.recommendationReason && (
+          {isRecommendation && anime.recommendationReason && (
             <div className="text-[10px] text-amber-300 font-semibold line-clamp-1 mb-1 flex items-center gap-1 bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-500/30 shadow-sm backdrop-blur-sm">
               <Sparkles className="w-2.5 h-2.5 text-amber-400 shrink-0" />
               <span className="truncate">{anime.recommendationReason}</span>
@@ -110,7 +111,7 @@ function AnimeCard({
                     ? (currentLang === 'ja' ? `${anime.episodes} 話` : currentLang === 'en' ? `${anime.episodes} Ep` : `${anime.episodes} 集`) 
                     : (currentLang === 'ja' ? 'シリーズ' : currentLang === 'en' ? 'Series' : '劇集'))}
             </span>
-            <span className="text-[10px] text-zinc-500">
+            <span className="text-[10px] text-zinc-400">
               {(() => {
                 if (!anime.season && !anime.seasonYear && !anime.startDate?.year) return '';
                 const year = anime.seasonYear || anime.startDate?.year || '';
@@ -144,7 +145,7 @@ function AnimeCard({
                     e.stopPropagation(); 
                     if (onMoreInfo) startTransition(() => onMoreInfo(anime)); 
                   }}
-                  className="px-3.5 py-1.5 rounded-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white flex items-center gap-1.5 shadow-lg shadow-red-600/30 transition-transform hover:scale-105 text-xs font-bold"
+                  className="px-3.5 py-1.5 rounded-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white flex items-center gap-1.5 shadow-lg shadow-red-600/30 transition-transform hover:scale-105 motion-safe:active:scale-[0.96] text-xs font-bold"
                   title={currentLang === 'ja' ? '予告編 / PV を再生' : currentLang.startsWith('zh') ? '觀看官方預告 / PV' : 'Watch Official PV / Trailer'}
                 >
                   <Play className="w-3.5 h-3.5 fill-white" />
@@ -156,7 +157,7 @@ function AnimeCard({
                   e.stopPropagation(); 
                   if (onMoreInfo) startTransition(() => onMoreInfo(anime)); 
                 }}
-                className="w-9 h-9 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-white flex items-center justify-center shadow-lg transition-transform hover:scale-105"
+                className="w-9 h-9 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-white flex items-center justify-center shadow-lg transition-transform hover:scale-105 motion-safe:active:scale-[0.96]"
                 title={currentLang === 'ja' ? '詳細・放送スケジュール' : currentLang.startsWith('zh') ? '詳細資訊與排期' : 'Details & Schedule'}
               >
                 <Info className="w-4 h-4" />

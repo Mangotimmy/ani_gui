@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, Download, X, Settings, Heart, Bell,
   Clock, Trash2, Flame, History, Compass, Globe, ChevronDown, Check,
-  Clipboard, Sparkles, Swords, Star, Menu, CalendarDays
+  Clipboard, Sparkles, Swords, Star, Menu, CalendarDays, Sun, Moon
 } from 'lucide-react';
 import { SUPPORTED_LANGS } from '../utils/i18n';
 import { 
@@ -42,7 +42,9 @@ function Navbar({
   watchHistoryCount = 0,
   currentLang = 'zh-TW',
   onSelectLang = () => {},
-  t = (k) => k
+  t = (k) => k,
+  theme = 'dark',
+  onToggleTheme = () => {}
 }) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -295,7 +297,7 @@ function Navbar({
     <div role="status" aria-live="polite" className="sr-only">
       {liveAnnouncement}
     </div>
-    <header className={`app-header fixed top-0 left-0 right-0 z-50 transition-all duration-300 px-2 min-[360px]:px-3 sm:px-5 md:px-10 ${
+    <header className={`app-header fixed top-0 left-0 right-0 z-50 transition-all duration-300 px-2.5 sm:px-4 lg:px-6 2xl:px-8 max-w-full overflow-x-clip ${
       isScrolled 
         ? 'py-2 bg-[#0e0e11] border-b border-white/[0.08] shadow-[0_12px_40px_rgba(0,0,0,0.7)]' 
         : 'py-3 bg-[#0e0e11] backdrop-blur-xl border-b border-white/[0.05] shadow-[0_4px_30px_rgba(0,0,0,0.4)]'
@@ -307,7 +309,7 @@ function Navbar({
       <div className="flex items-center gap-3 min-w-0 shrink-0">
         {/* Hamburger - mobile only */}
         <button
-          className="xl:hidden p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+          className="lg:hidden p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
           onClick={() => setShowMobileMenu(v => !v)}
           aria-label="Menu"
         >
@@ -335,16 +337,16 @@ function Navbar({
           <span className="max-[420px]:hidden text-xl sm:text-2xl font-black tracking-wider bg-gradient-to-r from-red-500 via-rose-400 to-amber-200 bg-clip-text text-transparent uppercase drop-shadow group-hover:brightness-110 transition-all">
             AniFlix
           </span>
-          <span className="hidden lg:inline-flex items-center text-[10px] tracking-wider bg-red-500/10 text-red-400 px-2 py-0.5 rounded-full border border-red-500/25 font-bold font-mono shadow-sm">
+          <span className="hidden xl:inline-flex items-center text-[10px] tracking-wider bg-red-500/10 text-red-400 px-2 py-0.5 rounded-full border border-red-500/25 font-bold font-mono shadow-sm">
             v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.8'}
           </span>
         </button>
 
         {/* Primary Navigation Pills — desktop only */}
-        <nav className="hidden xl:flex items-center gap-1.5 p-1 rounded-full bg-white/[0.03] border border-white/[0.06] backdrop-blur-md">
+        <nav className="hidden lg:flex items-center gap-1 xl:gap-1.5 p-1 rounded-full bg-white/[0.03] border border-white/[0.06] backdrop-blur-md">
           <button 
             onClick={() => { setActiveTab('home'); onSearch(''); }}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
+            className={`px-2.5 xl:px-3.5 py-1 xl:py-1.5 rounded-full text-xs font-semibold transition-all ${
               activeTab === 'home' && !searchQuery 
                 ? 'bg-white/15 text-white font-bold shadow-sm ring-1 ring-white/20' 
                 : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'
@@ -357,7 +359,7 @@ function Navbar({
           <div className="relative" ref={discoverContainerRef}>
             <button
               onClick={() => setShowDiscoverMenu(!showDiscoverMenu)}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1 xl:gap-1.5 px-2.5 xl:px-3.5 py-1 xl:py-1.5 rounded-full text-xs font-semibold transition-all ${
                 isDiscoverActive 
                   ? 'bg-white/15 text-white font-bold shadow-sm ring-1 ring-white/20' 
                   : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'
@@ -421,7 +423,7 @@ function Navbar({
 
           <button 
             onClick={() => { setActiveTab('catalog'); onSearch(''); }}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 xl:px-3.5 py-1 xl:py-1.5 rounded-full text-xs font-semibold transition-all ${
               activeTab === 'catalog' 
                 ? 'bg-white/15 text-white font-bold shadow-sm ring-1 ring-white/20' 
                 : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'
@@ -433,7 +435,7 @@ function Navbar({
           <button 
             onClick={() => { setActiveTab('schedule'); onSearch(''); }}
             aria-current={activeTab === 'schedule' ? 'page' : undefined}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-[background-color,color] duration-150 ${
+            className={`flex items-center gap-1.5 px-2.5 xl:px-3.5 py-1 xl:py-1.5 rounded-full text-xs font-semibold transition-[background-color,color] duration-150 ${
               activeTab === 'schedule' 
                 ? 'bg-white/15 text-white font-bold shadow-sm ring-1 ring-white/20' 
                 : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'
@@ -444,7 +446,7 @@ function Navbar({
           </button>
           <button 
             onClick={() => { setActiveTab('favorites'); onSearch(''); }}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 xl:px-3.5 py-1 xl:py-1.5 rounded-full text-xs font-semibold transition-all ${
               activeTab === 'favorites' 
                 ? 'bg-white/15 text-white font-bold shadow-sm ring-1 ring-white/20' 
                 : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'
@@ -460,7 +462,7 @@ function Navbar({
           </button>
           <button 
             onClick={() => { setActiveTab('history'); onSearch(''); }}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 xl:px-3.5 py-1 xl:py-1.5 rounded-full text-xs font-semibold transition-all ${
               activeTab === 'history' 
                 ? 'bg-white/15 text-white font-bold shadow-sm ring-1 ring-white/20' 
                 : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'
@@ -478,12 +480,12 @@ function Navbar({
       </div>
 
       {/* Right Side: Search, Downloader, Language & Settings */}
-      <div className="flex items-center gap-1 min-[360px]:gap-1.5 sm:gap-2.5 shrink-0">
+      <div className="flex items-center gap-1 min-[360px]:gap-1.5 sm:gap-2 shrink-0">
         {/* Search Bar & Dropdown */}
         <div className="relative flex items-center" ref={searchContainerRef}>
           <div className={`flex items-center transition-all duration-300 rounded-full ${
             isSearchOpen || searchQuery 
-              ? 'w-44 sm:w-72 bg-zinc-900/95 border border-white/20 px-3 py-1.5 shadow-xl ring-2 ring-red-500/20 backdrop-blur-xl' 
+              ? 'w-36 min-[420px]:w-48 sm:w-56 md:w-64 lg:w-72 bg-zinc-900/95 border border-white/20 px-3 py-1.5 shadow-xl ring-2 ring-red-500/20 backdrop-blur-xl' 
               : 'w-8 h-8 sm:w-9 sm:h-9 justify-center cursor-pointer bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.08] hover:border-white/20 rounded-full transition-all text-zinc-300 hover:text-white shadow-sm'
           }`}>
             <Search 
@@ -529,7 +531,7 @@ function Navbar({
 
           {/* Search History & Trending Suggestions Dropdown */}
           {showHistoryDropdown && (
-            <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-[#16161a]/98 border border-white/[0.12] rounded-2xl shadow-[0_25px_50px_rgba(0,0,0,0.8)] backdrop-blur-2xl overflow-hidden z-50 p-2.5 animate-in fade-in zoom-in-95">
+            <div className="absolute right-0 top-full mt-2 w-[calc(100vw-24px)] max-w-xs sm:w-80 bg-[#16161a]/98 border border-white/[0.12] rounded-2xl shadow-[0_25px_50px_rgba(0,0,0,0.8)] backdrop-blur-2xl overflow-hidden z-50 p-2.5 animate-in fade-in zoom-in-95">
               {/* Live anime suggestions: real matches for Japanese / English / short names */}
               {searchQuery.trim() && (
                 <div className="mb-2 pb-2 border-b border-white/[0.08]">
@@ -655,7 +657,7 @@ function Navbar({
           title="Download Manager & Queue"
         >
           <Download className="w-4 h-4 text-[#E50914] group-hover:scale-110 transition-transform" />
-          <span className="text-xs font-semibold hidden lg:inline">{t('downloads')}</span>
+          <span className="text-xs font-semibold hidden min-[1680px]:inline ml-1">{t('downloads')}</span>
           {activeDownloadsCount > 0 && (
             <span className="flex items-center justify-center w-4 h-4 bg-[#E50914] text-white text-[10px] font-black rounded-full animate-pulse shadow-md shadow-red-600/50">
               {activeDownloadsCount}
@@ -673,7 +675,7 @@ function Navbar({
                 markAllNotificationsAsRead();
               }
             }}
-            className="relative flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-white/[0.06] hover:bg-white/[0.12] active:scale-95 text-zinc-300 hover:text-white rounded-full border border-white/[0.08] hover:border-white/20 transition-all shadow-sm"
+            className="relative flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-white/[0.06] hover:bg-white/[0.12] motion-safe:active:scale-[0.96] text-zinc-300 hover:text-white rounded-full border border-white/[0.08] hover:border-white/20 transition-[transform,background-color] duration-150 shadow-sm"
             title="通知中心 (Notifications)"
             aria-label={unreadCount > 0 ? `通知中心，${unreadCount} 則未讀` : '通知中心'}
             aria-expanded={showNotificationsDropdown}
@@ -689,7 +691,7 @@ function Navbar({
 
           {/* Notifications Dropdown Panel */}
           {showNotificationsDropdown && (
-            <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-[#16161a]/98 border border-white/[0.12] rounded-2xl shadow-[0_25px_50px_rgba(0,0,0,0.85)] backdrop-blur-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95">
+            <div className="absolute right-0 top-full mt-2 w-[calc(100vw-24px)] max-w-sm sm:w-96 bg-[#16161a]/98 border border-white/[0.12] rounded-2xl shadow-[0_25px_50px_rgba(0,0,0,0.85)] backdrop-blur-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95">
               {/* Header */}
               <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-white/[0.08] bg-white/[0.02]">
                 <div className="flex items-center gap-2">
@@ -835,7 +837,7 @@ function Navbar({
                   }}
                   className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors ${
                     currentLang === langItem.code 
-                      ? 'bg-red-600/20 text-[#E50914] font-bold' 
+                      ? 'bg-red-600/20 text-rose-400 font-bold' 
                       : 'text-zinc-300 hover:bg-white/[0.08] hover:text-white'
                   }`}
                 >
@@ -847,17 +849,32 @@ function Navbar({
           )}
         </div>
 
+        {/* Dark / Light Mode Toggle Button */}
+        <button
+          type="button"
+          onClick={() => onToggleTheme(theme === 'light' ? 'dark' : 'light')}
+          className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.08] hover:border-white/20 text-zinc-300 hover:text-white transition-all shadow-sm group motion-safe:active:scale-95"
+          title={theme === 'light' ? '切換為深色模式 (Dark Mode)' : '切換為淺色模式 (Light Mode)'}
+          aria-label={theme === 'light' ? '切換為深色模式' : '切換為淺色模式'}
+        >
+          {theme === 'light' ? (
+            <Moon className="w-4 h-4 text-indigo-400 hover:rotate-12 transition-transform duration-200" />
+          ) : (
+            <Sun className="w-4 h-4 text-amber-400 hover:rotate-45 transition-transform duration-200" />
+          )}
+        </button>
+
         {/* User Profile Switcher Button */}
         <button
           type="button"
           onClick={onOpenUserProfile}
-          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.08] hover:border-white/20 text-zinc-200 hover:text-white text-xs font-semibold transition-all shadow-sm group motion-safe:active:scale-95"
+          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.08] hover:border-white/20 text-zinc-200 hover:text-white text-xs font-semibold transition-[transform,background-color] duration-150 shadow-sm group motion-safe:active:scale-[0.96]"
           title={`使用者帳號 (${currentUser?.displayName || currentUser?.username || 'Default'})`}
         >
           <span className="text-sm">
             {currentUser?.avatar === 'fox' ? '🦊' : currentUser?.avatar === 'ninja' ? '🥷' : currentUser?.avatar === 'robot' ? '🤖' : currentUser?.avatar === 'ghost' ? '👻' : currentUser?.avatar === 'dragon' ? '🐲' : currentUser?.avatar === 'star' ? '⭐' : '🐱'}
           </span>
-          <span className="max-w-[70px] sm:max-w-[100px] truncate hidden sm:inline">
+          <span className="max-w-[70px] sm:max-w-[100px] truncate hidden min-[1680px]:inline ml-1">
             {currentUser?.displayName || currentUser?.username || '用戶'}
           </span>
         </button>
@@ -875,15 +892,15 @@ function Navbar({
 
     {/* Mobile Navigation Drawer */}
     {showMobileMenu && (
-      <div className="fixed top-[52px] left-0 right-0 z-40 xl:hidden bg-[#0e0e11]/98 backdrop-blur-2xl border-b border-white/[0.08] shadow-2xl px-4 py-3 flex flex-col gap-1 animate-in fade-in slide-in-from-top-2">
+      <div className="fixed top-[52px] left-0 right-0 z-40 lg:hidden bg-[#0e0e11]/98 backdrop-blur-2xl border-b border-white/[0.08] shadow-2xl px-4 py-3 flex flex-col gap-1 animate-in fade-in slide-in-from-top-2">
         <button onClick={() => { setActiveTab('home'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'home' && !searchQuery ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}>{t('home')}</button>
-        <button onClick={() => { setActiveTab('trending'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'trending' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Flame className="w-4 h-4 text-amber-400" />{t('trending')}</button>
-        <button onClick={() => { setActiveTab('upcoming'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'upcoming' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Clock className="w-4 h-4 text-cyan-400" />{t('upcoming')}</button>
-        <button onClick={() => { setActiveTab('top-rated'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'top-rated' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{t('topRated')}</button>
-        <button onClick={() => { setActiveTab('catalog'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'catalog' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Compass className="w-4 h-4 text-amber-400" />{t('catalog')}</button>
-              <button onClick={() => { setActiveTab('schedule'); onSearch(''); setShowMobileMenu(false); }} aria-current={activeTab === 'schedule' ? 'page' : undefined} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'schedule' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><CalendarDays className="w-4 h-4 text-cyan-400" />{t('schedule')}</button>
-        <button onClick={() => { setActiveTab('favorites'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'favorites' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Heart className={`w-4 h-4 ${favoritesCount > 0 ? 'text-red-500 fill-red-500' : ''}`} />{t('favorites')}{favoritesCount > 0 && <span className="ml-auto text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full font-bold">{favoritesCount}</span>}</button>
-        <button onClick={() => { setActiveTab('history'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'history' ? 'bg-red-600/20 text-[#E50914]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><History className={`w-4 h-4 ${watchHistoryCount > 0 ? 'text-indigo-400' : ''}`} />{t('history')}{watchHistoryCount > 0 && <span className="ml-auto text-[10px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded-full font-bold">{watchHistoryCount}</span>}</button>
+        <button onClick={() => { setActiveTab('trending'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'trending' ? 'bg-red-600/20 text-rose-400' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Flame className="w-4 h-4 text-amber-400" />{t('trending')}</button>
+        <button onClick={() => { setActiveTab('upcoming'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'upcoming' ? 'bg-red-600/20 text-rose-400' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Clock className="w-4 h-4 text-cyan-400" />{t('upcoming')}</button>
+        <button onClick={() => { setActiveTab('top-rated'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'top-rated' ? 'bg-red-600/20 text-rose-400' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{t('topRated')}</button>
+        <button onClick={() => { setActiveTab('catalog'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'catalog' ? 'bg-red-600/20 text-rose-400' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Compass className="w-4 h-4 text-amber-400" />{t('catalog')}</button>
+              <button onClick={() => { setActiveTab('schedule'); onSearch(''); setShowMobileMenu(false); }} aria-current={activeTab === 'schedule' ? 'page' : undefined} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'schedule' ? 'bg-red-600/20 text-rose-400' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><CalendarDays className="w-4 h-4 text-cyan-400" />{t('schedule')}</button>
+        <button onClick={() => { setActiveTab('favorites'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'favorites' ? 'bg-red-600/20 text-rose-400' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><Heart className={`w-4 h-4 ${favoritesCount > 0 ? 'text-red-500 fill-red-500' : ''}`} />{t('favorites')}{favoritesCount > 0 && <span className="ml-auto text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full font-bold">{favoritesCount}</span>}</button>
+        <button onClick={() => { setActiveTab('history'); onSearch(''); setShowMobileMenu(false); }} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === 'history' ? 'bg-red-600/20 text-rose-400' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'}`}><History className={`w-4 h-4 ${watchHistoryCount > 0 ? 'text-indigo-400' : ''}`} />{t('history')}{watchHistoryCount > 0 && <span className="ml-auto text-[10px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded-full font-bold">{watchHistoryCount}</span>}</button>
       </div>
     )}
     </>

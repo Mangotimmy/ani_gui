@@ -22,6 +22,10 @@ export default function BentoGrid({
   const isZh = currentLang.startsWith('zh');
   const handlePowerShellClick = onScrollToPowerShell || onOpenArchitectureSettings;
 
+  const isDesktop = typeof window !== 'undefined' && Boolean(window.aniflixDesktop?.isDesktop);
+  const isDockerContainer = Boolean(isContainer);
+  const isWebMode = !isDockerContainer && !isDesktop;
+
   return (
     <section className={`w-full ${compact ? 'py-1 px-0' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6'}`} aria-label="System Architecture & Highlights">
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -39,33 +43,42 @@ export default function BentoGrid({
                   <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
                 </span>
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                  {isContainer ? 'Docker Server Online' : 'PC Client Active'}
+                  {isDockerContainer 
+                    ? 'Docker Server Online' 
+                    : (isDesktop ? 'PC Desktop Active' : 'Host Server Active')}
                 </span>
               </div>
 
               <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
-                {isContainer ? 'Port 3000 (HTTP)' : 'Port 3001 (IPC)'}
+                {isDockerContainer ? 'Port 3000 (HTTP)' : (isDesktop ? 'Port 3001 (IPC)' : 'Port 3001 (HTTP)')}
               </span>
             </div>
 
             <h3 className="text-lg font-black text-white flex items-center gap-2">
-              {isContainer ? (
+              {isDockerContainer ? (
                 <>
                   <span className="text-xl">🐳</span>
-                  <span>Docker 容器伺服器運行中</span>
+                  <span>{isZh ? 'Docker 容器伺服器運行中' : 'Docker Server Online'}</span>
+                </>
+              ) : isDesktop ? (
+                <>
+                  <span className="text-xl">💻</span>
+                  <span>{isZh ? 'AniFlix 桌面客戶端模式' : 'Desktop App Active'}</span>
                 </>
               ) : (
                 <>
-                  <span className="text-xl">💻</span>
-                  <span>AniFlix 桌面客戶端模式</span>
+                  <span className="text-xl">🖥️</span>
+                  <span>{isZh ? 'AniFlix 伺服器主機模式' : 'AniFlix Host Server'}</span>
                 </>
               )}
             </h3>
 
             <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
-              {isContainer 
-                ? '已成功連線至 Docker 容器端 (Synology NAS / Linux)。內建 ffmpeg、yt-dlp、aria2c 影音解碼引擎，支援跨平台手機與 PC 瀏覽器 HLS 極速串流。'
-                : '本機桌面環境運行中。提供完整 Direct3D 11 / Intel QuickSync 硬體加速、MPV 外顯播放器、以及本機 Scoop 依賴組件熱更新。'
+              {isDockerContainer 
+                ? (isZh ? '已成功連線至 Docker 容器端 (Synology NAS / Linux)。內建影音解碼引擎，支援跨平台手機與 PC 瀏覽器 HLS 極速串流。' : 'Connected to Docker container on Synology NAS / Linux.')
+                : isDesktop
+                ? (isZh ? '本機桌面環境運行中。提供完整 Direct3D 11 / Intel QuickSync 硬體加速、MPV 外顯播放器、以及本機組件熱更新。' : 'Running in local PC Desktop shell with hardware acceleration.')
+                : (isZh ? '已成功連線至 AniFlix 主機服務端 (Windows / Web)。支援 HLS 高速串流解碼、跨裝置播放進度同步與即時線上播放。' : 'Connected to AniFlix Host Server. Supports HLS stream decoding and multi-device sync.')
               }
             </p>
           </div>
@@ -95,7 +108,11 @@ export default function BentoGrid({
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-600/90 hover:bg-red-600 text-white text-xs font-bold shadow-md shadow-red-600/20 motion-safe:active:scale-[0.96] transition-all cursor-pointer"
             >
               <Terminal className="w-3.5 h-3.5" />
-              <span>{isZh ? 'PowerShell 部署指南' : 'PowerShell Guide'}</span>
+              <span>
+                {isDockerContainer 
+                  ? (isZh ? 'Docker / NAS 部署指南' : 'Docker Deployment') 
+                  : (isZh ? '系統架構與部署指南' : 'Architecture Guide')}
+              </span>
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>

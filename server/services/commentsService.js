@@ -2,13 +2,13 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { DATA_DIR } from './paths.js';
 
 const MAX_TEXT = 500;
 const MAX_PER_ANIME = 200;
 
 function getCommentsDir() {
-  const dataDir = process.env.ANIFLIX_DATA_DIR || path.join(process.cwd(), 'data');
-  const dir = path.join(dataDir, 'comments');
+  const dir = path.join(DATA_DIR, 'comments');
   if (!fs.existsSync(dir)) {
     try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   }

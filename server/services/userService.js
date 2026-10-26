@@ -1,10 +1,10 @@
 // server/services/userService.js - Multi-User Profile & Data Synchronization Service
 import fs from 'fs';
 import path from 'path';
+import { DATA_DIR } from './paths.js';
 
 function getUsersDir() {
-  const dataDir = process.env.ANIFLIX_DATA_DIR || path.join(process.cwd(), 'data');
-  const usersDir = path.join(dataDir, 'users');
+  const usersDir = path.join(DATA_DIR, 'users');
   if (!fs.existsSync(usersDir)) {
     try {
       fs.mkdirSync(usersDir, { recursive: true });

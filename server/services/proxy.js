@@ -11,8 +11,9 @@ const DEFAULT_REFERER = 'https://zokoanime.video/';
  * Rewrites an M3U8 playlist so all child playlists, video segments,
  * and key/init URLs route through the local proxy with proper Referer.
  */
-function rewriteM3U8(content, baseUrl, referer) {
+function rewriteM3U8(content, baseUrl, referer, cookies = '') {
   const lines = content.split(/\r?\n/);
+  const cookieParam = cookies ? `&cookies=${encodeURIComponent(cookies)}` : '';
   const rewritten = lines.map(line => {
     const trimmed = line.trim();
     if (!trimmed) return line;
@@ -22,7 +23,7 @@ function rewriteM3U8(content, baseUrl, referer) {
       return trimmed.replace(/URI="([^"]+)"/g, (match, uri) => {
         try {
           const resolvedUri = new URL(uri, baseUrl).href;
-          const proxyUri = `/api/proxy?url=${encodeURIComponent(resolvedUri)}&referer=${encodeURIComponent(referer)}`;
+          const proxyUri = `/api/proxy?url=${encodeURIComponent(resolvedUri)}&referer=${encodeURIComponent(referer)}${cookieParam}`;
           return `URI="${proxyUri}"`;
         } catch {
           return match;
@@ -33,7 +34,7 @@ function rewriteM3U8(content, baseUrl, referer) {
     // Playlist or segment URI line
     try {
       const resolvedUri = new URL(trimmed, baseUrl).href;
-      return `/api/proxy?url=${encodeURIComponent(resolvedUri)}&referer=${encodeURIComponent(referer)}`;
+      return `/api/proxy?url=${encodeURIComponent(resolvedUri)}&referer=${encodeURIComponent(referer)}${cookieParam}`;
     } catch {
       return line;
     }
@@ -146,7 +147,8 @@ export async function handleProxyStream(req, res) {
     // 1. M3U8 Playlist
     if (isM3U8) {
       const text = await upstreamRes.text();
-      const rewritten = rewriteM3U8(text, effectiveUrl, referer);
+      const cookies = req.query.cookies ? String(req.query.cookies) : '';
+      const rewritten = rewriteM3U8(text, effectiveUrl, referer, cookies);
 
       // Warm the disk cache ahead of the player: the first segments of the selected
       // variant are downloaded in the background while the browser parses the playlist,

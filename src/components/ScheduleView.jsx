@@ -55,7 +55,15 @@ export default function ScheduleView({ currentLang = 'zh-TW', t, onOpenAnime }) 
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(weekStart);
       d.setDate(d.getDate() + i);
-      return { long: fmt.format(d), short: short.format(d), date: d.getDate() };
+      const m = d.getMonth() + 1;
+      const day = d.getDate();
+      return { 
+        long: fmt.format(d), 
+        short: short.format(d), 
+        date: day,
+        dateFormatted: `${m}/${day}`,
+        fullDateText: currentLang.startsWith('zh') ? `${m}月${day}日` : `${m}/${day}`
+      };
     });
   }, [currentLang, weekStart]);
 
@@ -127,7 +135,7 @@ export default function ScheduleView({ currentLang = 'zh-TW', t, onOpenAnime }) 
       {status === 'ready' && (
         <>
           {/* Day selector (mobile / tablet) */}
-          <div role="tablist" aria-label={t('scheduleTitle')} className="lg:hidden flex gap-1.5 overflow-x-auto hide-scrollbar pb-3">
+          <div role="tablist" aria-label={t('scheduleTitle')} className="lg:hidden flex gap-2 overflow-x-auto hide-scrollbar pb-3">
             {dayNames.map((d, i) => {
               const selected = selectedDay === i;
               return (
@@ -141,15 +149,25 @@ export default function ScheduleView({ currentLang = 'zh-TW', t, onOpenAnime }) 
                   tabIndex={selected ? 0 : -1}
                   onClick={() => setSelectedDay(i)}
                   onKeyDown={(e) => onTabKeyDown(e, i)}
-                  className={`shrink-0 min-w-[56px] px-3 py-2 rounded-xl text-xs font-bold border transition-[background-color,color] duration-150 ${
+                  className={`shrink-0 min-w-[64px] px-3 py-2 rounded-xl text-center border transition-[background-color,color] duration-150 motion-safe:active:scale-[0.96] ${
                     selected
-                      ? 'bg-[#E50914] border-[#E50914] text-white'
-                      : 'bg-zinc-900/80 border-white/[0.08] text-zinc-300'
+                      ? 'bg-[#E50914] border-[#E50914] text-white shadow-md shadow-red-600/30'
+                      : 'bg-zinc-900/80 border-white/[0.08] text-zinc-300 hover:bg-zinc-800'
                   }`}
                 >
-                  <span className="block">{d.short}</span>
-                  <span className="block text-[10px] font-medium opacity-80 tabular-nums">
-                    {i === todayIdx ? t('scheduleToday') : `${byDay[i].length}`}
+                  <span className="block text-xs font-bold leading-tight flex items-center justify-center gap-1">
+                    <span>{d.short}</span>
+                    {i === todayIdx && (
+                      <span className={`text-[9px] px-1 py-0.2 rounded font-semibold ${selected ? 'bg-white text-red-600' : 'bg-red-600 text-white'}`}>
+                        {t('scheduleToday')}
+                      </span>
+                    )}
+                  </span>
+                  <span className="block text-[11px] font-semibold opacity-90 tabular-nums mt-0.5">
+                    {d.dateFormatted}
+                  </span>
+                  <span className="block text-[10px] text-zinc-400 tabular-nums mt-0.5">
+                    {byDay[i].length} {currentLang.startsWith('zh') ? '部' : 'titles'}
                   </span>
                 </button>
               );
@@ -176,16 +194,26 @@ export default function ScheduleView({ currentLang = 'zh-TW', t, onOpenAnime }) 
             {dayNames.map((d, i) => (
               <section key={i} aria-label={d.long} className="min-w-0">
                 <header
-                  className={`mb-2 px-3 py-2 rounded-xl text-center border ${
+                  className={`mb-2 px-3 py-2.5 rounded-xl text-center border transition-colors ${
                     i === todayIdx
-                      ? 'bg-[#E50914]/15 border-[#E50914]/50 text-white'
+                      ? 'bg-[#E50914]/15 border-[#E50914]/50 text-white shadow-sm'
                       : 'bg-zinc-900/70 border-white/[0.06] text-zinc-300'
                   }`}
                 >
-                  <span className="block text-sm font-bold">{d.long}</span>
-                  <span className="block text-[10px] text-zinc-500 tabular-nums">
-                    {i === todayIdx ? `${t('scheduleToday')} · ` : ''}{byDay[i].length}
-                  </span>
+                  <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                    <span className="text-sm font-bold">{d.long}</span>
+                    {i === todayIdx && (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[#E50914] text-white font-bold">
+                        {t('scheduleToday')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs font-semibold text-zinc-300 tabular-nums mt-0.5">
+                    {d.fullDateText}
+                  </div>
+                  <div className="text-[11px] text-zinc-400 tabular-nums mt-0.5">
+                    {byDay[i].length} {currentLang.startsWith('zh') ? '部新番' : 'anime'}
+                  </div>
                 </header>
                 <div className="space-y-2">
                   {byDay[i].length === 0 ? (

@@ -97,13 +97,37 @@ const SEED_ALIASES = [
   { alias: 'tokyo revengers', canonical: 'Tokyo Revengers', romaji: 'Tokyo Revengers', chinese: '東京復仇者', franchise: 'Tokyo Revengers' },
   { alias: 'kaguya', canonical: 'Kaguya-sama: Love is War', romaji: 'Kaguya-sama wa Kokurasetai', chinese: '輝夜姬想讓人告白', franchise: 'Kaguya-sama' },
   { alias: 'gotoubun', canonical: 'The Quintessential Quintuplets', romaji: 'Gotoubun no Hanayome', chinese: '五等分的新娘', franchise: 'The Quintessential Quintuplets' },
-  { alias: 'quintuplets', canonical: 'The Quintessential Quintuplets', romaji: 'Gotoubun no Hanayome', chinese: '五等分的新娘', franchise: 'The Quintessential Quintuplets' }
+  { alias: 'quintuplets', canonical: 'The Quintessential Quintuplets', romaji: 'Gotoubun no Hanayome', chinese: '五等分的新娘', franchise: 'The Quintessential Quintuplets' },
+
+  // Doraemon mappings (TW: 哆啦A夢, HK: 叮噹/哆啦A夢, CN: 哆啦A梦)
+  { alias: 'doraemon', canonical: 'Doraemon', romaji: 'Doraemon', chinese: '哆啦A夢', franchise: 'Doraemon' },
+  { alias: '哆啦a夢', canonical: 'Doraemon', romaji: 'Doraemon', chinese: '哆啦A夢', franchise: 'Doraemon' },
+  { alias: '哆啦a梦', canonical: 'Doraemon', romaji: 'Doraemon', chinese: '哆啦A夢', franchise: 'Doraemon' },
+  { alias: 'ドラえもん', canonical: 'Doraemon', romaji: 'Doraemon', chinese: '哆啦A夢', franchise: 'Doraemon' },
+  { alias: '小叮噹', canonical: 'Doraemon', romaji: 'Doraemon', chinese: '哆啦A夢', franchise: 'Doraemon' },
+  { alias: '叮噹', canonical: 'Doraemon', romaji: 'Doraemon', chinese: '哆啦A夢', franchise: 'Doraemon' },
+
+  // KonoSuba mappings
+  { alias: 'konosuba', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: 'このすば', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: 'この素晴らしい世界に祝福を', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: 'この素晴らしい世界に祝福を!', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: 'この素晴らしい世界に祝福を！', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: '為美好的世界獻上祝福', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: '為美好的世界獻上祝福！', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: '为美好的世界献上祝福', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: '为美好的世界献上祝福！', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: '為美好的世界', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: '为美好的世界', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: '美好的世界', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' },
+  { alias: '美好世界', canonical: 'KonoSuba: God\'s Blessing on this Wonderful World!', romaji: 'Kono Subarashii Sekai ni Shukufuku wo!', chinese: '為美好的世界獻上祝福！', franchise: 'KonoSuba' }
 ];
 
 // Fallback in-memory stores
 const fallbackAliases = new Map();
 const fallbackSearchCache = new Map();
 const fallbackStudioCache = new Map();
+const fallbackDetailsCache = new Map();
 
 for (const a of SEED_ALIASES) {
   fallbackAliases.set(a.alias.toLowerCase(), a);
@@ -118,7 +142,8 @@ function persistFallbackStore() {
       const data = {
         aliases: Object.fromEntries(fallbackAliases),
         searchCache: Object.fromEntries(fallbackSearchCache),
-        studioCache: Object.fromEntries(fallbackStudioCache)
+        studioCache: Object.fromEntries(fallbackStudioCache),
+        detailsCache: Object.fromEntries(fallbackDetailsCache)
       };
       fs.writeFileSync(FALLBACK_JSON_PATH, JSON.stringify(data, null, 2), 'utf-8');
     } catch {}
@@ -145,6 +170,11 @@ try {
         fallbackStudioCache.set(k.toLowerCase(), v);
       }
     }
+    if (parsed.detailsCache) {
+      for (const [k, v] of Object.entries(parsed.detailsCache)) {
+        fallbackDetailsCache.set(Number(k) || k, v);
+      }
+    }
   }
 } catch {}
 
@@ -164,6 +194,8 @@ let getAllAliasesStmt = null;
 let getSearchCacheStmt = null;
 let setSearchCacheStmt = null;
 let deleteExpiredSearchStmt = null;
+let getAnimeDetailsStmt = null;
+let setAnimeDetailsStmt = null;
 
 if (DatabaseSync) {
   try {
@@ -202,6 +234,12 @@ if (isNativeSqlite && db) {
         data_json TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS anime_details (
+        id INTEGER PRIMARY KEY,
+        data_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
 
     const insertAliasStmt = db.prepare(`
@@ -218,6 +256,8 @@ if (isNativeSqlite && db) {
     getSearchCacheStmt = db.prepare('SELECT results_json, updated_at FROM search_cache WHERE query = ?');
     setSearchCacheStmt = db.prepare('INSERT OR REPLACE INTO search_cache (query, results_json, updated_at) VALUES (?, ?, ?)');
     deleteExpiredSearchStmt = db.prepare('DELETE FROM search_cache WHERE updated_at < ?');
+    getAnimeDetailsStmt = db.prepare('SELECT data_json, updated_at FROM anime_details WHERE id = ?');
+    setAnimeDetailsStmt = db.prepare('INSERT OR REPLACE INTO anime_details (id, data_json, updated_at) VALUES (?, ?, ?)');
     console.log('[DB] Native Node.js SQLite (WAL mode) successfully initialized.');
   } catch (e) {
     console.warn('[SQLite] Table initialization warning:', e.message);
@@ -329,11 +369,60 @@ export function cleanExpiredCache() {
   if (changed) persistFallbackStore();
 }
 
+const DETAILS_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+export function getCachedAnimeDetails(id, maxAgeMs = DETAILS_TTL_MS) {
+  if (!id) return null;
+  const numId = Number(id);
+  if (!numId || isNaN(numId)) return null;
+
+  if (isNativeSqlite && getAnimeDetailsStmt) {
+    try {
+      const row = getAnimeDetailsStmt.get(numId);
+      if (!row) return null;
+      if (maxAgeMs && maxAgeMs > 0 && Date.now() - Number(row.updated_at) > maxAgeMs) {
+        return null;
+      }
+      return JSON.parse(row.data_json);
+    } catch {
+      return null;
+    }
+  }
+
+  const item = fallbackDetailsCache.get(numId);
+  if (!item) return null;
+  if (maxAgeMs && maxAgeMs > 0 && Date.now() - Number(item.updatedAt || item.updated_at || 0) > maxAgeMs) {
+    fallbackDetailsCache.delete(numId);
+    return null;
+  }
+  return item.data || item;
+}
+
+export function setCachedAnimeDetails(id, data) {
+  if (!id || !data) return;
+  const numId = Number(id);
+  if (!numId || isNaN(numId)) return;
+
+  if (isNativeSqlite && setAnimeDetailsStmt) {
+    try {
+      setAnimeDetailsStmt.run(numId, JSON.stringify(data), Date.now());
+      return;
+    } catch (e) {
+      console.warn('[SQLite] Error saving anime details cache:', e.message);
+    }
+  }
+
+  fallbackDetailsCache.set(numId, { data, updatedAt: Date.now() });
+  persistFallbackStore();
+}
+
 export default {
   lookupAlias,
   getAliasCandidates,
   getAllAliases,
   getCachedSearch,
   setCachedSearch,
+  getCachedAnimeDetails,
+  setCachedAnimeDetails,
   cleanExpiredCache
 };

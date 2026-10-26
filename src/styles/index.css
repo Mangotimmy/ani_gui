@@ -262,6 +262,18 @@ h1, h2, h3, p, .line-clamp-1, .line-clamp-2 {
   overflow-wrap: anywhere;
 }
 
+/* WCAG 2.2 AA Contrast enhancements (4.5:1 minimum on dark #141414 background) */
+.text-zinc-500 {
+  color: #a1a1aa !important; /* Promotes zinc-500 (3.81:1) to zinc-400 (7.19:1) for accessible secondary text */
+}
+
+/* Modal and dialog viewport protections during scaling/zooming */
+[role="dialog"],
+.modal-container {
+  max-block-size: 92dvh;
+  overscroll-behavior: contain;
+}
+
 /* Windows high-contrast / forced-colors: keep focus and borders visible. */
 @media (forced-colors: active) {
   *:focus-visible {
@@ -270,4 +282,79 @@ h1, h2, h3, p, .line-clamp-1, .line-clamp-2 {
   img {
     outline: none;
   }
+}
+
+/* ==========================================================================
+   Light Mode (White Mode) Theme Styles
+   ========================================================================== */
+html.theme-light,
+body.theme-light {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+html.theme-light .theme-bg-root,
+html.theme-light .bg-\[\#141414\] {
+  background-color: #f8fafc !important;
+}
+
+html.theme-light .bg-zinc-900\/90,
+html.theme-light .bg-zinc-900\/80,
+html.theme-light .bg-zinc-900\/70,
+html.theme-light .bg-zinc-900,
+html.theme-light .bg-\[\#181818\],
+html.theme-light .bg-\[\#1f1f1f\] {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.theme-light .app-header {
+  background-color: rgba(255, 255, 255, 0.94) !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+html.theme-light .text-white {
+  color: #0f172a !important;
+}
+
+html.theme-light .text-zinc-200,
+html.theme-light .text-zinc-300 {
+  color: #334155 !important;
+}
+
+html.theme-light .text-zinc-400,
+html.theme-light .text-zinc-500 {
+  color: #64748b !important;
+}
+
+html.theme-light .border-zinc-800,
+html.theme-light .border-zinc-700,
+html.theme-light .border-white\/\[0\.06\],
+html.theme-light .border-white\/\[0\.08\] {
+  border-color: #e2e8f0 !important;
+}
+
+html.theme-light .bg-zinc-800\/80,
+html.theme-light .bg-zinc-800 {
+  background-color: #f1f5f9 !important;
+  color: #1e293b !important;
+}
+
+html.theme-light .hover\:bg-zinc-800:hover,
+html.theme-light .hover\:bg-zinc-700:hover {
+  background-color: #e2e8f0 !important;
+}
+
+/* Ensure video player always remains cinema-dark */
+html.theme-light .video-player-container,
+html.theme-light .cinema-dark,
+html.theme-light [data-cinema="dark"] {
+  background-color: #0a0a0a !important;
+  color: #ffffff !important;
+}
+
+html.theme-light .video-player-container *,
+html.theme-light .cinema-dark * {
+  color: revert;
 }

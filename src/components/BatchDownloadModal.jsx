@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Download, Film, CheckCircle2, Sliders } from 'lucide-react';
+import { X, Download, Film, CheckCircle2, Sliders, Server, Smartphone } from 'lucide-react';
 
 export default function BatchDownloadModal({ 
   anime, 
@@ -12,6 +12,7 @@ export default function BatchDownloadModal({
   const [rangeInput, setRangeInput] = useState(initialRange || `1-${Math.min(maxEpisodes, 12)}`);
   const [quality, setQuality] = useState('best');
   const [audioMode, setAudioMode] = useState(initialAudioMode);
+  const [downloadTarget, setDownloadTarget] = useState('server'); // 'server' (NAS / Server) | 'device' (Local Device Browser)
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!anime) return null;
@@ -49,18 +50,19 @@ export default function BatchDownloadModal({
       animeTitle: title,
       episodeNumbers: parsedEpisodes,
       quality,
-      audio: audioMode
+      audio: audioMode,
+      downloadTarget
     });
     setIsSubmitting(false);
   };
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm cursor-pointer"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm cursor-pointer overflow-y-auto"
       onClick={onClose}
     >
       <div 
-        className="relative w-full max-w-lg bg-[#181818] rounded-xl overflow-hidden shadow-2xl border border-zinc-800 text-zinc-100 animate-in fade-in zoom-in duration-150 p-6 cursor-default"
+        className="relative w-full max-w-lg bg-[#181818] rounded-xl overflow-hidden shadow-2xl border border-zinc-800 text-zinc-100 animate-in fade-in zoom-in duration-150 p-6 cursor-default max-h-[90vh] overflow-y-auto my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -180,6 +182,46 @@ export default function BatchDownloadModal({
             </div>
           </div>
 
+          {/* Download Destination (Device vs Server / NAS) */}
+          <div>
+            <span className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+              下載儲存目標 (Download Destination):
+            </span>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setDownloadTarget('server')}
+                className={`flex items-center gap-2.5 p-3 rounded-xl border text-xs transition-all text-left ${
+                  downloadTarget === 'server'
+                    ? 'bg-red-950/50 border-red-500 text-white shadow-md ring-1 ring-red-500'
+                    : 'bg-zinc-900/90 border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800/80'
+                }`}
+              >
+                <Server className="w-5 h-5 text-red-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-white">NAS / 伺服器</div>
+                  <div className="text-[10px] text-zinc-400">儲存至伺服器目錄</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDownloadTarget('device')}
+                className={`flex items-center gap-2.5 p-3 rounded-xl border text-xs transition-all text-left ${
+                  downloadTarget === 'device'
+                    ? 'bg-red-950/50 border-red-500 text-white shadow-md ring-1 ring-red-500'
+                    : 'bg-zinc-900/90 border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800/80'
+                }`}
+              >
+                <Smartphone className="w-5 h-5 text-sky-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-white">本機裝置 (Device)</div>
+                  <div className="text-[10px] text-zinc-400">瀏覽器下載至本機</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
           {/* Summary Banner */}
           <div className="bg-zinc-900/90 rounded-lg p-3 border border-zinc-800 flex items-center justify-between text-xs">
             <span className="text-zinc-400">Total episodes to queue:</span>
@@ -200,7 +242,7 @@ export default function BatchDownloadModal({
             <button
               type="submit"
               disabled={parsedEpisodes.length === 0 || isSubmitting}
-              className="flex items-center gap-2 bg-[#E50914] hover:bg-[#B81D24] disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-lg text-xs shadow-lg shadow-red-600/30 transition-transform hover:scale-105 active:scale-95"
+              className="flex items-center gap-2 bg-[#E50914] hover:bg-[#B81D24] disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-lg text-xs shadow-lg shadow-red-600/30 transition-transform hover:scale-105 motion-safe:active:scale-[0.96]"
             >
               <Download className="w-4 h-4" />
               <span>Queue {parsedEpisodes.length} Download{parsedEpisodes.length !== 1 ? 's' : ''}</span>

@@ -4,6 +4,7 @@ import './dnsFallback.js';
 import { BoundedCache } from './cache.js';
 import { resolveAnime1Stream } from './sources/anime1.js';
 import { resolveFramexStream } from './sources/framextv.js';
+import { resolveGogoanimeStream } from './sources/gogoanime.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const DEOBFUSCATE_KEY = Buffer.from('otaku-embed-v1', 'utf-8');
@@ -240,6 +241,7 @@ export function buildSourceList(activeId = 'auto') {
   return [
     { id: 'auto', name: '自動線路 (Auto Failover)', badge: '推薦', active: activeId === 'auto' },
     { id: 'anime1', name: 'Anime1.me (1080p MP4 / 原生繁中硬字)', badge: '繁中', active: activeId === 'anime1' },
+    { id: 'gogoanime', name: 'Gogoanime (HD 雙語 / Vidmoly & MegaPlay)', badge: '極速', active: activeId === 'gogoanime' },
     { id: 'framextv', name: 'FramexTV (HD 多伺服器 / VidLink)', badge: '備用', active: activeId === 'framextv' },
     { id: 'hianime', name: 'HiAnime / Zoko (多畫質 HLS / 多國字幕)', badge: '國際', active: activeId === 'hianime' }
   ];
@@ -296,7 +298,32 @@ export async function resolveStream({
     };
   }
 
-  // 2. Explicit FramexTV selection
+  // 2. Explicit Gogoanime selection
+  if (source === 'gogoanime') {
+    const gogoRes = await resolveGogoanimeStream({
+      title: animeTitle,
+      candidates: queryCandidates,
+      episode,
+      mode,
+      season
+    });
+    if (gogoRes && gogoRes.success) {
+      return {
+        ...gogoRes,
+        activeSource: 'gogoanime',
+        availableSources: buildSourceList('gogoanime')
+      };
+    }
+    return {
+      success: false,
+      activeSource: 'gogoanime',
+      availableSources: buildSourceList('gogoanime'),
+      error: gogoRes?.error || `Gogoanime 找不到《${animeTitle}》第 ${episode} 集。`,
+      suggestedFallback: 'hianime'
+    };
+  }
+
+  // 3. Explicit FramexTV selection
   if (source === 'framextv') {
     const fxRes = await resolveFramexStream({ 
       title: animeTitle, 
@@ -405,6 +432,13 @@ export async function resolveStream({
       url: s.isAutoTranslated ? s.url : `/api/proxy?url=${encodeURIComponent(s.url)}&referer=${encodeURIComponent(DEFAULT_REFERER)}`
     }));
 
+    const requestedModeMismatch = (mode === 'cantonese' || mode === 'dub') && serverInfo.mode !== mode;
+    const audioNotice = requestedModeMismatch
+      ? (mode === 'cantonese'
+          ? '此線上串流伺服器目前僅提供日語原聲 (SUB)。如需完整香港粵語配音，推薦使用「BT / 磁力下載」取得香港 Viu OTT / TVB 雙語 1080p 粵配版本！'
+          : '此動漫之線上串流目前未提供英語配音，已自動為您切換至日語原聲 (SUB)。')
+      : null;
+
     return {
       success: true,
       animeTitle: anime.title,
@@ -417,7 +451,8 @@ export async function resolveStream({
       proxiedStreamUrl,
       subtitles,
       proxiedSubtitles,
-      referer: DEFAULT_REFERER
+      referer: DEFAULT_REFERER,
+      audioNotice
     };
   } catch (err) {
     hiAnimeError = err.message;
@@ -434,6 +469,25 @@ export async function resolveStream({
           ...a1Res,
           activeSource: 'anime1',
           availableSources: buildSourceList('anime1')
+        };
+      }
+    } catch {}
+
+    // Try Gogoanime fallback
+    try {
+      const gogoRes = await resolveGogoanimeStream({
+        title: animeTitle,
+        candidates: queryCandidates,
+        episode,
+        mode,
+        season
+      });
+      if (gogoRes && gogoRes.success) {
+        console.log(`[StreamResolver] Auto-fallback to Gogoanime succeeded for "${animeTitle}" Ep ${episode}`);
+        return {
+          ...gogoRes,
+          activeSource: 'gogoanime',
+          availableSources: buildSourceList('gogoanime')
         };
       }
     } catch {}

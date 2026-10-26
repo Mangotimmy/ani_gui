@@ -256,16 +256,22 @@ async function resolveFromAnime1Me(queryList, epNum) {
 
       const proxiedStreamUrl = `/api/proxy?url=${encodeURIComponent(rawSrc)}&referer=${encodeURIComponent(REFERER_ME)}${cookieStr ? `&cookies=${encodeURIComponent(cookieStr)}` : ''}`;
 
+      const isStreamM3U8 = rawSrc.includes('.m3u8');
+      const isMp4 = !isStreamM3U8 && rawSrc.includes('.mp4');
+      const serverLabel = isStreamM3U8 
+        ? 'Anime1.me (1080p HLS / 原生繁中硬字)' 
+        : 'Anime1.me (1080p MP4 / 原生繁中硬字)';
+
       return {
         success: true,
         source: 'anime1',
-        serverName: 'Anime1.me (1080p MP4 / 原生繁中硬字)',
+        serverName: serverLabel,
         mode: 'sub',
         episode: epNum,
         streamUrl: rawSrc,
         proxiedStreamUrl,
         cookies: cookieStr,
-        isMp4: true,
+        isMp4,
         referer: REFERER_ME,
         subtitles: [
           {

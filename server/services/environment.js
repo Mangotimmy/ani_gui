@@ -14,12 +14,13 @@ const TOOLS = [
 ];
 
 export const isContainerEnvironment = () => {
+  // Never report container on a native Windows OS host
+  if (process.platform === 'win32') return false;
   return (
     fs.existsSync('/.dockerenv') ||
     process.env.ANIFLIX_CONTAINER === 'true' ||
     Boolean(process.env.DOCKER_CONTAINER) ||
-    process.env.ANIFLIX_DATA_DIR === '/data' ||
-    fs.existsSync('/downloads')
+    process.env.ANIFLIX_DATA_DIR === '/data'
   );
 };
 

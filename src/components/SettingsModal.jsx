@@ -4,7 +4,7 @@ import {
   X, Settings, Folder, FolderPlus, Check, Terminal, Wrench, RefreshCw, 
   DownloadCloud, AlertTriangle, CheckCircle, ExternalLink, Sparkles,
   Shield, ShieldAlert, ShieldCheck, Database, FileText, UploadCloud, FileCode,
-  Cpu, Zap, Gauge, Monitor, Sliders, Server, Layers, Copy, Smartphone, Network, Activity
+  Cpu, Zap, Gauge, Monitor, Sliders, Server, Layers, Copy, Smartphone, Network, Activity, Keyboard
 } from 'lucide-react';
 import { 
   collectUserData, exportToXml, exportToCsv, downloadBackupFile, 
@@ -23,6 +23,7 @@ const I18N = {
     tabPlugins: '組件管理與更新',
     tabDownloads: '下載儲存路徑',
     tabBackup: '資料備份與匯出',
+    tabKeyboard: '快捷鍵與控制說明',
     r18Title: '過濾 R-18 成人內容 (安全模式)',
     r18Subtitle: '預設開啟隱藏。自動過濾 18禁、Hentai 及成人限制級動漫作品與種子資源。',
     r18Active: '安全防護中 (已隱藏 R-18 成人內容)',
@@ -78,6 +79,7 @@ const I18N = {
     tabPlugins: '组件管理与更新',
     tabDownloads: '下载存储路径',
     tabBackup: '数据备份与导出',
+    tabKeyboard: '快捷键与控制说明',
     r18Title: '过滤 R-18 成人内容 (安全模式)',
     r18Subtitle: '默认开启隐藏。自动过滤 18禁、Hentai 及成人限制级动漫作品与种子资源。',
     r18Active: '安全防护中 (已隐藏 R-18 成人内容)',
@@ -133,6 +135,7 @@ const I18N = {
     tabPlugins: 'プラグインと更新',
     tabDownloads: 'ダウンロード保存先',
     tabBackup: 'バックアップと復元',
+    tabKeyboard: 'キーボードショートカット',
     r18Title: 'R-18 成人向けコンテンツの制限 (セーフモード)',
     r18Subtitle: 'デフォルトで非表示。18禁・Hentai・成人向けアニメおよびトレントを自動的に非表示にします。',
     r18Active: 'セーフモード保護中 (R-18非表示)',
@@ -188,6 +191,7 @@ const I18N = {
     tabPlugins: 'Plugins & Auto-Updater',
     tabDownloads: 'Downloader Storage',
     tabBackup: 'Data & Backup',
+    tabKeyboard: 'Keyboard Shortcuts',
     r18Title: 'Filter R-18 / Adult Content (Safe Mode)',
     r18Subtitle: 'Hidden by default. Automatically excludes 18+, Hentai, and adult anime titles and torrent resources.',
     r18Active: 'Safe Mode Active (R-18 content hidden)',
@@ -254,7 +258,7 @@ export default function SettingsModal({
   activeDownloadsCount = 0
 }) {
   const txt = I18N[currentLang] || I18N['zh-TW'];
-  const [activeTab, setActiveTab] = useState(initialTab || 'content'); // 'content' | 'architecture' | 'gpu' | 'plugins' | 'downloads' | 'backup'
+  const [activeTab, setActiveTab] = useState(initialTab || 'content'); // 'content' | 'architecture' | 'gpu' | 'plugins' | 'downloads' | 'backup' | 'keyboard'
   const [downloadDir, setDownloadDir] = useState(currentDir || '');
   const [saved, setSaved] = useState(false);
 
@@ -800,6 +804,18 @@ export default function SettingsModal({
           >
             <Database className="w-3.5 h-3.5" />
             <span>{txt.tabBackup}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('keyboard')}
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 whitespace-nowrap ${
+              activeTab === 'keyboard'
+                ? 'bg-[#E50914] text-white shadow-md shadow-red-600/30'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+            }`}
+          >
+            <Keyboard className="w-3.5 h-3.5" />
+            <span>{txt.tabKeyboard || '快捷鍵與控制'}</span>
           </button>
         </div>
 
@@ -1863,6 +1879,104 @@ export default function SettingsModal({
                 <UploadCloud className="w-4 h-4" />
                 <span>{txt.importBackup}</span>
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 6: Keyboard Shortcuts & Controls */}
+        {activeTab === 'keyboard' && (
+          <div className="space-y-6 animate-in fade-in duration-200 pb-6">
+            {/* Header Banner */}
+            <div className="bg-gradient-to-r from-red-950/40 via-zinc-900 to-zinc-900 border border-red-500/20 rounded-2xl p-4 sm:p-5">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2.5 rounded-xl bg-red-600/20 text-red-500 border border-red-500/30">
+                  <Keyboard className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white">
+                    鍵盤快捷鍵與控制說明 (Keyboard Shortcuts)
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    掌握全套播放器與全域導航快速鍵，享受最極致流暢的操作體驗。
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 1: Player Shortcuts */}
+            <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 sm:p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Monitor className="w-4 h-4 text-red-500" />
+                  <h4 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider">
+                    🎬 播放器控制快捷鍵 (Video Player Shortcuts)
+                  </h4>
+                </div>
+                <span className="text-[11px] text-zinc-500 font-mono">Video Controls</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {[
+                  { keys: ['Space', 'K'], desc: '播放 / 暫停影片 (Play / Pause)' },
+                  { keys: ['←', 'J'], desc: '快退 5 秒 / 10 秒 (Seek -5s / -10s)' },
+                  { keys: ['→', 'L'], desc: '快進 5 秒 / 10 秒 (Seek +5s / +10s)' },
+                  { keys: ['↑'], desc: '音量增加 5% (Volume +5%)' },
+                  { keys: ['↓'], desc: '音量降低 5% (Volume -5%)' },
+                  { keys: ['M'], desc: '靜音 / 取消靜音 (Mute / Unmute)' },
+                  { keys: ['F'], desc: '切換全螢幕模式 (Toggle Fullscreen)' },
+                  { keys: ['S'], desc: '跳過片頭 OP / 片尾 ED (Skip Intro/Outro)' },
+                  { keys: ['C'], desc: '切換字幕軌道 / 關閉字幕 (Toggle Subtitles)' },
+                  { keys: ['D'], desc: '開啟 / 關閉專業除錯面板 (Stats for Nerds)' },
+                  { keys: ['Esc'], desc: '關閉選單、退出全螢幕或關閉播放器 (Exit / Close)' },
+                ].map((item, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-800/60 border border-zinc-800 hover:border-zinc-700 transition-colors">
+                    <span className="text-xs text-zinc-300 font-medium">{item.desc}</span>
+                    <div className="flex items-center gap-1 shrink-0 ml-3">
+                      {item.keys.map((k, ki) => (
+                        <kbd key={ki} className="px-2 py-0.5 rounded-md bg-black/60 border border-zinc-700 text-zinc-200 font-mono text-[11px] shadow-sm font-bold">
+                          {k}
+                        </kbd>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Section 2: Page & Global Navigation */}
+            <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 sm:p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-indigo-400" />
+                  <h4 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider">
+                    🖥️ 頁面導航與全域快捷鍵 (Page & Global Shortcuts)
+                  </h4>
+                </div>
+                <span className="text-[11px] text-zinc-500 font-mono">App Controls</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {[
+                  { keys: ['/', 'Ctrl + K'], desc: '快速聚焦頂部搜尋欄 (Focus Search Bar)' },
+                  { keys: ['Ctrl + +'], desc: '介面放大縮放 (UI Zoom In)' },
+                  { keys: ['Ctrl + -'], desc: '介面縮小縮放 (UI Zoom Out)' },
+                  { keys: ['Ctrl + 0'], desc: '重設介面縮放為 100% (Reset Zoom 100%)' },
+                  { keys: ['T'], desc: '切換深色 / 淺色外觀主題 (Toggle Dark/Light)' },
+                  { keys: ['Esc'], desc: '關閉彈出視窗或對話框 (Close Active Modal)' },
+                  { keys: ['F5', 'Ctrl + R'], desc: '重新整理頁面與目錄 (Reload Page)' },
+                ].map((item, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-800/60 border border-zinc-800 hover:border-zinc-700 transition-colors">
+                    <span className="text-xs text-zinc-300 font-medium">{item.desc}</span>
+                    <div className="flex items-center gap-1 shrink-0 ml-3">
+                      {item.keys.map((k, ki) => (
+                        <kbd key={ki} className="px-2 py-0.5 rounded-md bg-black/60 border border-zinc-700 text-zinc-200 font-mono text-[11px] shadow-sm font-bold">
+                          {k}
+                        </kbd>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}

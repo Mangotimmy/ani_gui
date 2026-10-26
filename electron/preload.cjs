@@ -16,6 +16,15 @@ contextBridge.exposeInMainWorld('aniflixDesktop', {
 
   notificationsSupported: () => ipcRenderer.invoke('desktop:notifications-supported'),
 
+  /** UI Zoom & Scale factor methods */
+  getZoomFactor: () => ipcRenderer.invoke('desktop:get-zoom-factor'),
+  setZoomFactor: (factor) => ipcRenderer.invoke('desktop:set-zoom-factor', factor),
+  onZoomChange: (callback) => {
+    const handler = (_event, factor) => callback(factor);
+    ipcRenderer.on('desktop:zoom-changed', handler);
+    return () => ipcRenderer.removeListener('desktop:zoom-changed', handler);
+  },
+
   /** Fired when the user clicks a native notification. Returns an unsubscribe fn. */
   onNotificationClick: (callback) => {
     const handler = (_event, payload) => callback(payload);

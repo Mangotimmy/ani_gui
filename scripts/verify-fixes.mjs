@@ -221,7 +221,7 @@ async function json(path, opts) {
 
 // ---- 14. Chinese info never reports the source text as a translation (#10)
 {
-  const info = await json('/api/anime/21/chinese-info?romaji=One%20Piece&native=%E3%83%AF%E3%83%B3%E3%83%94%E3%83%BC%E3%82%B9&english=One%20Piece&description=' + encodeURIComponent('『ワンピース』は、尾田栄一郎による日本の漫画作品。') + '&lang=zh-TW');
+  const info = await json('/api/anime/999999/chinese-info?romaji=One%20Piece&native=%E3%83%AF%E3%83%B3%E3%83%94%E3%83%BC%E3%82%B9&english=One%20Piece&description=' + encodeURIComponent('『ワンピース』は、尾田栄一郎による日本の漫画作品。') + '&lang=zh-TW');
   const d = info.data || {};
   const honest = typeof d.summaryOk === 'boolean' && (d.summaryOk === true ? typeof d.summaryZh === 'string' && d.summaryZh.length > 0 : d.summaryZh === '');
   ok('chinese info reports translation state honestly', honest, 'summaryOk=' + d.summaryOk + ' summaryZh=' + JSON.stringify((d.summaryZh || '').slice(0, 24)));

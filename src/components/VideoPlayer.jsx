@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { 
-  X, Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, 
+  X, Play, Pause, RotateCcw, RotateCw, Volume1, Volume2, VolumeX, 
   Maximize, Minimize, SkipBack, SkipForward, MonitorPlay, 
   Settings, Loader2, Copy, Check, Link2, ExternalLink, SlidersHorizontal, FastForward,
   Subtitles, Upload, FileUp, Tv, Smartphone, Zap, Sparkles,
@@ -153,11 +153,17 @@ export default function VideoPlayer({
   const [streamUrl, setStreamUrl] = useState('');
   const [rawStreamUrl, setRawStreamUrl] = useState('');
   const [referer, setReferer] = useState('https://zokoanime.video/');
+  const [currentAudioMode, setCurrentAudioMode] = useState(audioMode || 'sub');
+
+  useEffect(() => {
+    if (audioMode) setCurrentAudioMode(audioMode);
+  }, [audioMode]);
 
   const [subtitles, setSubtitles] = useState([]);
   const [selectedSubIndex, setSelectedSubIndex] = useState(0);
   const [showSubtitlesMenu, setShowSubtitlesMenu] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [audioNotice, setAudioNotice] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(true);
   const [bufferPercent, setBufferPercent] = useState(0);
@@ -170,6 +176,43 @@ export default function VideoPlayer({
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
+  const [volumeHud, setVolumeHud] = useState(null); // { level: number, isMuted: boolean }
+  const volumeHudTimerRef = useRef(null);
+
+  const showVolumeHud = useCallback((vol, muted) => {
+    if (volumeHudTimerRef.current) clearTimeout(volumeHudTimerRef.current);
+    setVolumeHud({ level: Math.round(vol * 100), isMuted: Boolean(muted) });
+    volumeHudTimerRef.current = setTimeout(() => {
+      setVolumeHud(null);
+      volumeHudTimerRef.current = null;
+    }, 1500);
+  }, []);
+
+  const adjustVolume = useCallback((delta) => {
+    const video = videoRef.current;
+    setVolume(prev => {
+      const next = Math.max(0, Math.min(1, Math.round((prev + delta) * 20) / 20)); // 5% steps
+      if (video) {
+        video.volume = next;
+        if (delta > 0 && (video.muted || isMuted)) {
+          video.muted = false;
+          setIsMuted(false);
+          showVolumeHud(next, false);
+          return next;
+        }
+        showVolumeHud(next, video.muted || isMuted);
+      } else {
+        showVolumeHud(next, isMuted);
+      }
+      return next;
+    });
+  }, [isMuted, showVolumeHud]);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = volume;
+    }
+  }, [volume]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
 
@@ -658,7 +701,7 @@ export default function VideoPlayer({
           body: JSON.stringify({
             animeTitle: rawTitle,
             episode,
-            mode: audioMode,
+            mode: currentAudioMode,
             candidates: candidateTitles,
             maxAiredCap,
             source: activeSource,
@@ -696,6 +739,7 @@ export default function VideoPlayer({
             setStreamUrl(proxied);
             setReferer(refHeader);
             setCustomInputUrl(raw);
+            setAudioNotice(streamRes.data.audioNotice || null);
 
             const remoteSubs = streamRes.data.proxiedSubtitles || (streamRes.data.subtitles || []).map(s => ({
               ...s,
@@ -777,7 +821,7 @@ export default function VideoPlayer({
     return () => { isCancelled = true; };
     // NOTE: displayTitle / currentLang are intentionally NOT dependencies — they change
     // asynchronously and must never trigger a re-resolve + playback restart.
-  }, [anime?.id, episode, audioMode, rawTitle, directStreamUrl, activeSource]);
+  }, [anime?.id, episode, currentAudioMode, rawTitle, directStreamUrl, activeSource]);
 
   // Load live uploaded episodes list
   useEffect(() => {
@@ -1005,9 +1049,10 @@ export default function VideoPlayer({
     }
 
     const playable = toPlayableUrl(streamUrl, referer);
-    const isDirectMp4 = isMp4 ||
+    const isM3U8Stream = (rawStreamUrl && rawStreamUrl.includes('.m3u8')) || (streamUrl && streamUrl.includes('.m3u8'));
+    const isDirectMp4 = !isM3U8Stream && (isMp4 ||
                         (rawStreamUrl && (rawStreamUrl.includes('.mp4') || rawStreamUrl.includes('api?c='))) ||
-                        (streamUrl && (streamUrl.includes('.mp4') || streamUrl.includes('api?c=')));
+                        (streamUrl && (streamUrl.includes('.mp4') || streamUrl.includes('api?c='))));
 
     if (isDirectMp4) {
       if (hlsRef.current) {
@@ -1141,9 +1186,10 @@ export default function VideoPlayer({
     setIsPreviewLoading(false);
     pendingPreviewSeekRef.current = null;
     const playable = toPlayableUrl(streamUrl, referer);
-    const isDirectMp4 = isMp4 ||
+    const isM3U8Stream = (rawStreamUrl && rawStreamUrl.includes('.m3u8')) || (streamUrl && streamUrl.includes('.m3u8'));
+    const isDirectMp4 = !isM3U8Stream && (isMp4 ||
                         (rawStreamUrl && (rawStreamUrl.includes('.mp4') || rawStreamUrl.includes('api?c='))) ||
-                        (streamUrl && (streamUrl.includes('.mp4') || streamUrl.includes('api?c=')));
+                        (streamUrl && (streamUrl.includes('.mp4') || streamUrl.includes('api?c='))));
 
     if (isDirectMp4) {
       if (previewHlsRef.current) {
@@ -1462,17 +1508,19 @@ export default function VideoPlayer({
           break;
         case 'ArrowUp':
           e.preventDefault();
-          setVolume(v => Math.min(1, v + 0.1));
+          adjustVolume(0.05);
           break;
         case 'ArrowDown':
           e.preventDefault();
-          setVolume(v => Math.max(0, v - 0.1));
+          adjustVolume(-0.05);
           break;
         case 'f':
+        case 'F':
           e.preventDefault();
           toggleFullscreen();
           break;
         case 'm':
+        case 'M':
           e.preventDefault();
           toggleMute();
           break;
@@ -1521,8 +1569,10 @@ export default function VideoPlayer({
   const toggleMute = () => {
     const video = videoRef.current;
     if (!video) return;
-    video.muted = !isMuted;
-    setIsMuted(!isMuted);
+    const nextMuted = !isMuted;
+    video.muted = nextMuted;
+    setIsMuted(nextMuted);
+    showVolumeHud(volume, nextMuted);
   };
 
   const toggleFullscreen = () => {
@@ -1900,7 +1950,7 @@ export default function VideoPlayer({
                 </span>
                 <span className="text-[10px] text-amber-300 font-medium flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
-                  FramexTV 獨立內嵌播放模式
+                  {resolvedSource === 'gogoanime' ? 'Gogoanime' : resolvedSource === 'framextv' ? 'FramexTV' : (resolvedSource || '獨立內嵌')} 播放模式
                 </span>
               </div>
             </div>
@@ -1920,12 +1970,16 @@ export default function VideoPlayer({
                     <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-800 flex items-center justify-between">
                       <span>選擇播放線路</span>
                     </div>
-                    {[
-                      { id: 'auto', label: '自動線路 (推薦)', badge: 'Auto' },
-                      { id: 'anime1', label: 'Anime1.me (1080p MP4)', badge: '繁中' },
-                      { id: 'framextv', label: 'FramexTV (HD 內嵌)', badge: '備用' },
-                      { id: 'hianime', label: 'HiAnime (國際 HLS)', badge: '多語' },
-                    ].map(s => (
+                    {(availableSources.length > 0
+                      ? availableSources.map(s => ({ id: s.id, label: s.name, badge: s.badge }))
+                      : [
+                          { id: 'auto', label: '自動線路 (推薦)', badge: 'Auto' },
+                          { id: 'anime1', label: 'Anime1.me (1080p MP4)', badge: '繁中' },
+                          { id: 'gogoanime', label: 'Gogoanime (HD 雙語 / HLS)', badge: '極速' },
+                          { id: 'framextv', label: 'FramexTV (HD 內嵌)', badge: '備用' },
+                          { id: 'hianime', label: 'HiAnime (國際 HLS)', badge: '多語' },
+                        ]
+                    ).map(s => (
                       <button
                         key={s.id}
                         type="button"
@@ -2549,6 +2603,33 @@ export default function VideoPlayer({
         </div>
       )}
 
+      {/* Keyboard / Gesture Volume HUD Overlay */}
+      {volumeHud && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none transition-all duration-200 animate-in fade-in zoom-in-95">
+          <div className="flex items-center gap-3.5 bg-black/85 backdrop-blur-md border border-white/15 px-5 py-3 rounded-2xl shadow-2xl text-white">
+            {volumeHud.isMuted || volumeHud.level === 0 ? (
+              <VolumeX className="w-6 h-6 text-red-500 animate-pulse shrink-0" />
+            ) : volumeHud.level < 50 ? (
+              <Volume1 className="w-6 h-6 text-white shrink-0" />
+            ) : (
+              <Volume2 className="w-6 h-6 text-white shrink-0" />
+            )}
+            <div className="flex flex-col gap-1 w-28">
+              <div className="flex justify-between items-center text-xs font-bold">
+                <span>{volumeHud.isMuted ? (currentLang.startsWith('zh') ? '已靜音' : 'Muted') : (currentLang.startsWith('zh') ? '音量' : 'Volume')}</span>
+                <span className="font-mono">{volumeHud.isMuted ? '0%' : `${volumeHud.level}%`}</span>
+              </div>
+              <div className="w-full bg-zinc-700/60 rounded-full h-1.5 overflow-hidden">
+                <div 
+                  className={`h-full transition-all duration-150 ${volumeHud.isMuted ? 'bg-red-500' : 'bg-[#E50914]'}`}
+                  style={{ width: `${volumeHud.isMuted ? 0 : volumeHud.level}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Center Buffering Spinner */}
       {isBuffering && !errorMessage && (isPlaying || !videoRef.current || (videoRef.current && videoRef.current.readyState < 2 && currentTime === 0)) && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
@@ -2658,7 +2739,7 @@ export default function VideoPlayer({
         <button
           type="button"
           onClick={handleSkipOpOrEd}
-          className="absolute bottom-24 right-6 z-40 bg-white/95 hover:bg-white text-black font-extrabold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 transition-all hover:scale-105 active:scale-95 border border-white/20 animate-in fade-in slide-in-from-bottom-3"
+          className="absolute bottom-24 right-6 z-40 bg-white/95 hover:bg-white text-black font-extrabold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 transition-[transform,background-color] duration-200 hover:scale-105 motion-safe:active:scale-[0.96] border border-white/20 animate-in fade-in slide-in-from-bottom-3"
           aria-label={activeSkipType === "op" ? "跳過片頭" : "跳過片尾"}
         >
           <FastForward className="w-4 h-4 fill-black" />
@@ -2792,11 +2873,25 @@ export default function VideoPlayer({
                   {t('episodeLabel', 'Episode {ep}').replace('{ep}', episode)}
                 </span>
                 <span>•</span>
-                <span className="bg-zinc-800 text-zinc-300 px-1 sm:px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">
-                  {audioMode === 'sub' 
-                    ? (t('audioSubLabel') || 'SUB') 
-                    : (t('audioDubLabel') || 'DUB')}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const modes = ['sub', 'dub', 'cantonese'];
+                    const nextIdx = (modes.indexOf(currentAudioMode) + 1) % modes.length;
+                    setCurrentAudioMode(modes[nextIdx]);
+                  }}
+                  title="點擊切換音訊語言 (日語原聲 / 英語配音 / 粵語配音)"
+                  className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-bold uppercase tracking-wider border border-zinc-700/80 transition-all flex items-center gap-1 cursor-pointer hover:border-zinc-500 shadow-sm"
+                >
+                  <span>
+                    {currentAudioMode === 'cantonese'
+                      ? '🇭🇰 粵配'
+                      : currentAudioMode === 'dub' 
+                        ? (t('audioDubLabel') || 'DUB') 
+                        : (t('audioSubLabel') || 'SUB')}
+                  </span>
+                  <span className="text-[9px] text-zinc-400">⇄</span>
+                </button>
                 {rawStreamUrl && (
                   <>
                     <span>•</span>
@@ -2903,8 +2998,27 @@ export default function VideoPlayer({
           </div>
         </div>
 
+        {/* Audio Mode Notice Banner */}
+        {audioNotice && (
+          <div className="mx-auto mt-2 max-w-xl w-11/12 z-40 pointer-events-auto animate-in fade-in slide-in-from-top-2">
+            <div className="bg-amber-950/90 border border-amber-500/40 text-amber-200 px-4 py-2.5 rounded-xl text-xs flex items-center justify-between gap-3 shadow-2xl backdrop-blur-md">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="leading-relaxed">{audioNotice}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAudioNotice(null)}
+                className="text-amber-400 hover:text-white p-1 rounded-md shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Center Clickable Trigger */}
-        <div className="flex-1 flex items-center justify-center" onClick={togglePlay} />
+        <button type="button" aria-label={isPlaying ? (t("pause") || "暫停") : (t("play") || "播放")} className="flex-1 w-full h-full flex items-center justify-center cursor-pointer bg-transparent border-0 p-0 focus:outline-none" onClick={togglePlay} />
 
         {/* Bottom Control Bar */}
         <div 
@@ -3117,10 +3231,10 @@ export default function VideoPlayer({
                 >
                   <Radio className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                   <span className="hidden xs:inline">
-                    {activeSource === 'anime1' ? 'Anime1' : activeSource === 'framextv' ? 'FramexTV' : activeSource === 'hianime' ? 'HiAnime' : '自動線路'}
+                    {activeSource === 'anime1' ? 'Anime1' : activeSource === 'gogoanime' ? 'GogoAnime' : activeSource === 'framextv' ? 'FramexTV' : activeSource === 'hianime' ? 'HiAnime' : '自動線路'}
                   </span>
                   <span className="xs:hidden">
-                    {activeSource === 'anime1' ? 'A1' : activeSource === 'framextv' ? 'FX' : activeSource === 'hianime' ? 'HA' : '線路'}
+                    {activeSource === 'anime1' ? 'A1' : activeSource === 'gogoanime' ? 'Gogo' : activeSource === 'framextv' ? 'FX' : activeSource === 'hianime' ? 'HA' : '線路'}
                   </span>
                 </button>
 
@@ -3132,12 +3246,16 @@ export default function VideoPlayer({
                         {resolvedSource ? `現在: ${resolvedSource}` : 'Source'}
                       </span>
                     </div>
-                    {[
-                      { id: 'auto', label: '自動線路 (Auto Failover)', badge: '推薦' },
-                      { id: 'anime1', label: 'Anime1.me (1080p MP4)', badge: '繁中' },
-                      { id: 'framextv', label: 'FramexTV (HD HLS)', badge: '備用' },
-                      { id: 'hianime', label: 'HiAnime (HD HLS)', badge: '國際' },
-                    ].map((src) => (
+                    {(availableSources.length > 0
+                      ? availableSources.map(s => ({ id: s.id, label: s.name, badge: s.badge }))
+                      : [
+                          { id: 'auto', label: '自動線路 (Auto Failover)', badge: '推薦' },
+                          { id: 'anime1', label: 'Anime1.me (1080p MP4)', badge: '繁中' },
+                          { id: 'gogoanime', label: 'Gogoanime (HD 雙語 / HLS & Embed)', badge: '極速' },
+                          { id: 'framextv', label: 'FramexTV (HD HLS)', badge: '備用' },
+                          { id: 'hianime', label: 'HiAnime (HD HLS)', badge: '國際' },
+                        ]
+                    ).map((src) => (
                       <button
                         key={src.id}
                         onClick={() => {

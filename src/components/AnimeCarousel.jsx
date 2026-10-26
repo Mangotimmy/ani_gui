@@ -16,7 +16,8 @@ function AnimeCarousel({
   currentLang = 'zh-TW',
   onLoadMore,
   isLoadingMore = false,
-  hasMore = false
+  hasMore = false,
+  isRecommendation = false
 }) {
   const rowRef = useRef(null);
 
@@ -73,7 +74,7 @@ function AnimeCarousel({
   return (
     <div 
       className="relative py-4 px-4 md:px-12 group/row min-h-[360px]"
-      style={{ contentVisibility: 'auto', containIntrinsicSize: '100% 370px' }}
+      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 370px' }}
     >
       {/* Category Row Title */}
       <div className="flex items-center justify-between mb-3">
@@ -105,7 +106,7 @@ function AnimeCarousel({
         {/* Left Arrow Button */}
         <button
           onClick={() => scroll('left')}
-          className="absolute left-0 top-1/2 -translate-y-1/2 z-30 w-10 h-28 bg-black/70 hover:bg-black/90 text-white rounded-r-md flex items-center justify-center opacity-0 group-hover/row:opacity-100 transition-all backdrop-blur-sm shadow-xl"
+          className="absolute left-0 top-1/2 -translate-y-1/2 z-30 w-10 h-28 bg-black/70 hover:bg-black/90 text-white rounded-r-md flex items-center justify-center opacity-0 group-hover/row:opacity-100 transition-[opacity,background-color] duration-200 backdrop-blur-sm shadow-xl"
           aria-label="Scroll left"
         >
           <ChevronLeft className="w-6 h-6" />
@@ -127,6 +128,7 @@ function AnimeCarousel({
               isFavorite={favoriteIds.has(anime.id)}
               onToggleFavorite={onToggleFavorite}
               currentLang={currentLang}
+              isRecommendation={isRecommendation}
             />
           ))}
 
@@ -142,7 +144,7 @@ function AnimeCarousel({
         {/* Right Arrow Button */}
         <button
           onClick={() => scroll('right')}
-          className="absolute right-0 top-1/2 -translate-y-1/2 z-30 w-10 h-28 bg-black/70 hover:bg-black/90 text-white rounded-l-md flex items-center justify-center opacity-0 group-hover/row:opacity-100 transition-all backdrop-blur-sm shadow-xl"
+          className="absolute right-0 top-1/2 -translate-y-1/2 z-30 w-10 h-28 bg-black/70 hover:bg-black/90 text-white rounded-l-md flex items-center justify-center opacity-0 group-hover/row:opacity-100 transition-[opacity,background-color] duration-200 backdrop-blur-sm shadow-xl"
           aria-label="Scroll right"
         >
           <ChevronRight className="w-6 h-6" />

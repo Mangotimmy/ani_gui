@@ -125,11 +125,11 @@ export default function UserProfileModal({
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm cursor-pointer"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm cursor-pointer overflow-y-auto"
       onClick={onClose}
     >
       <div 
-        className="w-full max-w-lg bg-[#18181c] rounded-3xl border border-zinc-800 shadow-2xl p-5 sm:p-7 text-zinc-100 animate-in fade-in zoom-in-95 cursor-default overflow-hidden max-h-[90vh] flex flex-col"
+        className="w-full max-w-lg bg-[#18181c] rounded-3xl border border-zinc-800 shadow-2xl p-5 sm:p-7 text-zinc-100 animate-in fade-in zoom-in-95 cursor-default overflow-hidden max-h-[90vh] flex flex-col my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -304,7 +304,7 @@ export default function UserProfileModal({
                   <button
                     type="submit"
                     disabled={isLoading || !inputUsername.trim()}
-                    className="px-4 py-2 rounded-xl bg-[#E50914] hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md shrink-0 flex items-center gap-1.5 motion-safe:active:scale-95"
+                    className="px-4 py-2 rounded-xl bg-[#E50914] hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold transition-[transform,background-color] duration-150 shadow-md shrink-0 flex items-center gap-1.5 motion-safe:active:scale-[0.96]"
                   >
                     <span>登入 / 切換</span>
                   </button>

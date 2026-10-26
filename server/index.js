@@ -67,7 +67,8 @@ const DEFAULT_SETTINGS = {
   gpuProfile: 'igpu',          // 'igpu' | 'standard' | 'software'
   enableUpscale: false,        // false = disable AI upscaling (prevents 98% 3D load on iGPU)
   enableBackdropBlur: false,   // false = low-power UI background without GPU blur
-  mpvProfile: 'igpu'           // 'igpu' | 'high-quality'
+  mpvProfile: 'igpu',          // 'igpu' | 'high-quality'
+  uiScale: 1.0                 // UI scale factor (0.8 - 1.5)
 };
 
 let inMemorySettings = { ...DEFAULT_SETTINGS };
@@ -441,9 +442,10 @@ app.get('/api/anime/:id/media-videos', async (req, res) => {
 app.get('/api/anime/:id/chinese-info', async (req, res) => {
   try {
     const { romaji = '', native = '', english = '', description = '', lang = 'zh-TW', refresh } = req.query;
+    const isRefresh = refresh === '1' || refresh === 'true' || Number(refresh) > 0;
     const info = await getAnimeChineseInfo(
       req.params.id,
-      { romaji, native, english, description, refresh: refresh === '1' || Number(refresh) > 0 },
+      { romaji, native, english, description, refresh: isRefresh },
       lang
     );
     res.json({ success: true, ...info });
@@ -648,7 +650,12 @@ app.get('/api/notifications/airing', async (req, res) => {
 app.get('/api/downloads/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
+  // In HTTP/2 and HTTP/3, the 'Connection' hop-by-hop header is forbidden by RFC 7540
+  // and triggers ERR_HTTP2_PROTOCOL_ERROR in modern browsers and reverse proxies (e.g. Synology DSM).
+  // Only set Connection: keep-alive on HTTP/1.x connections.
+  if (!req.httpVersion?.startsWith('2') && !req.httpVersion?.startsWith('3')) {
+    res.setHeader('Connection', 'keep-alive');
+  }
   // Stop compression / buffering layers (Synology DSM nginx, Cloudflare, Caddy) from sitting
   // on the stream until they reset the HTTP/2 connection (ERR_HTTP2_PROTOCOL_ERROR).
   res.setHeader('X-Accel-Buffering', 'no');
@@ -936,18 +943,18 @@ app.delete('/api/users/:username', (req, res) => {
 function getFriendlyOSName() {
   const plat = process.platform;
   const rel = os.release() || '';
+  if (plat === 'win32') {
+    const build = parseInt(rel.split('.')[2] || '0', 10);
+    if (build >= 22000) return `Windows 11 / Server 2022+ (Build ${build})`;
+    if (rel.startsWith('10.0')) return `Windows 10 / Server (Build ${build})`;
+    return `Windows (${rel})`;
+  }
   if (isContainerEnvironment()) {
     if (fs.existsSync('/etc/alpine-release')) {
       const v = fs.readFileSync('/etc/alpine-release', 'utf8').trim();
       return `Alpine Linux ${v} (Docker Container)`;
     }
     return 'Linux Container (Docker)';
-  }
-  if (plat === 'win32') {
-    const build = parseInt(rel.split('.')[2] || '0', 10);
-    if (build >= 22000) return `Windows 11 (Build ${build})`;
-    if (rel.startsWith('10.0')) return `Windows 10 (Build ${build})`;
-    return `Windows (${rel})`;
   }
   if (plat === 'darwin') {
     return `macOS (${rel})`;
@@ -1143,7 +1150,7 @@ app.get('/api/settings', (req, res) => {
 });
 
 app.post('/api/settings', (req, res) => {
-  const { downloadDir, gpuProfile, enableUpscale, enableBackdropBlur, mpvProfile } = req.body;
+  const { downloadDir, gpuProfile, enableUpscale, enableBackdropBlur, mpvProfile, uiScale } = req.body;
   if (downloadDir) {
     downloadManager.setDownloadDir(downloadDir);
   }
@@ -1152,7 +1159,8 @@ app.post('/api/settings', (req, res) => {
     ...(gpuProfile !== undefined ? { gpuProfile } : {}),
     ...(enableUpscale !== undefined ? { enableUpscale } : {}),
     ...(enableBackdropBlur !== undefined ? { enableBackdropBlur } : {}),
-    ...(mpvProfile !== undefined ? { mpvProfile } : {})
+    ...(mpvProfile !== undefined ? { mpvProfile } : {}),
+    ...(uiScale !== undefined ? { uiScale: Math.max(0.6, Math.min(2.0, Number(uiScale) || 1.0)) } : {})
   });
   res.json({ success: true, ...updated });
 });

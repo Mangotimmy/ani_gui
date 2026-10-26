@@ -67,6 +67,43 @@ export default function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
 
+  // Theme State: 'dark' | 'light' | 'system'
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem('aniflix_theme') || 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  useEffect(() => {
+    const applyTheme = (tMode) => {
+      const isLight = tMode === 'light' || (tMode === 'system' && typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+      if (isLight) {
+        document.documentElement.classList.add('theme-light');
+        document.documentElement.classList.remove('theme-dark');
+        document.body.classList.add('theme-light');
+        document.body.classList.remove('theme-dark');
+      } else {
+        document.documentElement.classList.remove('theme-light');
+        document.documentElement.classList.add('theme-dark');
+        document.body.classList.remove('theme-light');
+        document.body.classList.add('theme-dark');
+      }
+    };
+    applyTheme(theme);
+    try {
+      localStorage.setItem('aniflix_theme', theme);
+    } catch {}
+
+    if (theme === 'system' && typeof window !== 'undefined' && window.matchMedia) {
+      const mq = window.matchMedia('(prefers-color-scheme: light)');
+      const listener = () => applyTheme('system');
+      mq.addEventListener('change', listener);
+      return () => mq.removeEventListener('change', listener);
+    }
+  }, [theme]);
+
   // Localization State
   const [currentLang, setCurrentLang] = useState(getSavedLanguage);
   const t = useMemo(() => createTranslator(currentLang), [currentLang]);
@@ -160,7 +197,7 @@ function hasHomeCache() {
     let cancelled = false;
     const timers = [];
     const patchTitles = async () => {
-      const lists = [trending, popular, topRated, actionAnimes, fantasyAnimes, upcoming, thisSeasonAnimes, catalogAnimes, recommendations, searchResults];
+      const lists = [trending, popular, topRated, actionAnimes, fantasyAnimes, upcoming, thisSeasonAnimes, catalogAnimes, recommendations, searchResults, favorites];
       const ids = Array.from(new Set(
         lists.flat().filter(a => a && a.id && !(a.titleZhTW || a.titleZh)).map(a => a.id)
       )).slice(0, 150);
@@ -184,6 +221,7 @@ function hasHomeCache() {
         setCatalogAnimes(apply);
         setRecommendations(apply);
         setSearchResults(apply);
+        setFavorites(apply);
       } catch {}
     };
     timers.push(setTimeout(patchTitles, 6000));
@@ -341,7 +379,14 @@ function hasHomeCache() {
   const [favorites, setFavorites] = useState(() => {
     try {
       const stored = localStorage.getItem('aniflix_favorites');
-      return stored ? JSON.parse(stored) : [];
+      if (!stored) return [];
+      const parsed = JSON.parse(stored);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map(item => {
+        if (!item || typeof item !== 'object') return item;
+        const { matchPercent, recommendationReason, recReason, ...rest } = item;
+        return rest;
+      });
     } catch {
       return [];
     }
@@ -356,8 +401,39 @@ function hasHomeCache() {
     }
   });
 
+  // Live catalog map to keep favorites synchronized with the freshest main page data (titles, score, episodes, status)
+  const catalogAnimeMap = useMemo(() => {
+    const map = new Map();
+    const lists = [trending, popular, topRated, actionAnimes, fantasyAnimes, upcoming, thisSeasonAnimes, catalogAnimes, recommendations, searchResults];
+    lists.forEach(list => {
+      if (Array.isArray(list)) {
+        list.forEach(item => {
+          if (item && item.id) map.set(item.id, item);
+        });
+      }
+    });
+    return map;
+  }, [trending, popular, topRated, actionAnimes, fantasyAnimes, upcoming, thisSeasonAnimes, catalogAnimes, recommendations, searchResults]);
+
+  // Synchronized favorites: merged with fresh catalog data so titles, episodes, score, cover, and status match the main page 100%
+  const synchronizedFavorites = useMemo(() => {
+    return favorites.map(fav => {
+      if (!fav || !fav.id) return fav;
+      const fresh = catalogAnimeMap.get(fav.id);
+      if (!fresh) {
+        const { matchPercent, recommendationReason, recReason, ...rest } = fav;
+        return rest;
+      }
+      const { matchPercent, recommendationReason, recReason, ...cleanFresh } = fresh;
+      return {
+        ...fav,
+        ...cleanFresh
+      };
+    });
+  }, [favorites, catalogAnimeMap]);
+
   const favoriteIds = useMemo(() => new Set(favorites.map(f => f.id)), [favorites]);
-  const filteredFavorites = useMemo(() => filterAnimeList(favorites), [favorites, filterAnimeList]);
+  const filteredFavorites = useMemo(() => filterAnimeList(synchronizedFavorites), [synchronizedFavorites, filterAnimeList]);
   const filteredWatchHistoryAnimes = useMemo(
     () => filterAnimeList(watchHistory.map(w => w.anime).filter(Boolean)), 
     [watchHistory, filterAnimeList]
@@ -374,35 +450,111 @@ function hasHomeCache() {
     }
   });
 
+  const skipNextSyncRef = useRef(false);
+
   // Switch or Login User Handler
   const handleSwitchUser = useCallback((userObj) => {
     if (!userObj || !userObj.username) return;
+    skipNextSyncRef.current = true;
     setCurrentUser(userObj);
     try {
-      localStorage.setItem('aniflix_current_user', JSON.stringify(userObj));
+      localStorage.setItem('aniflix_current_user', JSON.stringify({
+        username: userObj.username,
+        displayName: userObj.displayName || userObj.username,
+        avatar: userObj.avatar || 'cat'
+      }));
     } catch {}
 
-    if (userObj.data) {
-      if (Array.isArray(userObj.data.favorites)) {
-        setFavorites(userObj.data.favorites);
-        try {
-          localStorage.setItem('aniflix_favorites', JSON.stringify(userObj.data.favorites));
-        } catch {}
-      }
-      if (Array.isArray(userObj.data.watchHistory)) {
-        setWatchHistory(userObj.data.watchHistory);
-        try {
-          localStorage.setItem('aniflix_watch_history', JSON.stringify(userObj.data.watchHistory));
-        } catch {}
-      }
+    // Support both direct userObj and wrapped userObj.data
+    const incomingFavs = Array.isArray(userObj.favorites) 
+      ? userObj.favorites 
+      : (Array.isArray(userObj.data?.favorites) ? userObj.data.favorites : null);
+    const incomingHist = Array.isArray(userObj.watchHistory) 
+      ? userObj.watchHistory 
+      : (Array.isArray(userObj.data?.watchHistory) ? userObj.data.watchHistory : null);
+
+    if (incomingFavs !== null) {
+      setFavorites(incomingFavs);
+      try {
+        localStorage.setItem('aniflix_favorites', JSON.stringify(incomingFavs));
+      } catch {}
+    }
+    if (incomingHist !== null) {
+      setWatchHistory(incomingHist);
+      try {
+        localStorage.setItem('aniflix_watch_history', JSON.stringify(incomingHist));
+      } catch {}
     }
   }, []);
 
-  // Sync user data to server with 1s debounce whenever favorites or watchHistory changes
+  // On startup / cross-device boot: pull user profile from server and merge with local state
+  useEffect(() => {
+    const uname = currentUser?.username || 'Default';
+    fetch(`/api/users/${encodeURIComponent(uname)}`)
+      .then(r => r.json())
+      .then(d => {
+        if (!d.success || !d.user) return;
+        const serverFavs = Array.isArray(d.user.favorites) ? d.user.favorites : [];
+        const serverHist = Array.isArray(d.user.watchHistory) ? d.user.watchHistory : [];
+
+        // If local is completely empty (e.g. Device 2 first open), adopt server profile directly
+        setFavorites(prevFavs => {
+          if (!prevFavs || prevFavs.length === 0) {
+            if (serverFavs.length > 0) {
+              try { localStorage.setItem('aniflix_favorites', JSON.stringify(serverFavs)); } catch {}
+              return serverFavs;
+            }
+            return prevFavs;
+          }
+          // Merge by id (union so nothing is lost across devices)
+          const map = new Map();
+          for (const f of serverFavs) if (f?.id) map.set(f.id, f);
+          for (const f of prevFavs) if (f?.id && !map.has(f.id)) map.set(f.id, f);
+          const merged = Array.from(map.values());
+          try { localStorage.setItem('aniflix_favorites', JSON.stringify(merged)); } catch {}
+          return merged;
+        });
+
+        setWatchHistory(prevHist => {
+          if (!prevHist || prevHist.length === 0) {
+            if (serverHist.length > 0) {
+              try { localStorage.setItem('aniflix_watch_history', JSON.stringify(serverHist)); } catch {}
+              return serverHist;
+            }
+            return prevHist;
+          }
+          // Merge by animeId + episode keeping the most recent watchedAt
+          const map = new Map();
+          for (const h of serverHist) {
+            const key = `${h.anime?.id || h.animeId || ''}_${h.episode || 1}`;
+            map.set(key, h);
+          }
+          for (const h of prevHist) {
+            const key = `${h.anime?.id || h.animeId || ''}_${h.episode || 1}`;
+            const existing = map.get(key);
+            if (!existing || (h.watchedAt || 0) > (existing.watchedAt || 0)) {
+              map.set(key, h);
+            }
+          }
+          const merged = Array.from(map.values()).sort((a, b) => (b.watchedAt || 0) - (a.watchedAt || 0));
+          try { localStorage.setItem('aniflix_watch_history', JSON.stringify(merged)); } catch {}
+          return merged;
+        });
+      })
+      .catch(err => {
+        console.warn('Initial server user sync error:', err.message);
+      });
+  }, []);
+
+  // Sync user data to server with 1.2s debounce whenever favorites or watchHistory changes
   const isInitialUserSyncRef = useRef(true);
   useEffect(() => {
     if (isInitialUserSyncRef.current) {
       isInitialUserSyncRef.current = false;
+      return;
+    }
+    if (skipNextSyncRef.current) {
+      skipNextSyncRef.current = false;
       return;
     }
     if (!currentUser || !currentUser.username) return;
@@ -413,6 +565,8 @@ function hasHomeCache() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: currentUser.username,
+          displayName: currentUser.displayName,
+          avatar: currentUser.avatar,
           favorites: favorites.map(slimAnimeForSync),
           watchHistory: watchHistory.map(item => (
             item && item.anime ? { ...item, anime: slimAnimeForSync(item.anime) } : item
@@ -464,6 +618,13 @@ function hasHomeCache() {
   // Downloader Real-Time State (SSE)
   const [downloadTasks, setDownloadTasks] = useState([]);
   const [downloadDir, setDownloadDir] = useState('');
+  const [uiScale, setUiScale] = useState(() => {
+    try {
+      const stored = localStorage.getItem('aniflix_ui_scale');
+      if (stored) return parseFloat(stored) || 1.0;
+    } catch {}
+    return 1.0;
+  });
   const [gpuSettings, setGpuSettings] = useState(() => {
     try {
       const stored = localStorage.getItem('aniflix_gpu_settings');
@@ -550,6 +711,7 @@ function hasHomeCache() {
       .then(d => {
         if (d.success) {
           if (d.downloadDir) setDownloadDir(d.downloadDir);
+          if (d.uiScale && !localStorage.getItem("aniflix_ui_scale")) { handleUpdateUiScale(d.uiScale); }
           setGpuSettings(prev => {
             const merged = {
               ...prev,
@@ -703,8 +865,14 @@ function hasHomeCache() {
       eventSource.onerror = (err) => {
         sseFailures += 1;
         console.warn('SSE connection notice (auto-reconnecting):', err?.type || err);
-        // Give EventSource one automatic retry, then guarantee live data via polling.
-        if (sseFailures >= 2) startPolling();
+        // Give EventSource one automatic retry, then close it to stop infinite HTTP/2 reconnect spam and guarantee live data via polling.
+        if (sseFailures >= 2) {
+          try {
+            eventSource?.close();
+            eventSource = null;
+          } catch {}
+          startPolling();
+        }
       };
     };
 
@@ -764,7 +932,8 @@ function hasHomeCache() {
       if (exists) {
         updated = prev.filter(f => f.id !== anime.id);
       } else {
-        updated = [anime, ...prev];
+        const { matchPercent, recommendationReason, recReason, ...cleanAnime } = anime;
+        updated = [cleanAnime, ...prev];
         const title = anime.title?.chinese || anime.title?.romaji || anime.title?.english || '動漫';
         sendAnimeNotification({
           title: `💖 已加入追蹤關注`,
@@ -922,6 +1091,40 @@ function hasHomeCache() {
 
   const handleStartDownload = async (payload) => {
     try {
+      if (payload.downloadTarget === 'device') {
+        // Direct browser file download onto the local device
+        setBatchDownloadData(null);
+        const eps = payload.episodeNumbers || [];
+        const epCount = eps.length;
+        for (const ep of eps) {
+          try {
+            const streamRes = await fetch('/api/stream', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                animeTitle: payload.animeTitle,
+                episode: ep,
+                audio: payload.audio || 'sub'
+              })
+            });
+            const streamData = await streamRes.json();
+            const targetUrl = streamData.streamUrl || streamData.url;
+            if (targetUrl) {
+              const a = document.createElement('a');
+              a.href = targetUrl;
+              a.download = `${payload.animeTitle}_EP${ep}.mp4`;
+              a.target = '_blank';
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+            }
+          } catch (e) {
+            console.warn('Device download stream resolve error:', e);
+          }
+        }
+        return;
+      }
+
       await fetch('/api/downloads/queue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -988,6 +1191,36 @@ function hasHomeCache() {
       directStreamUrl: fileInfo.streamUrl
     });
   };
+
+  // UI Zoom & Scale Handler
+  const handleUpdateUiScale = useCallback((nextScale) => {
+    const s = Math.max(0.6, Math.min(2.0, Math.round((Number(nextScale) || 1.0) * 100) / 100));
+    setUiScale(s);
+    try {
+      localStorage.setItem("aniflix_ui_scale", String(s));
+    } catch {}
+    if (window.aniflixDesktop?.setZoomFactor) {
+      window.aniflixDesktop.setZoomFactor(s);
+    } else {
+      document.documentElement.style.zoom = String(s);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (window.aniflixDesktop?.setZoomFactor) {
+      window.aniflixDesktop.setZoomFactor(uiScale);
+    } else {
+      document.documentElement.style.zoom = String(uiScale);
+    }
+    if (window.aniflixDesktop?.onZoomChange) {
+      return window.aniflixDesktop.onZoomChange((factor) => {
+        setUiScale(factor);
+        try {
+          localStorage.setItem("aniflix_ui_scale", String(factor));
+        } catch {}
+      });
+    }
+  }, [uiScale]);
 
   const handleSaveSettings = async (settings) => {
     // 1. Optimistically update local state & localStorage immediately (0ms UI reaction)
@@ -1079,6 +1312,8 @@ function hasHomeCache() {
         currentLang={currentLang}
         onSelectLang={handleSelectLang}
         t={t}
+        theme={theme}
+        onToggleTheme={(nextTheme) => setTheme(nextTheme)}
       />
 
       {/* Top Status & Announcement Marquee Bar */}
@@ -1101,7 +1336,7 @@ function hasHomeCache() {
             <div className="flex items-center gap-2 mb-6">
               <Search className="w-5 h-5 text-[#E50914]" />
               <h2 className="text-xl font-bold">
-                Search results for <span className="text-[#E50914]">"{searchQuery}"</span>
+                Search results for <span className="text-rose-400 font-semibold">"{searchQuery}"</span>
               </h2>
             </div>
 
@@ -1136,12 +1371,12 @@ function hasHomeCache() {
           <div className="pt-24 px-4 md:px-12">
             <div className="flex items-center gap-2 mb-6">
               <Heart className="w-6 h-6 text-red-500 fill-red-500" />
-              <h2 className="text-2xl font-black text-white">{t('myFavorites')} ({filterAnimeList(favorites).length})</h2>
+              <h2 className="text-2xl font-black text-white">{t('myFavorites')} ({filteredFavorites.length})</h2>
             </div>
 
-            {filterAnimeList(favorites).length === 0 ? (
+            {filteredFavorites.length === 0 ? (
               <div className="h-80 flex flex-col items-center justify-center text-zinc-400 bg-zinc-900/30 rounded-2xl border border-zinc-800">
-                <Heart className="w-12 h-12 text-zinc-600 mb-3" />
+                <Heart className="w-12 h-12 text-zinc-500 mb-3" />
                 <p className="text-base font-bold text-zinc-300">{t('favoritesEmpty')}</p>
                 <p className="text-xs text-zinc-500 mt-1 max-w-sm text-center">
                   {t('favoritesEmptyDesc')}
@@ -1149,7 +1384,7 @@ function hasHomeCache() {
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {filterAnimeList(favorites).map((anime) => (
+                {filteredFavorites.map((anime) => (
                   <AnimeCard
                     key={anime.id}
                     anime={anime}
@@ -1159,6 +1394,7 @@ function hasHomeCache() {
                     onMoreInfo={setSelectedAnime}
                     isFavorite={true}
                     onToggleFavorite={handleToggleFavorite}
+                    isRecommendation={false}
                   />
                 ))}
               </div>
@@ -1185,7 +1421,7 @@ function hasHomeCache() {
 
             {watchHistory.filter(i => i.anime && (!hideR18 || (!i.anime.isAdult && !i.anime.genres?.includes('Hentai')))).length === 0 ? (
               <div className="h-80 flex flex-col items-center justify-center text-zinc-400 bg-zinc-900/30 rounded-2xl border border-zinc-800">
-                <History className="w-12 h-12 text-zinc-600 mb-3" />
+                <History className="w-12 h-12 text-zinc-500 mb-3" />
                 <p className="text-base font-bold text-zinc-300">{t('watchHistoryEmpty')}</p>
                 <p className="text-xs text-zinc-500 mt-1 max-w-sm text-center">
                   {t('watchHistoryEmptyDesc')}
@@ -1214,7 +1450,7 @@ function hasHomeCache() {
                           {currentLang === 'ja' ? `第 ${item.episode || 1} 話` : currentLang.startsWith('zh') ? `第 ${item.episode || 1} 集` : `Ep ${item.episode || 1}`}
                         </span>
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-zinc-500">
+                          <span className="text-[10px] text-zinc-400">
                             {formatTimeAgo(item.timestamp)}
                           </span>
                           <button
@@ -1646,6 +1882,7 @@ function hasHomeCache() {
                     onLoadMore={() => handleLoadMoreCarousel('recommendations')}
                     isLoadingMore={Boolean(carouselLoadingMore.recommendations)}
                     hasMore={Boolean(carouselHasMore.recommendations)}
+                    isRecommendation={true}
                   />
                 )}
 
@@ -1858,6 +2095,10 @@ function hasHomeCache() {
             serverInfo={serverInfo}
             trendingCount={filteredTrending.length}
             activeDownloadsCount={downloadTasks.length}
+            uiScale={uiScale}
+            onUpdateUiScale={handleUpdateUiScale}
+            theme={theme}
+            onUpdateTheme={setTheme}
           />
         )}
 
