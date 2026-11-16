@@ -38,6 +38,7 @@ import {
   getEnvironmentStatus, 
   installAllPlugins, 
   updateAllPlugins, 
+  removePlugins,
   checkAppUpdate,
   isContainerEnvironment 
 } from './services/environment.js';
@@ -577,7 +578,8 @@ app.post('/api/stream', async (req, res) => {
       tmdbId, 
       anilistId, 
       season = 1, 
-      synonyms = [] 
+      synonyms = [],
+      trailer = null
     } = req.body;
     const streamData = await resolveStream({ 
       animeTitle, 
@@ -590,7 +592,8 @@ app.post('/api/stream', async (req, res) => {
       tmdbId, 
       anilistId, 
       season, 
-      synonyms 
+      synonyms,
+      trailer
     });
     if (!streamData || streamData.success === false) {
       return res.status(200).json({
@@ -1209,6 +1212,26 @@ app.get('/api/environment/update/stream', async (req, res) => {
 
   try {
     const result = await updateAllPlugins(sendLog);
+    res.write(`data: ${JSON.stringify({ done: true, success: result.success })}\n\n`);
+  } catch (err) {
+    res.write(`data: ${JSON.stringify({ done: true, error: err.message })}\n\n`);
+  }
+  res.end();
+});
+
+// SSE endpoint for removing optional plugins with live streaming terminal logs
+app.get('/api/environment/remove/stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const sendLog = (text) => {
+    res.write(`data: ${JSON.stringify({ text })}\n\n`);
+  };
+
+  try {
+    const result = await removePlugins(sendLog);
     res.write(`data: ${JSON.stringify({ done: true, success: result.success })}\n\n`);
   } catch (err) {
     res.write(`data: ${JSON.stringify({ done: true, error: err.message })}\n\n`);

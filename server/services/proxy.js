@@ -275,13 +275,33 @@ export async function handleProxyStream(req, res) {
  */
 export async function handleProxyImage(req, res) {
   const targetUrl = req.query.url;
+  const requestedFormat = (req.query.format || '').toLowerCase().trim(); // 'avif', 'webp', 'jpg', 'jpeg'
   if (!targetUrl) {
     return res.status(400).json({ error: 'Missing "url" query parameter' });
   }
 
   try {
-    // 1. Check disk cache
-    const cached = mediaCache.getImage(targetUrl);
+    // 1. Determine effective URL and format preferences
+    let effectiveTargetUrl = targetUrl;
+    let acceptHeader = req.headers['accept'] || 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8';
+
+    if (requestedFormat === 'webp') {
+      acceptHeader = 'image/webp,*/*;q=0.8';
+      // Native YouTube WebP rewrite
+      if (effectiveTargetUrl.includes('i.ytimg.com/vi/')) {
+        effectiveTargetUrl = effectiveTargetUrl.replace('i.ytimg.com/vi/', 'i.ytimg.com/vi_webp/').replace(/\.(jpg|jpeg)$/i, '.webp');
+      }
+    } else if (requestedFormat === 'avif') {
+      acceptHeader = 'image/avif,*/*;q=0.8';
+    } else if (requestedFormat === 'jpg' || requestedFormat === 'jpeg') {
+      acceptHeader = 'image/jpeg,*/*;q=0.8';
+      if (effectiveTargetUrl.includes('i.ytimg.com/vi_webp/')) {
+        effectiveTargetUrl = effectiveTargetUrl.replace('i.ytimg.com/vi_webp/', 'i.ytimg.com/vi/').replace(/\.webp$/i, '.jpg');
+      }
+    }
+
+    // 2. Check disk cache with format distinction
+    const cached = mediaCache.getImage(targetUrl, requestedFormat);
     if (cached) {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Content-Type', cached.contentType);
@@ -291,21 +311,38 @@ export async function handleProxyImage(req, res) {
       return fs.createReadStream(cached.filePath).pipe(res);
     }
 
-    // 2. Fetch upstream and stream it through while teeing to the disk cache.
-    // Previously the whole image had to download before the first byte reached the
-    // browser, which delayed the hero backdrop (the LCP element) on first view.
-    const upstreamRes = await fetch(targetUrl, {
+    // 3. Fetch upstream and stream it through while teeing to the disk cache
+    let upstreamRes = await fetch(effectiveTargetUrl, {
       headers: {
         'User-Agent': DEFAULT_USER_AGENT,
-        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+        'Accept': acceptHeader
       }
     });
+
+    // Fallback to original URL if rewritten WebP/AVIF returned 404
+    if (!upstreamRes.ok && effectiveTargetUrl !== targetUrl) {
+      effectiveTargetUrl = targetUrl;
+      upstreamRes = await fetch(effectiveTargetUrl, {
+        headers: {
+          'User-Agent': DEFAULT_USER_AGENT,
+          'Accept': 'image/*,*/*;q=0.8'
+        }
+      });
+    }
 
     if (!upstreamRes.ok) {
       return res.status(upstreamRes.status).send('Image fetch failed');
     }
 
-    const contentType = upstreamRes.headers.get('content-type') || 'image/jpeg';
+    let contentType = upstreamRes.headers.get('content-type') || 'image/jpeg';
+    if (requestedFormat === 'webp' && (effectiveTargetUrl.endsWith('.webp') || contentType.includes('webp'))) {
+      contentType = 'image/webp';
+    } else if (requestedFormat === 'avif' && (effectiveTargetUrl.endsWith('.avif') || contentType.includes('avif'))) {
+      contentType = 'image/avif';
+    } else if ((requestedFormat === 'jpg' || requestedFormat === 'jpeg') && (effectiveTargetUrl.endsWith('.jpg') || contentType.includes('jpeg'))) {
+      contentType = 'image/jpeg';
+    }
+
     const upstreamLength = Number(upstreamRes.headers.get('content-length') || 0);
 
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -317,7 +354,7 @@ export async function handleProxyImage(req, res) {
     if (!upstreamRes.body) return res.end();
 
     const nodeStream = Readable.fromWeb(upstreamRes.body);
-    const tempPath = `${mediaCache.getImagePath(targetUrl)}.${process.pid}.${Date.now()}.tmp`;
+    const tempPath = `${mediaCache.getImagePath(targetUrl, requestedFormat)}.${process.pid}.${Date.now()}.tmp`;
     const fileStream = fs.createWriteStream(tempPath);
     let aborted = false;
 
@@ -343,7 +380,7 @@ export async function handleProxyImage(req, res) {
 
     fileStream.on('finish', () => {
       if (aborted) return;
-      mediaCache.commitImageTemp(targetUrl, tempPath, contentType);
+      mediaCache.commitImageTemp(targetUrl, tempPath, contentType, requestedFormat);
     });
 
     nodeStream.pipe(fileStream);

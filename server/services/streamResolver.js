@@ -5,6 +5,7 @@ import { BoundedCache } from './cache.js';
 import { resolveAnime1Stream } from './sources/anime1.js';
 import { resolveFramexStream } from './sources/framextv.js';
 import { resolveGogoanimeStream } from './sources/gogoanime.js';
+import { resolveYouTubeStream } from './sources/youtube.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const DEOBFUSCATE_KEY = Buffer.from('otaku-embed-v1', 'utf-8');
@@ -237,14 +238,25 @@ async function extractStream(embedUrl) {
   return streamConfig;
 }
 
-export function buildSourceList(activeId = 'auto') {
-  return [
+export function buildSourceList(activeId = 'auto', { hasYouTube = false } = {}) {
+  const sources = [
     { id: 'auto', name: '自動線路 (Auto Failover)', badge: '推薦', active: activeId === 'auto' },
     { id: 'anime1', name: 'Anime1.me (1080p MP4 / 原生繁中硬字)', badge: '繁中', active: activeId === 'anime1' },
     { id: 'gogoanime', name: 'Gogoanime (HD 雙語 / Vidmoly & MegaPlay)', badge: '極速', active: activeId === 'gogoanime' },
     { id: 'framextv', name: 'FramexTV (HD 多伺服器 / VidLink)', badge: '備用', active: activeId === 'framextv' },
     { id: 'hianime', name: 'HiAnime / Zoko (多畫質 HLS / 多國字幕)', badge: '國際', active: activeId === 'hianime' }
   ];
+
+  if (hasYouTube) {
+    sources.push({
+      id: 'youtube',
+      name: 'YouTube (官方 PV / 預告 / 串流)',
+      badge: 'YouTube',
+      active: activeId === 'youtube'
+    });
+  }
+
+  return sources;
 }
 
 // Main Export: Resolve stream for any anime with multi-source support
@@ -259,15 +271,17 @@ export async function resolveStream({
   tmdbId = null,
   anilistId = null,
   season = 1,
-  synonyms = []
+  synonyms = [],
+  trailer = null
 }) {
+  const hasYouTube = Boolean(trailer?.id && (trailer.site === 'youtube' || !trailer.site));
   const queryCandidates = [
     ...(Array.isArray(candidates) ? candidates : (typeof candidates === 'string' ? candidates.split(/\|\||\||,/) : [])),
     ...(Array.isArray(synonyms) ? synonyms : []),
     animeTitle
   ].filter(Boolean);
 
-  console.log(`[StreamResolver] Resolving stream for [${queryCandidates.join(', ')}] Ep ${episode} (${mode}, Source: ${source}, AniList: ${anilistId || 'n/a'})...`);
+  console.log(`[StreamResolver] Resolving stream for [${queryCandidates.join(', ')}] Ep ${episode} (${mode}, Source: ${source}, AniList: ${anilistId || 'n/a'}, YouTube: ${hasYouTube})...`);
 
   if (maxAiredCap !== null && maxAiredCap !== undefined && Number(maxAiredCap) > 0 && Number(episode) > Number(maxAiredCap)) {
     return {
@@ -279,26 +293,51 @@ export async function resolveStream({
     };
   }
 
-  // 1. Explicit Anime1 selection
+  // 1. Explicit YouTube selection
+  if (source === 'youtube') {
+    const ytRes = await resolveYouTubeStream({ 
+      title: animeTitle, 
+      candidates: queryCandidates, 
+      episode, 
+      anilistId, 
+      trailer 
+    });
+    if (ytRes && ytRes.success) {
+      return {
+        ...ytRes,
+        activeSource: 'youtube',
+        availableSources: buildSourceList('youtube', { hasYouTube: true })
+      };
+    }
+    return {
+      success: false,
+      activeSource: 'youtube',
+      availableSources: buildSourceList('youtube', { hasYouTube: false }),
+      error: ytRes?.error || `YouTube 找不到《${animeTitle}》相關的官方預告或影片資源。`,
+      suggestedFallback: 'auto'
+    };
+  }
+
+  // 2. Explicit Anime1 selection
   if (source === 'anime1') {
     const a1Res = await resolveAnime1Stream({ title: animeTitle, candidates: queryCandidates, episode });
     if (a1Res && a1Res.success) {
       return {
         ...a1Res,
         activeSource: 'anime1',
-        availableSources: buildSourceList('anime1')
+        availableSources: buildSourceList('anime1', { hasYouTube })
       };
     }
     return {
       success: false,
       activeSource: 'anime1',
-      availableSources: buildSourceList('anime1'),
+      availableSources: buildSourceList('anime1', { hasYouTube }),
       error: a1Res?.error || `Anime1 找不到《${animeTitle}》第 ${episode} 集。`,
       suggestedFallback: 'hianime'
     };
   }
 
-  // 2. Explicit Gogoanime selection
+  // 3. Explicit Gogoanime selection
   if (source === 'gogoanime') {
     const gogoRes = await resolveGogoanimeStream({
       title: animeTitle,
@@ -311,19 +350,19 @@ export async function resolveStream({
       return {
         ...gogoRes,
         activeSource: 'gogoanime',
-        availableSources: buildSourceList('gogoanime')
+        availableSources: buildSourceList('gogoanime', { hasYouTube })
       };
     }
     return {
       success: false,
       activeSource: 'gogoanime',
-      availableSources: buildSourceList('gogoanime'),
+      availableSources: buildSourceList('gogoanime', { hasYouTube }),
       error: gogoRes?.error || `Gogoanime 找不到《${animeTitle}》第 ${episode} 集。`,
       suggestedFallback: 'hianime'
     };
   }
 
-  // 3. Explicit FramexTV selection
+  // 4. Explicit FramexTV selection
   if (source === 'framextv') {
     const fxRes = await resolveFramexStream({ 
       title: animeTitle, 
@@ -338,13 +377,13 @@ export async function resolveStream({
       return {
         ...fxRes,
         activeSource: 'framextv',
-        availableSources: buildSourceList('framextv')
+        availableSources: buildSourceList('framextv', { hasYouTube })
       };
     }
     return {
       success: false,
       activeSource: 'framextv',
-      availableSources: buildSourceList('framextv'),
+      availableSources: buildSourceList('framextv', { hasYouTube }),
       error: fxRes?.error || `FramexTV 找不到《${animeTitle}》第 ${episode} 集。`,
       suggestedFallback: 'hianime'
     };
@@ -446,7 +485,7 @@ export async function resolveStream({
       mode: serverInfo.mode,
       activeSource: 'hianime',
       serverName: `${serverInfo.serverName} (Multi-Quality HLS)`,
-      availableSources: buildSourceList('hianime'),
+      availableSources: buildSourceList('hianime', { hasYouTube }),
       streamUrl: streamConfig.src,
       proxiedStreamUrl,
       subtitles,
@@ -468,7 +507,7 @@ export async function resolveStream({
         return {
           ...a1Res,
           activeSource: 'anime1',
-          availableSources: buildSourceList('anime1')
+          availableSources: buildSourceList('anime1', { hasYouTube })
         };
       }
     } catch {}
@@ -487,7 +526,7 @@ export async function resolveStream({
         return {
           ...gogoRes,
           activeSource: 'gogoanime',
-          availableSources: buildSourceList('gogoanime')
+          availableSources: buildSourceList('gogoanime', { hasYouTube })
         };
       }
     } catch {}
@@ -508,10 +547,31 @@ export async function resolveStream({
         return {
           ...fxRes,
           activeSource: 'framextv',
-          availableSources: buildSourceList('framextv')
+          availableSources: buildSourceList('framextv', { hasYouTube })
         };
       }
     } catch {}
+
+    // Try YouTube PV fallback if trailer is available and no episodes are streamable yet
+    if (hasYouTube) {
+      try {
+        const ytRes = await resolveYouTubeStream({ 
+          title: animeTitle, 
+          candidates: queryCandidates, 
+          episode, 
+          anilistId, 
+          trailer 
+        });
+        if (ytRes && ytRes.success) {
+          console.log(`[StreamResolver] Auto-fallback to YouTube PV succeeded for "${animeTitle}" Ep ${episode}`);
+          return {
+            ...ytRes,
+            activeSource: 'youtube',
+            availableSources: buildSourceList('youtube', { hasYouTube: true })
+          };
+        }
+      } catch {}
+    }
   }
 
   return {
@@ -520,7 +580,7 @@ export async function resolveStream({
     animeTitle,
     episode,
     mode,
-    availableSources: buildSourceList('hianime')
+    availableSources: buildSourceList('hianime', { hasYouTube })
   };
 }
 

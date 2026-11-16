@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { getPlatformInfo, getExternalPlayerLinks } from '../utils/platform.js';
 import { toCachedImageUrl } from '../utils/image.js';
+import { ThumbnailImage } from './ThumbnailImage.jsx';
 
 
 const isTradZh = (lang = '') => {
@@ -667,6 +668,19 @@ export default function VideoPlayer({
         return;
       }
 
+      // If YouTube source is explicitly selected and trailer exists, resolve directly
+      if (activeSource === 'youtube' && anime?.trailer?.id) {
+        const ytEmbed = `https://www.youtube-nocookie.com/embed/${anime.trailer.id}?autoplay=1&rel=0`;
+        setStreamUrl(ytEmbed);
+        setRawStreamUrl(ytEmbed);
+        setIsEmbedSource(true);
+        setResolvedSource('youtube');
+        setIsBuffering(false);
+        setErrorMessage('');
+        resolved = true;
+        return;
+      }
+
       // Check if anime is unreleased beforehand
       if (anime?.status === 'NOT_YET_RELEASED' || anime?.episodes === 0) {
         setIsBuffering(false);
@@ -707,7 +721,8 @@ export default function VideoPlayer({
             source: activeSource,
             anilistId: anime?.id,
             season: anime?.seasonNumber || anime?.season || 1,
-            synonyms: anime?.synonyms || []
+            synonyms: anime?.synonyms || [],
+            trailer: anime?.trailer || null
           })
         }).then(r => r.json());
 
@@ -1860,6 +1875,7 @@ export default function VideoPlayer({
   }, [isScrubbing, duration]);
 
   const hasTrailer = Boolean(anime?.trailer?.id && (anime.trailer?.site === 'youtube' || !anime.trailer?.site));
+  const hasYouTube = Boolean(hasTrailer || (availableSources && availableSources.some(s => s.id === 'youtube')));
   const isUnreleased = Boolean(
     anime?.status === 'NOT_YET_RELEASED' || 
     anime?.episodes === 0 || 
@@ -1950,7 +1966,7 @@ export default function VideoPlayer({
                 </span>
                 <span className="text-[10px] text-amber-300 font-medium flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
-                  {resolvedSource === 'gogoanime' ? 'Gogoanime' : resolvedSource === 'framextv' ? 'FramexTV' : (resolvedSource || '獨立內嵌')} 播放模式
+                  {resolvedSource === 'gogoanime' ? 'Gogoanime' : resolvedSource === 'framextv' ? 'FramexTV' : resolvedSource === 'youtube' ? 'YouTube' : (resolvedSource || '獨立內嵌')} 播放模式
                 </span>
               </div>
             </div>
@@ -1970,7 +1986,7 @@ export default function VideoPlayer({
                     <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-800 flex items-center justify-between">
                       <span>選擇播放線路</span>
                     </div>
-                    {(availableSources.length > 0
+                    {((availableSources.length > 0
                       ? availableSources.map(s => ({ id: s.id, label: s.name, badge: s.badge }))
                       : [
                           { id: 'auto', label: '自動線路 (推薦)', badge: 'Auto' },
@@ -1978,8 +1994,9 @@ export default function VideoPlayer({
                           { id: 'gogoanime', label: 'Gogoanime (HD 雙語 / HLS)', badge: '極速' },
                           { id: 'framextv', label: 'FramexTV (HD 內嵌)', badge: '備用' },
                           { id: 'hianime', label: 'HiAnime (國際 HLS)', badge: '多語' },
+                          ...(hasYouTube ? [{ id: 'youtube', label: 'YouTube (官方 PV / 預告)', badge: 'YouTube' }] : [])
                         ]
-                    ).map(s => (
+                    ).filter(s => s.id !== 'youtube' || hasYouTube)).map(s => (
                       <button
                         key={s.id}
                         type="button"
@@ -2538,9 +2555,11 @@ export default function VideoPlayer({
                 {[
                   { id: 'auto', name: '自動線路 (推薦)' },
                   { id: 'anime1', name: 'Anime1 (繁中 MP4 / HLS)' },
+                  { id: 'gogoanime', name: 'Gogoanime (HD 雙語 / 極速)' },
                   { id: 'framextv', name: 'FramexTV (HD 多伺服器)' },
-                  { id: 'hianime', name: 'HiAnime (國際多語)' }
-                ].filter(s => s.id !== activeSource).map(s => (
+                  { id: 'hianime', name: 'HiAnime (國際多語)' },
+                  ...(hasYouTube ? [{ id: 'youtube', name: 'YouTube (官方 PV / 預告)' }] : [])
+                ].filter(s => (s.id !== 'youtube' || hasYouTube) && s.id !== activeSource).map(s => (
                   <button
                     key={s.id}
                     type="button"
@@ -2679,10 +2698,11 @@ export default function VideoPlayer({
                     >
                       <div className="aspect-[2/3] relative overflow-hidden bg-zinc-950">
                         {itCover && (
-                          <img
-                            src={itCover}
+                          <ThumbnailImage
+                            src={item}
                             alt={itTitle}
-                            className="w-full h-full object-cover group-hover/end:scale-110 transition-transform duration-300"
+                            className="w-full h-full"
+                            imgClassName="w-full h-full object-cover group-hover/end:scale-110 transition-transform duration-300"
                           />
                         )}
                       </div>
@@ -3231,10 +3251,10 @@ export default function VideoPlayer({
                 >
                   <Radio className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                   <span className="hidden xs:inline">
-                    {activeSource === 'anime1' ? 'Anime1' : activeSource === 'gogoanime' ? 'GogoAnime' : activeSource === 'framextv' ? 'FramexTV' : activeSource === 'hianime' ? 'HiAnime' : '自動線路'}
+                    {activeSource === 'anime1' ? 'Anime1' : activeSource === 'gogoanime' ? 'GogoAnime' : activeSource === 'framextv' ? 'FramexTV' : activeSource === 'hianime' ? 'HiAnime' : activeSource === 'youtube' ? 'YouTube' : '自動線路'}
                   </span>
                   <span className="xs:hidden">
-                    {activeSource === 'anime1' ? 'A1' : activeSource === 'gogoanime' ? 'Gogo' : activeSource === 'framextv' ? 'FX' : activeSource === 'hianime' ? 'HA' : '線路'}
+                    {activeSource === 'anime1' ? 'A1' : activeSource === 'gogoanime' ? 'Gogo' : activeSource === 'framextv' ? 'FX' : activeSource === 'hianime' ? 'HA' : activeSource === 'youtube' ? 'YT' : '線路'}
                   </span>
                 </button>
 
@@ -3246,7 +3266,7 @@ export default function VideoPlayer({
                         {resolvedSource ? `現在: ${resolvedSource}` : 'Source'}
                       </span>
                     </div>
-                    {(availableSources.length > 0
+                    {((availableSources.length > 0
                       ? availableSources.map(s => ({ id: s.id, label: s.name, badge: s.badge }))
                       : [
                           { id: 'auto', label: '自動線路 (Auto Failover)', badge: '推薦' },
@@ -3254,8 +3274,9 @@ export default function VideoPlayer({
                           { id: 'gogoanime', label: 'Gogoanime (HD 雙語 / HLS & Embed)', badge: '極速' },
                           { id: 'framextv', label: 'FramexTV (HD HLS)', badge: '備用' },
                           { id: 'hianime', label: 'HiAnime (HD HLS)', badge: '國際' },
+                          ...(hasYouTube ? [{ id: 'youtube', label: 'YouTube (官方 PV / 預告 / 串流)', badge: 'YouTube' }] : [])
                         ]
-                    ).map((src) => (
+                    ).filter(src => src.id !== 'youtube' || hasYouTube)).map((src) => (
                       <button
                         key={src.id}
                         onClick={() => {

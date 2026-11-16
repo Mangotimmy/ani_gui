@@ -1,6 +1,7 @@
 import React, { useState, startTransition } from 'react';
 import { Play, Download, Info, Star, Heart, Sparkles } from 'lucide-react';
 import { getAnimeCoverUrl } from '../utils/image.js';
+import { ThumbnailImage } from './ThumbnailImage.jsx';
 import { pickAnimeTitle } from '../utils/titles.js';
 
 function AnimeCard({ 
@@ -28,8 +29,8 @@ function AnimeCard({
     >
       {/* Poster Image Container with Animata spotlight & better-ui outline */}
       <div className="relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 shadow-md card-hover-effect transition-all duration-300 group-hover:border-red-500/50 outline outline-1 outline-white/10 -outline-offset-1">
-        <img
-          src={poster}
+        <ThumbnailImage
+          src={anime}
           alt={title}
           width="220"
           height="330"
@@ -39,7 +40,8 @@ function AnimeCard({
           onError={(e) => {
             e.currentTarget.style.opacity = '0.3';
           }}
-          className="w-full h-auto aspect-[2/3] object-cover transition-transform duration-500 group-hover:scale-105"
+          className="w-full h-full"
+          imgClassName="w-full h-auto aspect-[2/3] object-cover transition-transform duration-500 group-hover:scale-105"
         />
 
         {/* Whole-poster action: a real button so keyboard users can open the details sheet. */}

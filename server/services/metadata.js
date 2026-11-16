@@ -1585,7 +1585,9 @@ export async function fetchOfficialYouTubePVs(searchTitle) {
       else if (/character|キャラクター/i.test(combined)) badge = 'Character PV';
       else if (/trailer/i.test(combined)) badge = 'Trailer';
 
-      const thumb = v.thumbnail?.thumbnails?.pop()?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+      const thumbJpg = `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+      const thumbWebp = `https://i.ytimg.com/vi_webp/${v.videoId}/hqdefault.webp`;
+      const thumb = v.thumbnail?.thumbnails?.pop()?.url || thumbJpg;
       pvs.push({
         id: v.videoId,
         site: 'youtube',
@@ -1593,6 +1595,11 @@ export async function fetchOfficialYouTubePVs(searchTitle) {
         channel,
         badge,
         thumbnail: thumb,
+        thumbnails: {
+          jpg: thumbJpg,
+          webp: thumbWebp,
+          avif: `/api/proxy/image?url=${encodeURIComponent(thumbJpg)}&format=avif`
+        },
         embedUrl: `https://www.youtube-nocookie.com/embed/${v.videoId}?autoplay=1&rel=0`,
         url: `https://www.youtube.com/watch?v=${v.videoId}`
       });
@@ -1625,12 +1632,19 @@ export async function getAnimeMediaVideos(animeId, romajiTitle = '', englishTitl
     const animeDetails = await getAnimeDetails(id);
     if (animeDetails?.trailer && animeDetails.trailer.id) {
       const tr = animeDetails.trailer;
+      const trThumbJpg = tr.thumbnail || (tr.site === 'youtube' ? `https://i.ytimg.com/vi/${tr.id}/hqdefault.jpg` : null);
+      const trThumbWebp = tr.site === 'youtube' ? `https://i.ytimg.com/vi_webp/${tr.id}/hqdefault.webp` : trThumbJpg;
       result.trailers.push({
         id: tr.id,
         site: tr.site || 'youtube',
         title: 'Official Teaser / PV',
         badge: 'AniList Official PV',
-        thumbnail: tr.thumbnail || (tr.site === 'youtube' ? `https://i.ytimg.com/vi/${tr.id}/hqdefault.jpg` : null),
+        thumbnail: trThumbJpg,
+        thumbnails: {
+          jpg: trThumbJpg,
+          webp: trThumbWebp,
+          avif: trThumbJpg ? `/api/proxy/image?url=${encodeURIComponent(trThumbJpg)}&format=avif` : null
+        },
         embedUrl: tr.site === 'youtube' ? `https://www.youtube-nocookie.com/embed/${tr.id}?autoplay=1&rel=0` : null,
         url: tr.site === 'youtube' ? `https://www.youtube.com/watch?v=${tr.id}` : null
       });

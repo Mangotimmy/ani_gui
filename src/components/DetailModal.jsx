@@ -7,6 +7,7 @@ import {
   Users, HardDrive, Radio, Languages, Compass, Search, Zap, MessageSquare
 } from 'lucide-react';
 import { getAnimeCoverUrl, getAnimeBannerUrl, toCachedImageUrl } from '../utils/image.js';
+import { ThumbnailImage } from './ThumbnailImage.jsx';
 import { pickAnimeTitle } from '../utils/titles.js';
 import AnimeComments from './AnimeComments';
 import AnimeInfoLinks from './AnimeInfoLinks';
@@ -486,15 +487,16 @@ export default function DetailModal({
           ) : (
             /* Idle Backdrop Image Banner */
             <>
-              <img
-                src={backdrop}
+              <ThumbnailImage
+                src={anime.bannerImage || anime}
                 alt={title}
                 width="1280"
                 height="720"
                 loading="lazy"
                 decoding="async"
                 style={{ aspectRatio: '16/9' }}
-                className="w-full h-auto aspect-[16/9] object-cover object-center"
+                className="w-full h-auto aspect-[16/9]"
+                imgClassName="w-full h-auto aspect-[16/9] object-cover object-center"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-[#141418] via-[#141418]/60 to-transparent" />
               <div className="absolute inset-0 bg-gradient-to-r from-[#141418] via-transparent to-transparent" />
@@ -887,17 +889,20 @@ export default function DetailModal({
                 <span>{t('episodesTab')} ({uploadedEpisodes.length})</span>
               </button>
 
-              <button
-                onClick={() => setActiveTab('trailers')}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  activeTab === 'trailers'
-                    ? 'bg-rose-600 text-white shadow-md'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                <Film className="w-3.5 h-3.5" />
-                <span>{t('trailersTab')} ({mediaVideos.trailers.length})</span>
-              </button>
+              {/* TAB 2: TRAILERS & PV VIEW - Show only if trailers/YouTube available */}
+              {(mediaVideos.trailers.length > 0 || anime?.trailer?.id) && (
+                <button
+                  onClick={() => setActiveTab('trailers')}
+                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    activeTab === 'trailers'
+                      ? 'bg-rose-600 text-white shadow-md'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Film className="w-3.5 h-3.5" />
+                  <span>{t('trailersTab')} ({mediaVideos.trailers.length || (anime?.trailer?.id ? 1 : 0)})</span>
+                </button>
+              )}
 
               <button
                 onClick={() => setActiveTab('themes')}
@@ -1133,15 +1138,16 @@ export default function DetailModal({
                     >
                       <div className="aspect-video relative overflow-hidden bg-black rounded-t-2xl">
                         {tr.thumbnail ? (
-                          <img
-                            src={toCachedImageUrl(tr.thumbnail)}
+                          <ThumbnailImage
+                            src={tr}
                             alt={tr.title}
                             width="480"
                             height="270"
                             loading="lazy"
                             decoding="async"
                             style={{ aspectRatio: '16/9' }}
-                            className="w-full h-auto aspect-[16/9] object-cover group-hover/pv:scale-105 transition-transform duration-300 ring-1 ring-inset ring-white/10"
+                            className="w-full h-auto aspect-[16/9]"
+                            imgClassName="w-full h-auto aspect-[16/9] object-cover group-hover/pv:scale-105 transition-transform duration-300 ring-1 ring-inset ring-white/10"
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center bg-zinc-950">
@@ -1527,15 +1533,16 @@ export default function DetailModal({
                     >
                       <div className="aspect-[2/3] relative overflow-hidden bg-zinc-950">
                         {relCover && (
-                          <img
-                            src={relCover}
+                          <ThumbnailImage
+                            src={rel}
                             alt={relTitle}
                             width="200"
                             height="300"
                             loading="lazy"
                             decoding="async"
                             style={{ aspectRatio: '2/3' }}
-                            className="w-full h-auto aspect-[2/3] object-cover group-hover/rel:scale-110 transition-transform duration-300"
+                            className="w-full h-auto aspect-[2/3]"
+                            imgClassName="w-full h-auto aspect-[2/3] object-cover group-hover/rel:scale-110 transition-transform duration-300"
                           />
                         )}
                         <div className="absolute top-1.5 left-1.5">
@@ -1581,15 +1588,16 @@ export default function DetailModal({
                     >
                       <div className="aspect-[2/3] relative overflow-hidden bg-zinc-950">
                         {simCover && (
-                          <img
-                            src={simCover}
+                          <ThumbnailImage
+                            src={sim}
                             alt={simTitle}
                             width="200"
                             height="300"
                             loading="lazy"
                             decoding="async"
                             style={{ aspectRatio: '2/3' }}
-                            className="w-full h-auto aspect-[2/3] object-cover group-hover/sim:scale-110 transition-transform duration-300"
+                            className="w-full h-auto aspect-[2/3]"
+                            imgClassName="w-full h-auto aspect-[2/3] object-cover group-hover/sim:scale-110 transition-transform duration-300"
                           />
                         )}
                         {sim.averageScore && (

@@ -52,12 +52,14 @@ export const mediaCache = {
     return path.join(SEGMENTS_DIR, `${hashUrl(url)}.ts`);
   },
 
-  getImagePath(url) {
-    return path.join(IMAGES_DIR, `${hashUrl(url)}.img`);
+  getImagePath(url, format = '') {
+    const key = format ? `${url}__fmt_${format}` : url;
+    return path.join(IMAGES_DIR, `${hashUrl(key)}.img`);
   },
 
-  getImageMetaPath(url) {
-    return path.join(IMAGES_DIR, `${hashUrl(url)}.json`);
+  getImageMetaPath(url, format = '') {
+    const key = format ? `${url}__fmt_${format}` : url;
+    return path.join(IMAGES_DIR, `${hashUrl(key)}.json`);
   },
 
   getSubtitlePath(cacheKey) {
@@ -124,9 +126,9 @@ export const mediaCache = {
   /**
    * Check if an image is cached on disk.
    */
-  getImage(url) {
-    const filePath = this.getImagePath(url);
-    const metaPath = this.getImageMetaPath(url);
+  getImage(url, format = '') {
+    const filePath = this.getImagePath(url, format);
+    const metaPath = this.getImageMetaPath(url, format);
     const stat = safeStat(filePath);
     if (stat && stat.size > 0 && fs.existsSync(metaPath)) {
       try {
@@ -142,23 +144,23 @@ export const mediaCache = {
   /**
    * Save an image buffer to disk cache.
    */
-  saveImage(url, buffer, contentType = 'image/jpeg') {
-    const filePath = this.getImagePath(url);
-    const metaPath = this.getImageMetaPath(url);
+  saveImage(url, buffer, contentType = 'image/jpeg', format = '') {
+    const filePath = this.getImagePath(url, format);
+    const metaPath = this.getImageMetaPath(url, format);
     const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
     try {
       fs.writeFileSync(tempPath, buffer);
       fs.renameSync(tempPath, filePath);
-      fs.writeFileSync(metaPath, JSON.stringify({ contentType, url, cachedAt: Date.now() }));
+      fs.writeFileSync(metaPath, JSON.stringify({ contentType, url, format, cachedAt: Date.now() }));
     } catch {
       try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
     }
   },
 
   /** Promote a streamed image temp file into the cache (used by the streaming proxy). */
-  commitImageTemp(url, tempPath, contentType = 'image/jpeg') {
-    const filePath = this.getImagePath(url);
-    const metaPath = this.getImageMetaPath(url);
+  commitImageTemp(url, tempPath, contentType = 'image/jpeg', format = '') {
+    const filePath = this.getImagePath(url, format);
+    const metaPath = this.getImageMetaPath(url, format);
     try {
       const stat = safeStat(tempPath);
       if (!stat || stat.size === 0) {
@@ -166,7 +168,7 @@ export const mediaCache = {
         return null;
       }
       fs.renameSync(tempPath, filePath);
-      fs.writeFileSync(metaPath, JSON.stringify({ contentType, url, cachedAt: Date.now() }));
+      fs.writeFileSync(metaPath, JSON.stringify({ contentType, url, format, cachedAt: Date.now() }));
       return filePath;
     } catch {
       try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}

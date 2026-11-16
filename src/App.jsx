@@ -695,14 +695,9 @@ function hasHomeCache() {
 
     loadInitialData();
 
-    // Check environment readiness (suppressed in Docker containers)
+    // Check environment status quietly (built-in HTML5 web player is always ready)
     fetch('/api/environment/status')
       .then(r => r.json())
-      .then(d => {
-        if (d.success && !d.ready && !d.isContainer) {
-          setIsSetupWizardOpen(true);
-        }
-      })
       .catch(() => {});
 
     // Load persistent settings (Downloads & GPU profile)

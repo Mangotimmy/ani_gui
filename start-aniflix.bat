@@ -9,11 +9,9 @@ echo           Powered by ani-cli, yt-dlp ^& aria2c
 echo.
 echo ============================================================
 echo.
-echo [*] Adding Scoop tools to PATH...
+echo [*] Checking optional Scoop tools in PATH...
 if exist "%USERPROFILE%\scoop\shims" (
     set "PATH=%USERPROFILE%\scoop\shims;%PATH%"
-) else (
-    set "PATH=C:\Users\Atszl\scoop\shims;%PATH%"
 )
 
 cd /d "%~dp0"

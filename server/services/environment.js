@@ -5,9 +5,9 @@ import fs from 'fs';
 import { spawn, execSync } from 'child_process';
 
 const TOOLS = [
-  { name: 'yt-dlp', scoopSubdir: 'yt-dlp', versionArg: '--version', critical: true },
-  { name: 'ffmpeg', scoopSubdir: 'ffmpeg', versionArg: '-version', critical: true },
-  { name: 'mpv', scoopSubdir: 'mpv', versionArg: '--version', critical: true },
+  { name: 'yt-dlp', scoopSubdir: 'yt-dlp', versionArg: '--version', critical: false },
+  { name: 'ffmpeg', scoopSubdir: 'ffmpeg', versionArg: '-version', critical: false },
+  { name: 'mpv', scoopSubdir: 'mpv', versionArg: '--version', critical: false },
   { name: 'aria2c', scoopSubdir: 'aria2', versionArg: '--version', critical: false },
   { name: 'ani-cli', scoopSubdir: 'ani-cli', versionArg: '--version', critical: false },
   { name: 'git', scoopSubdir: 'git', versionArg: '--version', critical: false }
@@ -150,9 +150,8 @@ export function getEnvironmentStatus() {
   }
 
   const allInstalled = Object.values(results).every(t => t.installed);
-  const ready = isContainer
-    ? Boolean(results['yt-dlp']?.installed && results['ffmpeg']?.installed)
-    : criticalMissingCount === 0;
+  // AniFlix built-in HTML5/HLS web player is always ready without requiring any external plugins
+  const ready = true;
 
   return {
     ready,
@@ -257,6 +256,8 @@ export function installAllPlugins(onProgress) {
     const scoopPath = path.join(home, 'scoop');
 
     const installScript = `
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
 Write-Host ">>> Initializing Windows Plugin Environment Setup..."
 
@@ -350,14 +351,39 @@ export function updateAllPlugins(onProgress) {
 
     const home = os.homedir();
     const updateScript = `
-$env:PATH = "${path.join(home, 'scoop', 'shims').replace(/\\/g, '\\\\')};" + $env:PATH
-Write-Host ">>> Running Scoop update..."
-scoop update
-Write-Host ">>> Updating installed apps..."
-scoop update *
-Write-Host ">>> Ensuring yt-dlp is latest..."
-yt-dlp -U
-Write-Host ">>> All plugins updated!"
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ErrorActionPreference = 'Continue'
+
+$scoopShim = "${path.join(home, 'scoop', 'shims').replace(/\\/g, '\\\\')}"
+if (Test-Path $scoopShim) {
+  $env:PATH = "$scoopShim;" + $env:PATH
+}
+
+$hasScoop = (Get-Command scoop -ErrorAction SilentlyContinue) -ne $null -or (Test-Path "${path.join(home, 'scoop', 'shims', 'scoop.ps1').replace(/\\/g, '\\\\')}")
+$hasYtDlp = (Get-Command yt-dlp -ErrorAction SilentlyContinue) -ne $null
+
+if (!$hasScoop -and !$hasYtDlp) {
+  Write-Host "[Status] No external video plugins or Scoop package manager installed."
+  Write-Host "[Notice] Video plugins (yt-dlp, ffmpeg, mpv, aria2c) are purely optional."
+  Write-Host "[Notice] AniFlix natively streams all anime via built-in web playback and does not require external plugins."
+  Write-Host ">>> Nothing to update. System is ready!"
+  exit 0
+}
+
+if ($hasScoop) {
+  Write-Host ">>> Running Scoop update..."
+  scoop update
+  Write-Host ">>> Updating installed Scoop apps..."
+  scoop update *
+}
+
+if ($hasYtDlp) {
+  Write-Host ">>> Ensuring yt-dlp is latest..."
+  yt-dlp -U
+}
+
+Write-Host ">>> All installed plugins updated!"
 `;
 
     const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', updateScript], {
@@ -376,6 +402,63 @@ Write-Host ">>> All plugins updated!"
     ps.on('error', (err) => {
       onProgress(`\n❌ Error running updater: ${err.message}\n`);
       reject(err);
+    });
+  });
+}
+
+/**
+ * Remove / Clean up optional plugins
+ */
+export function removePlugins(onProgress) {
+  return new Promise((resolve) => {
+    onProgress('🧹 Checking and removing optional video plugins...\n');
+    const home = os.homedir();
+    const removeScript = `
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ErrorActionPreference = 'Continue'
+
+$scoopShim = "${path.join(home, 'scoop', 'shims').replace(/\\/g, '\\\\')}"
+if (Test-Path $scoopShim) {
+  $env:PATH = "$scoopShim;" + $env:PATH
+}
+
+$hasScoop = (Get-Command scoop -ErrorAction SilentlyContinue) -ne $null -or (Test-Path "${path.join(home, 'scoop', 'shims', 'scoop.ps1').replace(/\\/g, '\\\\')}")
+if ($hasScoop) {
+  $tools = @("ani-cli", "aria2", "mpv", "ffmpeg", "yt-dlp")
+  foreach ($t in $tools) {
+    Write-Host ">>> Checking $t in Scoop..."
+    scoop uninstall $t 2>&1
+  }
+} else {
+  Write-Host ">>> Scoop is not installed; no Scoop plugins to remove."
+}
+
+$binDir = "${path.join(process.cwd(), 'bin').replace(/\\/g, '\\\\')}"
+if (Test-Path $binDir) {
+  Write-Host ">>> Cleaning local bin directory..."
+  Remove-Item -Path "$binDir\\*" -Force -Recurse -ErrorAction SilentlyContinue
+}
+
+Write-Host ">>> Optional plugins removed or cleaned up."
+Write-Host ">>> AniFlix will continue to stream anime using the built-in HTML5 player."
+`;
+
+    const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', removeScript], {
+      windowsHide: true
+    });
+
+    ps.stdout.on('data', (data) => onProgress(data.toString()));
+    ps.stderr.on('data', (data) => onProgress(data.toString()));
+
+    ps.on('close', (code) => {
+      onProgress(`\n✅ Optional plugins cleanup finished (exit code ${code}).\n`);
+      resolve({ success: true, code });
+    });
+
+    ps.on('error', (err) => {
+      onProgress(`\n⚠️ Notice: ${err.message}\n`);
+      resolve({ success: true });
     });
   });
 }

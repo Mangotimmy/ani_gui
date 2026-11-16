@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Download, Info, Star } from 'lucide-react';
 import { getAnimeBannerUrl } from '../utils/image.js';
+import { ThumbnailImage } from './ThumbnailImage.jsx';
 import { pickAnimeTitle } from '../utils/titles.js';
 
 const GENRE_MAP = {
@@ -101,8 +102,8 @@ export default function HeroBanner({
     <div className="relative w-full h-[76vh] min-h-[580px] max-h-[820px] select-none overflow-hidden">
       {/* Background Image with Dark Vignette */}
       <div className="absolute inset-0">
-        <img
-          src={backdrop}
+        <ThumbnailImage
+          src={anime.bannerImage || anime}
           alt={title}
           fetchPriority="high"
           loading="eager"
@@ -110,7 +111,8 @@ export default function HeroBanner({
           width="1920"
           height="800"
           style={{ aspectRatio: '16/7' }}
-          className="w-full h-full object-cover object-center"
+          className="w-full h-full"
+          imgClassName="w-full h-full object-cover object-center"
         />
         {/* Gradients: bottom fade + left side fade */}
         <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/75 to-transparent" />

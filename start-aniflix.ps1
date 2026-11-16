@@ -4,7 +4,10 @@ Write-Host "         AniFlix - Anime Streaming & Downloader" -ForegroundColor Wh
 Write-Host "          Powered by ani-cli, yt-dlp & aria2c" -ForegroundColor Gray
 Write-Host "============================================================" -ForegroundColor Red
 
-$env:PATH = "C:\Users\Atszl\scoop\shims;" + $env:PATH
+$scoopShims = Join-Path $HOME "scoop\shims"
+if (Test-Path $scoopShims) {
+    $env:PATH = "$scoopShims;" + $env:PATH
+}
 Set-Location -Path $PSScriptRoot
 
 Write-Host "`n[*] Starting AniFlix server at http://localhost:3001 ..." -ForegroundColor Cyan

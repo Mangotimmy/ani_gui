@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, Settings, Folder, FolderPlus, Check, Terminal, Wrench, RefreshCw, 
-  DownloadCloud, AlertTriangle, CheckCircle, ExternalLink, Sparkles,
+  DownloadCloud, AlertTriangle, CheckCircle, ExternalLink, Sparkles, Trash2,
   Shield, ShieldAlert, ShieldCheck, Database, FileText, UploadCloud, FileCode,
   Cpu, Zap, Gauge, Monitor, Sliders, Server, Layers, Copy, Smartphone, Network, Activity, Keyboard
 } from 'lucide-react';
@@ -543,6 +543,7 @@ export default function SettingsModal({
   const [isLoadingEnv, setIsLoadingEnv] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
   const [terminalLogs, setTerminalLogs] = useState('');
   const [showLogModal, setShowLogModal] = useState(false);
   const [appUpdateInfo, setAppUpdateInfo] = useState(null);
@@ -681,6 +682,36 @@ export default function SettingsModal({
       es.close();
       setIsInstalling(false);
       setTerminalLogs(prev => prev + '\n[Installer process finished]\n');
+      fetchEnvStatus();
+    };
+  };
+
+  // Handle Remove / Clean Up Plugins via SSE
+  const handleRemovePlugins = () => {
+    setIsRemoving(true);
+    setTerminalLogs('Connecting to plugin cleaner...\n');
+    setShowLogModal(true);
+
+    const es = new EventSource('/api/environment/remove/stream');
+
+    es.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        if (d.text) {
+          setTerminalLogs(prev => prev + d.text);
+        }
+        if (d.done) {
+          es.close();
+          setIsRemoving(false);
+          fetchEnvStatus();
+        }
+      } catch {}
+    };
+
+    es.onerror = () => {
+      es.close();
+      setIsRemoving(false);
+      setTerminalLogs(prev => prev + '\n[Cleanup finished]\n');
       fetchEnvStatus();
     };
   };
@@ -1456,11 +1487,20 @@ export default function SettingsModal({
                 </button>
                 <button
                   onClick={handleUpdatePlugins}
-                  disabled={isUpdating}
+                  disabled={isUpdating || isRemoving}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-emerald-400 hover:text-emerald-300 border border-zinc-700 text-xs font-bold transition-colors"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isUpdating ? 'animate-spin' : ''}`} />
                   <span>{txt.updateAll}</span>
+                </button>
+                <button
+                  onClick={handleRemovePlugins}
+                  disabled={isRemoving || isUpdating}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-red-400 border border-zinc-700 text-xs font-bold transition-colors"
+                  title="移除或清理選配外掛"
+                >
+                  <Trash2 className={`w-3.5 h-3.5 ${isRemoving ? 'animate-spin' : ''}`} />
+                  <span>{isRemoving ? '清理中...' : '移除/清理外掛'}</span>
                 </button>
               </div>
             </div>
@@ -1494,14 +1534,12 @@ export default function SettingsModal({
                   <div className="min-w-0 pr-2">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-xs text-white">{tool.name}</span>
-                      {tool.critical && (
-                        <span className="text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.2 rounded font-semibold">
-                          Required
-                        </span>
-                      )}
+                      <span className="text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.2 rounded font-semibold border border-zinc-700/40">
+                        {tool.installed ? '已就緒' : '選配'}
+                      </span>
                     </div>
                     <p className="text-[11px] text-zinc-400 truncate mt-0.5 font-mono">
-                      {tool.version || (tool.installed ? 'Installed' : 'Missing')}
+                      {tool.version || (tool.installed ? 'Installed' : '未安裝 (選配)')}
                     </p>
                   </div>
 
@@ -1509,34 +1547,39 @@ export default function SettingsModal({
                     {tool.installed ? (
                       <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
                     ) : (
-                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span className="text-[10px] text-zinc-500 font-mono">選配</span>
                     )}
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* Missing Tools Alert & 1-Click Install */}
+            {/* Optional Tools Notice & 1-Click Install */}
             {envStatus && !envStatus.allInstalled && (
-              <div className="bg-amber-950/30 border border-amber-600/40 rounded-xl p-3.5 flex items-center justify-between gap-3">
+              <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
-                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                  <Sparkles className="w-5 h-5 text-emerald-400 shrink-0" />
                   <div>
-                    <h5 className="text-xs font-bold text-amber-300">Missing Video Dependencies</h5>
-                    <p className="text-[11px] text-zinc-300">
-                      Install missing plugins automatically via PowerShell & Scoop in 1 click.
+                    <h5 className="text-xs font-bold text-white flex items-center gap-2">
+                      <span>無須額外外掛即可直接觀看</span>
+                      <span className="text-[10px] bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 px-1.5 py-0.2 rounded">內建播放器就緒</span>
+                    </h5>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                      AniFlix 內建原生 HTML5 串流核心，不需安裝任何外掛即可播放。若無使用外部 MPV 播放器或批次下載之需求，無需理會或安裝此處組件。
                     </p>
                   </div>
                 </div>
 
-                <button
-                  onClick={handleInstallPlugins}
-                  disabled={isInstalling}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#E50914] hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow-md shrink-0"
-                >
-                  <DownloadCloud className="w-4 h-4" />
-                  <span>Auto Install Plugins</span>
-                </button>
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                  <button
+                    onClick={handleInstallPlugins}
+                    disabled={isInstalling || isRemoving}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white border border-zinc-700 rounded-lg text-xs font-bold transition-colors"
+                  >
+                    <DownloadCloud className="w-4 h-4 text-emerald-400" />
+                    <span>安裝選配外掛</span>
+                  </button>
+                </div>
               </div>
             )}
 
