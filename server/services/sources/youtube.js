@@ -7,6 +7,45 @@ const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const youtubeSeriesCache = new BoundedCache(300, 2 * 60 * 60 * 1000); // 2h TTL for hits
 const youtubeSeriesFailCache = new BoundedCache(200, 10 * 60 * 1000);  // 10m TTL for misses
 
+/**
+ * Checks YouTube playability & country availability for a video ID.
+ * Detects "The uploader has not made this video available in your country" or embed blocks.
+ */
+export async function checkPlayability(videoId) {
+  if (!videoId) return { ok: false, reason: 'No videoId' };
+  try {
+    const url = `https://www.youtube.com/watch?v=${videoId}`;
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': BROWSER_UA,
+        'Accept-Language': 'zh-TW,zh;q=0.9,ja;q=0.8,en;q=0.7'
+      },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` };
+    const html = await res.text();
+    const m = html.match(/ytInitialPlayerResponse\s*=\s*({.+?});/);
+    if (!m) return { ok: false, reason: 'Unable to extract player response' };
+    const data = JSON.parse(m[1]);
+    const playability = data?.playabilityStatus;
+    const isPlayable = playability?.status === 'OK' && playability?.playableInEmbed !== false;
+    const reason = playability?.reason ||
+      playability?.errorScreen?.playerInterstitialRenderer?.content?.interstitialViewModel?.description?.content ||
+      playability?.errorScreen?.playerErrorMessageRenderer?.reason?.simpleText ||
+      playability?.messages?.[0] ||
+      (isPlayable ? '' : 'Video unavailable: The uploader has not made this video available in your country');
+
+    return {
+      ok: isPlayable,
+      status: playability?.status || 'UNKNOWN',
+      reason,
+      playableInEmbed: playability?.playableInEmbed !== false
+    };
+  } catch (err) {
+    return { ok: false, reason: err.message };
+  }
+}
+
 function parseDurationSeconds(durationStr) {
   if (!durationStr) return 0;
   const parts = durationStr.split(':').map(Number);
@@ -126,13 +165,21 @@ export async function findYouTubeSeriesEpisode(titleCandidates, episode = 1) {
         // 5. Must match the specific anime title
         if (!matchesAnimeTitle(vTitle, titles)) continue;
 
+        // 6. Verify playability in user's region & embed permission
+        const playability = await checkPlayability(v.videoId);
+        if (!playability.ok) {
+          console.log(`[YouTube] Video ${v.videoId} ("${vTitle}") is unplayable or geo-blocked: ${playability.reason}`);
+          continue;
+        }
+
         const matchResult = {
           id: v.videoId,
           title: vTitle,
           channel,
           duration: lengthText,
           durationSec,
-          isOfficial: isOfficialLicensor
+          isOfficial: isOfficialLicensor,
+          playability
         };
 
         youtubeSeriesCache.set(cacheKey, matchResult);
@@ -175,16 +222,18 @@ export async function resolveYouTubeStream({
 
   if (matchedEpisode && matchedEpisode.id) {
     const videoId = matchedEpisode.id;
+    const streamUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0&enablejsapi=1`;
     return {
       success: true,
       source: 'youtube',
       activeSource: 'youtube',
       serverName: `YouTube (${matchedEpisode.channel || '正版系列'} / 第 ${episode} 集)`,
-      streamUrl: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`,
-      proxiedStreamUrl: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`,
+      streamUrl,
+      proxiedStreamUrl: streamUrl,
       isEmbed: true,
       isEmbedSource: true,
       videoId,
+      watchUrl: `https://www.youtube.com/watch?v=${videoId}`,
       videoTitle: matchedEpisode.title,
       channel: matchedEpisode.channel,
       duration: matchedEpisode.duration,
@@ -197,7 +246,7 @@ export async function resolveYouTubeStream({
     success: false,
     source: 'youtube',
     activeSource: 'youtube',
-    error: `YouTube 查無《${rawTitle}》第 ${episode} 集的正版系列影集資源。`
+    error: `Video unavailable: The uploader has not made this video available in your country (YouTube 查無《${rawTitle}》第 ${episode} 集可在您地區播放之正版系列影集)。`
   };
 }
 

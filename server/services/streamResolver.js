@@ -311,7 +311,7 @@ export async function resolveStream({
       success: false,
       activeSource: 'youtube',
       availableSources: buildSourceList('youtube', { hasYouTube: false }),
-      error: ytRes?.error || `YouTube 查無《${animeTitle}》第 ${episode} 集的正版系列影集資源。`,
+      error: ytRes?.error || `Video unavailable: The uploader has not made this video available in your country (YouTube 查無《${animeTitle}》第 ${episode} 集可在您地區播放之正版系列影集)。`,
       suggestedFallback: 'auto'
     };
   }

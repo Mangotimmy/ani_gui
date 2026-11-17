@@ -6,7 +6,7 @@ import {
   Settings, Loader2, Copy, Check, Link2, ExternalLink, SlidersHorizontal, FastForward,
   Subtitles, Upload, FileUp, Tv, Smartphone, Zap, Sparkles,
   MoreVertical, Film, AlertTriangle, Radio, ChevronDown,
-  PictureInPicture2, Minimize2, Maximize2
+  PictureInPicture2, Minimize2, Maximize2, Globe
 } from 'lucide-react';
 import { getPlatformInfo, getExternalPlayerLinks } from '../utils/platform.js';
 import { toCachedImageUrl } from '../utils/image.js';
@@ -320,7 +320,37 @@ export default function VideoPlayer({
   const [showSourceMenu, setShowSourceMenu] = useState(false);
   const [isEmbedSource, setIsEmbedSource] = useState(false);
   const [isMp4, setIsMp4] = useState(false);
+  const [embedMeta, setEmbedMeta] = useState(null); // { watchUrl, videoId, channel, videoTitle }
+  const [ytGeoBlocked, setYtGeoBlocked] = useState(false);
   const sourceMenuRef = useRef(null);
+
+  // Listen for YouTube iframe player postMessage events (e.g. error code 150/101 for geo-block)
+  useEffect(() => {
+    const handleYouTubeMessage = (event) => {
+      if (!event.origin || (!event.origin.includes('youtube.com') && !event.origin.includes('youtube-nocookie.com'))) {
+        return;
+      }
+      let payload = event.data;
+      if (typeof payload === 'string') {
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          return;
+        }
+      }
+      if (!payload) return;
+
+      // Detect YouTube error event: code 150 (not allowed in embedded or geo-blocked in country),
+      // 101 (same as 150), 100 (not found/removed)
+      if (payload.event === 'onError' || (payload.info && [150, 101, 100, 2].includes(payload.info))) {
+        console.warn('[VideoPlayer] YouTube player onError event captured:', payload);
+        setYtGeoBlocked(true);
+      }
+    };
+
+    window.addEventListener('message', handleYouTubeMessage);
+    return () => window.removeEventListener('message', handleYouTubeMessage);
+  }, []);
 
   // In-Player Episode Drawer state
   const [showEpisodeDrawer, setShowEpisodeDrawer] = useState(false);
@@ -649,6 +679,8 @@ export default function VideoPlayer({
     setIsBuffering(true);
     setErrorMessage('');
     setResolvedSource('');
+    setYtGeoBlocked(false);
+    setEmbedMeta(null);
     if (!directStreamUrl) {
       // Tear down the previous line immediately; leaving it running behind an error (or
       // behind the newly resolved line) made switching sources look like it did nothing.
@@ -736,6 +768,13 @@ export default function VideoPlayer({
             setResolvedSource(streamRes.data.activeSource || '');
             setIsEmbedSource(Boolean(streamRes.data.isEmbed));
             setIsMp4(Boolean(streamRes.data.isMp4));
+            setEmbedMeta(streamRes.data.isEmbed ? {
+              watchUrl: streamRes.data.watchUrl,
+              videoId: streamRes.data.videoId,
+              channel: streamRes.data.channel,
+              videoTitle: streamRes.data.videoTitle
+            } : null);
+            setYtGeoBlocked(false);
 
             setRawStreamUrl(raw);
             setStreamUrl(proxied);
@@ -801,8 +840,15 @@ export default function VideoPlayer({
             // Auto-select the preferred track for the active UI language.
             setSelectedSubIndex(preferredSubtitleIndex(combinedSubs, currentLang));
           } else {
+            if (streamRes.data?.availableSources) {
+              setAvailableSources(streamRes.data.availableSources);
+            }
             const rawErr = streamRes.error || streamRes.data?.error || '';
             const isAiredErr = rawErr.includes('not officially aired');
+            const isGeoErr = rawErr.toLowerCase().includes('country') || rawErr.toLowerCase().includes('unavailable') || activeSource === 'youtube';
+            if (isGeoErr && activeSource === 'youtube') {
+              setYtGeoBlocked(true);
+            }
             const friendlyErr = isAiredErr
               ? `《${displayTitleRef.current || rawTitle}》第 ${episode} 集目前尚未正式播映 (未發行)。`
               : (rawErr || '來源端查無此集數之串流資源，您可以嘗試其他集數或欣賞官方預告片。');
@@ -1958,6 +2004,18 @@ export default function VideoPlayer({
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {(embedMeta?.watchUrl || (resolvedSource === 'youtube' && rawStreamUrl)) && (
+                <a
+                  href={embedMeta?.watchUrl || `https://www.youtube.com/watch?v=${rawStreamUrl.match(/embed\/([^/?]+)/)?.[1] || ''}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hidden sm:flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 hover:text-red-300 rounded-xl border border-red-500/30 cursor-pointer transition-colors"
+                  title="在 YouTube 官方頁面開啟"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>在 YouTube 開啟</span>
+                </a>
+              )}
               <div className="relative">
                 <button
                   type="button"
@@ -2521,8 +2579,73 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Error Message Overlay */}
-      {errorMessage && (
+      {/* YouTube Country / Geo-Restriction Notice Overlay */}
+      {(ytGeoBlocked || (activeSource === 'youtube' && errorMessage && (errorMessage.includes('country') || errorMessage.includes('unavailable') || errorMessage.includes('Video unavailable')))) ? (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center p-6 bg-black/95 text-center pointer-events-auto backdrop-blur-md animate-in fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4 border border-amber-500/30 shadow-xl shadow-amber-500/10">
+            <Globe className="w-8 h-8" />
+          </div>
+          <h3 className="text-xl sm:text-2xl font-black text-white mb-2 tracking-tight">
+            Video unavailable
+          </h3>
+          <p className="text-sm sm:text-base text-zinc-200 font-medium max-w-lg mb-2 leading-relaxed">
+            The uploader has not made this video available in your country
+          </p>
+          <p className="text-xs text-zinc-400 mb-6 max-w-md">
+            (影片無法播放：上傳者並未在您的國家/地區提供這部正版影片)
+          </p>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-md mb-5">
+            <button
+              type="button"
+              onClick={() => {
+                setYtGeoBlocked(false);
+                setErrorMessage('');
+                setActiveSource('auto');
+              }}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 bg-[#E50914] hover:bg-red-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs sm:text-sm transition-all shadow-lg shadow-red-600/30 cursor-pointer active:scale-95"
+            >
+              <Radio className="w-4 h-4" />
+              <span>切換至自動線路 (Auto Failover)</span>
+            </button>
+
+            {(embedMeta?.watchUrl || (resolvedSource === 'youtube' && rawStreamUrl)) && (
+              <a
+                href={embedMeta?.watchUrl || `https://www.youtube.com/watch?v=${rawStreamUrl.match(/embed\/([^/?]+)/)?.[1] || ''}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white font-semibold px-4 py-2.5 rounded-xl text-xs sm:text-sm border border-zinc-700 transition-all cursor-pointer"
+              >
+                <ExternalLink className="w-4 h-4 text-red-500" />
+                <span>在 YouTube 上開啟</span>
+              </a>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-2 max-w-lg pt-3 border-t border-zinc-800/80">
+            <span className="text-[11px] text-zinc-500 w-full mb-1">或選擇其他可用線路：</span>
+            {[
+              { id: 'anime1', name: 'Anime1.me (繁中)' },
+              { id: 'gogoanime', name: 'Gogoanime (雙語)' },
+              { id: 'framextv', name: 'FramexTV' },
+              { id: 'hianime', name: 'HiAnime' }
+            ].map(s => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => {
+                  setYtGeoBlocked(false);
+                  setErrorMessage('');
+                  setActiveSource(s.id);
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 transition-all cursor-pointer"
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : errorMessage && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center p-6 bg-black/95 text-center pointer-events-auto">
           <div className="w-14 h-14 rounded-2xl bg-red-600/20 text-[#E50914] flex items-center justify-center mb-4 border border-red-600/30 shadow-lg shadow-red-600/10">
             {isUnreleased ? <Sparkles className="w-7 h-7 text-amber-400" /> : <AlertTriangle className="w-7 h-7" />}
