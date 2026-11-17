@@ -668,19 +668,6 @@ export default function VideoPlayer({
         return;
       }
 
-      // If YouTube source is explicitly selected and trailer exists, resolve directly
-      if (activeSource === 'youtube' && anime?.trailer?.id) {
-        const ytEmbed = `https://www.youtube-nocookie.com/embed/${anime.trailer.id}?autoplay=1&rel=0`;
-        setStreamUrl(ytEmbed);
-        setRawStreamUrl(ytEmbed);
-        setIsEmbedSource(true);
-        setResolvedSource('youtube');
-        setIsBuffering(false);
-        setErrorMessage('');
-        resolved = true;
-        return;
-      }
-
       // Check if anime is unreleased beforehand
       if (anime?.status === 'NOT_YET_RELEASED' || anime?.episodes === 0) {
         setIsBuffering(false);
@@ -1875,7 +1862,7 @@ export default function VideoPlayer({
   }, [isScrubbing, duration]);
 
   const hasTrailer = Boolean(anime?.trailer?.id && (anime.trailer?.site === 'youtube' || !anime.trailer?.site));
-  const hasYouTube = Boolean(hasTrailer || (availableSources && availableSources.some(s => s.id === 'youtube')));
+  const hasYouTubeSeries = Boolean(availableSources && availableSources.some(s => s.id === 'youtube'));
   const isUnreleased = Boolean(
     anime?.status === 'NOT_YET_RELEASED' || 
     anime?.episodes === 0 || 
@@ -1994,9 +1981,9 @@ export default function VideoPlayer({
                           { id: 'gogoanime', label: 'Gogoanime (HD 雙語 / HLS)', badge: '極速' },
                           { id: 'framextv', label: 'FramexTV (HD 內嵌)', badge: '備用' },
                           { id: 'hianime', label: 'HiAnime (國際 HLS)', badge: '多語' },
-                          ...(hasYouTube ? [{ id: 'youtube', label: 'YouTube (官方 PV / 預告)', badge: 'YouTube' }] : [])
+                          ...(hasYouTubeSeries ? [{ id: 'youtube', label: 'YouTube (正版系列影集)', badge: 'YouTube' }] : [])
                         ]
-                    ).filter(s => s.id !== 'youtube' || hasYouTube)).map(s => (
+                    ).filter(s => s.id !== 'youtube' || hasYouTubeSeries)).map(s => (
                       <button
                         key={s.id}
                         type="button"
@@ -2558,8 +2545,8 @@ export default function VideoPlayer({
                   { id: 'gogoanime', name: 'Gogoanime (HD 雙語 / 極速)' },
                   { id: 'framextv', name: 'FramexTV (HD 多伺服器)' },
                   { id: 'hianime', name: 'HiAnime (國際多語)' },
-                  ...(hasYouTube ? [{ id: 'youtube', name: 'YouTube (官方 PV / 預告)' }] : [])
-                ].filter(s => (s.id !== 'youtube' || hasYouTube) && s.id !== activeSource).map(s => (
+                  ...(hasYouTubeSeries ? [{ id: 'youtube', name: 'YouTube (正版系列影集)' }] : [])
+                ].filter(s => (s.id !== 'youtube' || hasYouTubeSeries) && s.id !== activeSource).map(s => (
                   <button
                     key={s.id}
                     type="button"
@@ -3274,9 +3261,9 @@ export default function VideoPlayer({
                           { id: 'gogoanime', label: 'Gogoanime (HD 雙語 / HLS & Embed)', badge: '極速' },
                           { id: 'framextv', label: 'FramexTV (HD HLS)', badge: '備用' },
                           { id: 'hianime', label: 'HiAnime (HD HLS)', badge: '國際' },
-                          ...(hasYouTube ? [{ id: 'youtube', label: 'YouTube (官方 PV / 預告 / 串流)', badge: 'YouTube' }] : [])
+                          ...(hasYouTubeSeries ? [{ id: 'youtube', label: 'YouTube (正版系列影集 / 雙語)', badge: 'YouTube' }] : [])
                         ]
-                    ).filter(src => src.id !== 'youtube' || hasYouTube)).map((src) => (
+                    ).filter(src => src.id !== 'youtube' || hasYouTubeSeries)).map((src) => (
                       <button
                         key={src.id}
                         onClick={() => {

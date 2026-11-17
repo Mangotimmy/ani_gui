@@ -5,7 +5,7 @@ import { BoundedCache } from './cache.js';
 import { resolveAnime1Stream } from './sources/anime1.js';
 import { resolveFramexStream } from './sources/framextv.js';
 import { resolveGogoanimeStream } from './sources/gogoanime.js';
-import { resolveYouTubeStream } from './sources/youtube.js';
+import { resolveYouTubeStream, checkYouTubeSeriesAvailability } from './sources/youtube.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const DEOBFUSCATE_KEY = Buffer.from('otaku-embed-v1', 'utf-8');
@@ -250,7 +250,7 @@ export function buildSourceList(activeId = 'auto', { hasYouTube = false } = {}) 
   if (hasYouTube) {
     sources.push({
       id: 'youtube',
-      name: 'YouTube (官方 PV / 預告 / 串流)',
+      name: 'YouTube (正版系列影集 / 雙語)',
       badge: 'YouTube',
       active: activeId === 'youtube'
     });
@@ -274,14 +274,13 @@ export async function resolveStream({
   synonyms = [],
   trailer = null
 }) {
-  const hasYouTube = Boolean(trailer?.id && (trailer.site === 'youtube' || !trailer.site));
   const queryCandidates = [
     ...(Array.isArray(candidates) ? candidates : (typeof candidates === 'string' ? candidates.split(/\|\||\||,/) : [])),
     ...(Array.isArray(synonyms) ? synonyms : []),
     animeTitle
   ].filter(Boolean);
 
-  console.log(`[StreamResolver] Resolving stream for [${queryCandidates.join(', ')}] Ep ${episode} (${mode}, Source: ${source}, AniList: ${anilistId || 'n/a'}, YouTube: ${hasYouTube})...`);
+  console.log(`[StreamResolver] Resolving stream for [${queryCandidates.join(', ')}] Ep ${episode} (${mode}, Source: ${source}, AniList: ${anilistId || 'n/a'})...`);
 
   if (maxAiredCap !== null && maxAiredCap !== undefined && Number(maxAiredCap) > 0 && Number(episode) > Number(maxAiredCap)) {
     return {
@@ -293,14 +292,13 @@ export async function resolveStream({
     };
   }
 
-  // 1. Explicit YouTube selection
+  // 1. Explicit YouTube series selection
   if (source === 'youtube') {
     const ytRes = await resolveYouTubeStream({ 
       title: animeTitle, 
       candidates: queryCandidates, 
       episode, 
-      anilistId, 
-      trailer 
+      anilistId 
     });
     if (ytRes && ytRes.success) {
       return {
@@ -313,10 +311,16 @@ export async function resolveStream({
       success: false,
       activeSource: 'youtube',
       availableSources: buildSourceList('youtube', { hasYouTube: false }),
-      error: ytRes?.error || `YouTube 找不到《${animeTitle}》相關的官方預告或影片資源。`,
+      error: ytRes?.error || `YouTube 查無《${animeTitle}》第 ${episode} 集的正版系列影集資源。`,
       suggestedFallback: 'auto'
     };
   }
+
+  // Probe YouTube series availability for building source list
+  let hasYouTube = false;
+  try {
+    hasYouTube = await checkYouTubeSeriesAvailability(queryCandidates, episode);
+  } catch {}
 
   // 2. Explicit Anime1 selection
   if (source === 'anime1') {
@@ -552,18 +556,17 @@ export async function resolveStream({
       }
     } catch {}
 
-    // Try YouTube PV fallback if trailer is available and no episodes are streamable yet
+    // Try YouTube series fallback if other streams fail and series exists on YouTube
     if (hasYouTube) {
       try {
         const ytRes = await resolveYouTubeStream({ 
           title: animeTitle, 
           candidates: queryCandidates, 
           episode, 
-          anilistId, 
-          trailer 
+          anilistId 
         });
         if (ytRes && ytRes.success) {
-          console.log(`[StreamResolver] Auto-fallback to YouTube PV succeeded for "${animeTitle}" Ep ${episode}`);
+          console.log(`[StreamResolver] Auto-fallback to YouTube series succeeded for "${animeTitle}" Ep ${episode}`);
           return {
             ...ytRes,
             activeSource: 'youtube',
