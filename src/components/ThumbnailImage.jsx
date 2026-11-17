@@ -43,7 +43,7 @@ export function ThumbnailImage({
 
   return (
     <picture
-      className={`relative block overflow-hidden ${className}`.trim()}
+      className={`isolate relative block overflow-hidden ${className}`.trim()}
       style={
         !isLoaded && sources.placeholder
           ? {
@@ -80,7 +80,7 @@ export function ThumbnailImage({
         }}
         onLoad={handleLoad}
         onError={onError}
-        className={`relative z-10 ${imgClassName || className}`.trim()}
+        className={`relative z-[1] ${imgClassName || className}`.trim()}
         {...props}
       />
     </picture>

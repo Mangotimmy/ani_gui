@@ -58,7 +58,7 @@ function AnimeCard({
             e.stopPropagation();
             if (onToggleFavorite) onToggleFavorite(anime);
           }}
-          className={`absolute top-2 left-2 z-10 p-1.5 rounded-full backdrop-blur-md transition-all ${
+          className={`absolute top-2 left-2 z-20 p-1.5 rounded-full backdrop-blur-md transition-all ${
             isFavorite
               ? 'bg-red-600/80 text-white shadow-lg shadow-red-600/30'
               : 'bg-black/60 text-zinc-300 opacity-0 group-hover:opacity-100 hover:text-white hover:bg-black/80'
@@ -76,11 +76,11 @@ function AnimeCard({
 
         {/* Match Percentage or Rating or Upcoming Badge Top Right */}
         {isRecommendation && anime.matchPercent ? (
-          <div className="absolute top-2 right-2 flex items-center gap-1 bg-emerald-950/85 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold text-emerald-400 border border-emerald-500/30 shadow-md">
+          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-emerald-950/85 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold text-emerald-400 border border-emerald-500/30 shadow-md">
             <span>{anime.matchPercent}% {currentLang === 'ja' ? '一致' : currentLang.startsWith('zh') ? '契合度' : 'Match'}</span>
           </div>
         ) : anime.status === 'NOT_YET_RELEASED' ? (
-          <div className="absolute top-2 right-2 flex items-center gap-1 bg-indigo-600/90 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow-md">
+          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-indigo-600/90 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow-md">
             <span>
               {anime.startDate?.year 
                 ? `${anime.startDate.year}${anime.startDate.month ? '/' + anime.startDate.month : ''}`
@@ -88,14 +88,14 @@ function AnimeCard({
             </span>
           </div>
         ) : score ? (
-          <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/75 backdrop-blur-md px-1.5 py-0.5 rounded text-[11px] font-bold text-amber-400 border border-amber-500/20">
+          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-black/75 backdrop-blur-md px-1.5 py-0.5 rounded text-[11px] font-bold text-amber-400 border border-amber-500/20">
             <Star className="w-3 h-3 fill-amber-400" />
             <span>{score}</span>
           </div>
         ) : null}
 
         {/* Bottom Title Gradient Overlay on Card */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-2.5 pt-6 flex flex-col justify-end">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-2.5 pt-6 flex flex-col justify-end">
           {isRecommendation && anime.recommendationReason && (
             <div className="text-[10px] text-amber-300 font-semibold line-clamp-1 mb-1 flex items-center gap-1 bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-500/30 shadow-sm backdrop-blur-sm">
               <Sparkles className="w-2.5 h-2.5 text-amber-400 shrink-0" />
@@ -137,7 +137,7 @@ function AnimeCard({
         <div
           role="presentation"
           onClick={() => { if (onMoreInfo) startTransition(() => onMoreInfo(anime)); }}
-          className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2"
+          className="absolute inset-0 z-20 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2 pointer-events-none group-hover:pointer-events-auto"
         >
           {anime.status === 'NOT_YET_RELEASED' ? (
             <>

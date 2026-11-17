@@ -168,6 +168,8 @@ export default function VideoPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(true);
   const [bufferPercent, setBufferPercent] = useState(0);
+  const [displayBufferPercent, setDisplayBufferPercent] = useState(0);
+  const targetBufferPercentRef = useRef(0);
   const [skipTimes, setSkipTimes] = useState(null);
   const [activeSkipType, setActiveSkipType] = useState(null);
   const [showEndScreen, setShowEndScreen] = useState(false);
@@ -677,6 +679,9 @@ export default function VideoPlayer({
     setSubtitles([]);
     setSelectedSubIndex(-1);
     setIsBuffering(true);
+    setBufferPercent(0);
+    setDisplayBufferPercent(0);
+    targetBufferPercentRef.current = 0;
     setErrorMessage('');
     setResolvedSource('');
     setYtGeoBlocked(false);
@@ -1022,6 +1027,74 @@ export default function VideoPlayer({
     } catch {}
   };
 
+  // Real-time Buffer Progress Calculation & Tracking
+  const updateBufferProgress = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const cur = video.currentTime || 0;
+    const dur = video.duration || 0;
+
+    let curBufEnd = cur;
+    if (video.buffered && video.buffered.length > 0) {
+      try {
+        for (let i = 0; i < video.buffered.length; i++) {
+          if (video.buffered.start(i) <= cur + 0.5 && video.buffered.end(i) >= cur) {
+            curBufEnd = video.buffered.end(i);
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    setBufferedEnd(curBufEnd);
+
+    const aheadSec = Math.max(0, curBufEnd - cur);
+    const remainingSec = dur > cur ? dur - cur : 10;
+    const targetSec = Math.max(2, Math.min(8, remainingSec));
+
+    let targetPct = 0;
+    if (video.readyState >= 3) {
+      targetPct = 100;
+    } else {
+      targetPct = Math.min(99, Math.round((aheadSec / targetSec) * 100));
+    }
+
+    targetBufferPercentRef.current = targetPct;
+    setBufferPercent(targetPct);
+  }, []);
+
+  // Smooth real-time buffer progress animation loop (50 -> 85 -> 97 -> 100%)
+  useEffect(() => {
+    if (!isBuffering) {
+      targetBufferPercentRef.current = 100;
+      setDisplayBufferPercent(100);
+      return;
+    }
+
+    updateBufferProgress();
+
+    const interval = setInterval(() => {
+      updateBufferProgress();
+
+      setDisplayBufferPercent((prev) => {
+        const target = targetBufferPercentRef.current;
+        if (prev >= target) {
+          // Gently creep forward while buffering before playback is ready so UI feels active
+          if (prev < 97 && target < 97) {
+            return prev + 1;
+          }
+          return prev;
+        }
+        const diff = target - prev;
+        const step = Math.max(1, Math.ceil(diff * 0.25));
+        return Math.min(100, prev + step);
+      });
+    }, 70);
+
+    return () => clearInterval(interval);
+  }, [isBuffering, updateBufferProgress]);
+
   const handleTimeUpdate = () => {
     if (isScrubbingRef.current) return;
     const video = videoRef.current;
@@ -1029,20 +1102,8 @@ export default function VideoPlayer({
     const cur = video.currentTime;
     setCurrentTime(cur);
 
-    // Buffer percentage calculation: forward buffer ahead of current playhead
-    if (video.buffered && video.buffered.length > 0) {
-      let curBufEnd = cur;
-      for (let i = 0; i < video.buffered.length; i++) {
-        if (video.buffered.start(i) <= cur + 0.5 && video.buffered.end(i) >= cur) {
-          curBufEnd = video.buffered.end(i);
-          break;
-        }
-      }
-      const aheadSec = Math.max(0, curBufEnd - cur);
-      const targetSec = 20;
-      const pct = Math.min(100, Math.round((aheadSec / targetSec) * 100));
-      setBufferPercent(pct);
-    }
+    // Buffer percentage & buffered range calculation
+    updateBufferProgress();
 
     // Skip OP / ED detection
     if (skipTimes?.op && cur >= skipTimes.op.start && cur < skipTimes.op.end - 1) {
@@ -1053,18 +1114,6 @@ export default function VideoPlayer({
       setActiveSkipType(null);
     }
     setDuration(video.duration || 0);
-
-    // Track buffered range for seekbar
-    if (video.buffered && video.buffered.length > 0) {
-      try {
-        for (let i = 0; i < video.buffered.length; i++) {
-          if (video.buffered.start(i) <= cur && video.buffered.end(i) >= cur) {
-            setBufferedEnd(video.buffered.end(i));
-            break;
-          }
-        }
-      } catch {}
-    }
 
     if (cur > 5) {
       try {
@@ -1158,14 +1207,43 @@ export default function VideoPlayer({
         setCurrentQualityIndex(data.level);
       });
 
-      hls.on(Hls.Events.BUFFER_STALLED, () => setIsBuffering(true));
-      hls.on(Hls.Events.BUFFER_APPENDED, () => setIsBuffering(false));
-      hls.on(Hls.Events.FRAG_BUFFERED, () => setIsBuffering(false));
-      hls.on(Hls.Events.FRAG_LOADED, () => setIsBuffering(false));
+      hls.on(Hls.Events.BUFFER_STALLED, () => {
+        setIsBuffering(true);
+        updateBufferProgress();
+      });
+      hls.on(Hls.Events.BUFFER_APPENDED, () => {
+        updateBufferProgress();
+        if (video.readyState >= 3) {
+          targetBufferPercentRef.current = 100;
+          setDisplayBufferPercent(100);
+          setIsBuffering(false);
+        }
+      });
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        updateBufferProgress();
+        if (video.readyState >= 3) {
+          targetBufferPercentRef.current = 100;
+          setDisplayBufferPercent(100);
+          setIsBuffering(false);
+        }
+      });
+      hls.on(Hls.Events.FRAG_LOADED, () => {
+        updateBufferProgress();
+      });
+      hls.on(Hls.Events.FRAG_LOAD_PROGRESS, (event, data) => {
+        updateBufferProgress();
+        if (data?.stats?.total > 0) {
+          const fragPct = Math.min(99, Math.round((data.stats.loaded / data.stats.total) * 100));
+          if (fragPct > targetBufferPercentRef.current) {
+            targetBufferPercentRef.current = Math.max(targetBufferPercentRef.current, Math.round(fragPct * 0.75));
+          }
+        }
+      });
 
       hls.on(Hls.Events.ERROR, (event, data) => {
         if (data.details === 'bufferStalledError') {
           setIsBuffering(true);
+          updateBufferProgress();
           return;
         }
         if (data.details === 'bufferSeekOverHole') {
@@ -1425,6 +1503,9 @@ export default function VideoPlayer({
     if (!customInputUrl.trim()) return;
     setErrorMessage('');
     setIsBuffering(true);
+    setBufferPercent(0);
+    setDisplayBufferPercent(0);
+    targetBufferPercentRef.current = 0;
     const proxied = toPlayableUrl(customInputUrl.trim(), referer);
     setRawStreamUrl(customInputUrl.trim());
     setStreamUrl(proxied);
@@ -2082,8 +2163,19 @@ export default function VideoPlayer({
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={handleVideoEnded}
-          onWaiting={() => setIsBuffering(true)}
+          onWaiting={() => {
+            setIsBuffering(true);
+            updateBufferProgress();
+          }}
+          onSeeking={() => {
+            setIsBuffering(true);
+            updateBufferProgress();
+          }}
+          onProgress={updateBufferProgress}
           onPlaying={() => { 
+            updateBufferProgress();
+            targetBufferPercentRef.current = 100;
+            setDisplayBufferPercent(100);
             setIsBuffering(false); 
             setIsPlaying(true); 
             resetControlsTimeout(10000); 
@@ -2093,10 +2185,32 @@ export default function VideoPlayer({
             setIsBuffering(false); 
             resetControlsTimeout(30000); 
           }}
-          onCanPlay={() => setIsBuffering(false)}
-          onCanPlayThrough={() => setIsBuffering(false)}
-          onSeeked={() => setIsBuffering(false)}
-          onLoadedData={() => setIsBuffering(false)}
+          onCanPlay={() => {
+            updateBufferProgress();
+            if (videoRef.current && videoRef.current.readyState >= 3) {
+              targetBufferPercentRef.current = 100;
+              setDisplayBufferPercent(100);
+              setIsBuffering(false);
+            }
+          }}
+          onCanPlayThrough={() => {
+            updateBufferProgress();
+            targetBufferPercentRef.current = 100;
+            setDisplayBufferPercent(100);
+            setIsBuffering(false);
+          }}
+          onSeeked={() => {
+            updateBufferProgress();
+            if (videoRef.current && videoRef.current.readyState >= 3) {
+              setIsBuffering(false);
+            }
+          }}
+          onLoadedData={() => {
+            updateBufferProgress();
+            if (videoRef.current && videoRef.current.readyState >= 3) {
+              setIsBuffering(false);
+            }
+          }}
         >
           {playableSubtitles.map((sub, idx) => (
             <track
@@ -2759,20 +2873,72 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Center Buffering Spinner */}
+      {/* Center Buffering Spinner & Real-Time Circular Progress Meter */}
       {isBuffering && !errorMessage && (isPlaying || !videoRef.current || (videoRef.current && videoRef.current.readyState < 2 && currentTime === 0)) && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
-          <div className={`flex flex-col items-center gap-3 ${
-            gpuSettings?.enableBackdropBlur ? 'bg-black/40 backdrop-blur-sm' : 'bg-zinc-900/90'
-          } p-4 rounded-2xl ring-1 ring-white/10 shadow-2xl`}>
-            <Loader2 className="w-10 h-10 text-[#E50914] animate-spin drop-shadow-xl" />
-            <span className="text-xs font-semibold text-zinc-300 tracking-wider uppercase flex items-center gap-1.5">
-              {currentTime > 0 || (videoRef.current && videoRef.current.readyState >= 2)
-                ? `${currentLang.startsWith('zh') ? '緩衝中' : 'Buffering'} ${bufferPercent}%`
-                : (currentLang.startsWith('zh')
-                    ? `HLS 串流載入中${bufferPercent > 0 ? ` ${bufferPercent}%` : ''}`
-                    : `Loading HLS Stream...${bufferPercent > 0 ? ` ${bufferPercent}%` : ''}`)}
-            </span>
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30 animate-in fade-in duration-150">
+          <div className={`flex flex-col items-center gap-3.5 ${
+            gpuSettings?.enableBackdropBlur ? 'bg-black/60 backdrop-blur-md' : 'bg-zinc-950/95'
+          } px-7 py-5 rounded-3xl ring-1 ring-white/15 shadow-2xl min-w-[170px]`}>
+            {/* Animated Circular Buffer Progress Meter with Spinning Loader & Counter */}
+            <div className="relative w-16 h-16 flex items-center justify-center">
+              {/* Circular SVG Track & Animated Meter */}
+              <svg className="w-full h-full -rotate-90 transform drop-shadow-md" viewBox="0 0 64 64">
+                {/* Background Ring */}
+                <circle
+                  cx="32"
+                  cy="32"
+                  r="26"
+                  stroke="currentColor"
+                  strokeWidth="3.5"
+                  className="text-white/10"
+                  fill="transparent"
+                />
+                {/* Animated Buffer Progress Fill Ring (0 to 100%) */}
+                <circle
+                  cx="32"
+                  cy="32"
+                  r="26"
+                  stroke="url(#playerBufferGradient)"
+                  strokeWidth="3.5"
+                  strokeDasharray={163.36}
+                  strokeDashoffset={163.36 - (displayBufferPercent / 100) * 163.36}
+                  strokeLinecap="round"
+                  className="transition-[stroke-dashoffset] duration-150 ease-out"
+                  fill="transparent"
+                />
+                <defs>
+                  <linearGradient id="playerBufferGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#E50914" />
+                    <stop offset="100%" stopColor="#FF4D4D" />
+                  </linearGradient>
+                </defs>
+              </svg>
+
+              {/* Center Spinning Accent & Real-Time Percentage */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <Loader2 className="w-8 h-8 text-[#E50914]/75 animate-spin absolute" />
+                <span className="text-[13px] font-black font-mono text-white tracking-tighter drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] relative z-10">
+                  {displayBufferPercent}%
+                </span>
+              </div>
+            </div>
+
+            {/* Buffering Label & Animated Mini Progress Bar */}
+            <div className="flex flex-col items-center gap-1.5 w-full">
+              <span className="text-[11px] font-bold text-zinc-300 tracking-wider uppercase flex items-center gap-1.5">
+                {currentTime > 0 || (videoRef.current && videoRef.current.readyState >= 2)
+                  ? `${currentLang.startsWith('zh') ? '緩衝中' : 'Buffering'} ${displayBufferPercent}%`
+                  : (currentLang.startsWith('zh')
+                      ? `HLS 串流載入中 ${displayBufferPercent}%`
+                      : `Loading Stream ${displayBufferPercent}%`)}
+              </span>
+              <div className="w-24 bg-white/10 h-1 rounded-full overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-[#E50914] to-red-500 h-full transition-[width] duration-150 ease-out rounded-full"
+                  style={{ width: `${displayBufferPercent}%` }}
+                />
+              </div>
+            </div>
           </div>
         </div>
       )}
