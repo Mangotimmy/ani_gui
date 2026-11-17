@@ -184,6 +184,27 @@ const metadataListCache = new BoundedCache(300, 45 * 60 * 1000); // 45 min TTL
 const detailsCache = new BoundedCache(500, 30 * 60 * 1000); // 30 min TTL
 const searchCache = new BoundedCache(300, 15 * 60 * 1000); // 15 min TTL
 
+// Helper for fast pagination enrichment: waits briefly on page 1, non-blocking on page > 1
+// while updating metadataListCache once background title resolutions finish.
+async function enrichPaginatedList(mediaList, page = 1, cacheKey = null, wrapFn = null) {
+  if (!Array.isArray(mediaList) || mediaList.length === 0) return [];
+  const p = parseInt(page) || 1;
+  const budgetMs = p > 1 ? 0 : 1200;
+  const enriched = await enrichWithChineseTitlesAsync(mediaList, { budgetMs });
+  if (p > 1 && cacheKey) {
+    // Re-enrich in background after pending resolves settle so cache holds complete Chinese titles
+    setTimeout(() => {
+      try {
+        const updated = enrichWithChineseTitles(mediaList);
+        if (updated && updated.length > 0) {
+          metadataListCache.set(cacheKey, wrapFn ? wrapFn(updated) : updated);
+        }
+      } catch {}
+    }, 1800);
+  }
+  return enriched;
+}
+
 export async function getTrending(page = 1, perPage = 50) {
   const cacheKey = `trending_${page}_${perPage}`;
   const cached = metadataListCache.get(cacheKey);
@@ -199,7 +220,7 @@ export async function getTrending(page = 1, perPage = 50) {
     }
   `;
   const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
-  const result = await enrichWithChineseTitlesAsync(data?.Page?.media || [], { budgetMs: 2500 });
+  const result = await enrichPaginatedList(data?.Page?.media || [], page, cacheKey);
   if (result && result.length > 0) metadataListCache.set(cacheKey, result);
   return result;
 }
@@ -219,7 +240,7 @@ export async function getPopular(page = 1, perPage = 50) {
     }
   `;
   const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
-  const result = await enrichWithChineseTitlesAsync(data?.Page?.media || [], { budgetMs: 2500 });
+  const result = await enrichPaginatedList(data?.Page?.media || [], page, cacheKey);
   if (result && result.length > 0) metadataListCache.set(cacheKey, result);
   return result;
 }
@@ -239,7 +260,7 @@ export async function getTopRated(page = 1, perPage = 50) {
     }
   `;
   const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
-  const result = await enrichWithChineseTitlesAsync(data?.Page?.media || [], { budgetMs: 2500 });
+  const result = await enrichPaginatedList(data?.Page?.media || [], page, cacheKey);
   if (result && result.length > 0) metadataListCache.set(cacheKey, result);
   return result;
 }
@@ -259,7 +280,7 @@ export async function getUpcoming(page = 1, perPage = 50) {
     }
   `;
   const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
-  const result = await enrichWithChineseTitlesAsync(data?.Page?.media || [], { budgetMs: 2500 });
+  const result = await enrichPaginatedList(data?.Page?.media || [], page, cacheKey);
   if (result && result.length > 0) metadataListCache.set(cacheKey, result);
   return result;
 }
@@ -317,7 +338,7 @@ export async function getByGenre(genre, page = 1, perPage = 50) {
     }
   `;
   const data = await anilistQuery(query, { genre, page: parseInt(page), perPage: parseInt(perPage) });
-  const result = await enrichWithChineseTitlesAsync(data?.Page?.media || [], { budgetMs: 2500 });
+  const result = await enrichPaginatedList(data?.Page?.media || [], page, cacheKey);
   if (result && result.length > 0) metadataListCache.set(cacheKey, result);
   return result;
 }
@@ -1312,7 +1333,7 @@ export async function getPopularNow(page = 1, perPage = 50) {
     }
   `;
   const data = await anilistQuery(query, { page: parseInt(page), perPage: parseInt(perPage) });
-  const result = await enrichWithChineseTitlesAsync(data?.Page?.media || [], { budgetMs: 2500 });
+  const result = await enrichPaginatedList(data?.Page?.media || [], page, cacheKey);
   if (result && result.length > 0) metadataListCache.set(cacheKey, result);
   return result;
 }
@@ -1475,9 +1496,10 @@ export async function getCatalog({
     try {
       const data = await anilistQuery(studioQuery, { studio: cleanStudio, page: parseInt(page), perPage: parseInt(perPage) });
       const mediaNodes = data?.Studio?.media?.nodes || [];
+      const pageInfo = data?.Studio?.media?.pageInfo || { hasNextPage: false };
       const result = {
-        media: await enrichWithChineseTitlesAsync(mediaNodes, { budgetMs: 2500 }),
-        pageInfo: data?.Studio?.media?.pageInfo || { hasNextPage: false }
+        media: await enrichPaginatedList(mediaNodes, page, studioCacheKey, (m) => ({ media: m, pageInfo })),
+        pageInfo
       };
       if (result.media && result.media.length > 0) {
         metadataListCache.set(studioCacheKey, result);
@@ -1535,9 +1557,10 @@ export async function getCatalog({
 
   try {
     const data = await anilistQuery(query, variables);
+    const pageInfo = data?.Page?.pageInfo || { hasNextPage: false };
     const result = {
-      media: await enrichWithChineseTitlesAsync(data?.Page?.media || [], { budgetMs: 2500 }),
-      pageInfo: data?.Page?.pageInfo || { hasNextPage: false }
+      media: await enrichPaginatedList(data?.Page?.media || [], page, cacheKey, (m) => ({ media: m, pageInfo })),
+      pageInfo
     };
     if (result.media && result.media.length > 0) {
       metadataListCache.set(cacheKey, result);
@@ -1547,6 +1570,125 @@ export async function getCatalog({
     console.error('Failed to get seasonal catalog:', err.message);
     return { media: [], pageInfo: { hasNextPage: false } };
   }
+}
+
+function parseYouTubeLengthSeconds(lengthText = '') {
+  if (!lengthText || typeof lengthText !== 'string') return 0;
+  const parts = lengthText.trim().split(':').map(Number);
+  if (parts.some(Number.isNaN)) return 0;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] || 0;
+}
+
+// Scrape YouTube for official Anime OP (Opening) and ED (Ending) theme videos
+export async function fetchOfficialYouTubeThemes(titles = {}) {
+  const candidates = [
+    titles.native,
+    titles.romaji,
+    titles.english,
+    typeof titles === 'string' ? titles : ''
+  ].map(s => (s || '').trim()).filter(Boolean);
+
+  if (candidates.length === 0) return { op: [], ed: [] };
+  const primaryTitle = candidates[0];
+  const fallbackTitle = candidates[1] || primaryTitle;
+
+  const searchYouTubeTheme = async (themeType) => {
+    const isOp = themeType === 'OP';
+    const queries = [
+      isOp ? `${primaryTitle} ノンクレジットOP Opening` : `${primaryTitle} ノンクレジットED Ending`,
+      primaryTitle !== fallbackTitle
+        ? (isOp ? `${fallbackTitle} Anime Opening OP Creditless` : `${fallbackTitle} Anime Ending ED Creditless`)
+        : null
+    ].filter(Boolean);
+
+    const results = [];
+    const seenIds = new Set();
+
+    for (const q of queries) {
+      if (results.length >= 3) break;
+      try {
+        const ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}&sp=EgIQAQ%253D%253D`;
+        const res = await fetch(ytUrl, {
+          headers: {
+            'User-Agent': BROWSER_UA,
+            'Accept-Language': 'ja,zh-TW,en-US;q=0.8'
+          }
+        });
+        if (!res.ok) continue;
+        const html = await res.text();
+        const dataMatch = html.match(/ytInitialData\s*=\s*({.+?});<\/script>/);
+        if (!dataMatch) continue;
+        const json = JSON.parse(dataMatch[1]);
+        const contents = json?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
+
+        for (const item of contents) {
+          const v = item?.videoRenderer;
+          if (!v || !v.videoId || seenIds.has(v.videoId)) continue;
+          const vTitle = v.title?.runs?.[0]?.text || '';
+          const channel = v.ownerText?.runs?.[0]?.text || '';
+          const lengthSec = parseYouTubeLengthSeconds(v.lengthText?.simpleText || '');
+
+          // OP/ED TV size (~1:30) or full MV (~3:00-6:00)
+          if (lengthSec > 0 && (lengthSec < 45 || lengthSec > 420)) continue;
+
+          // Exclude fan covers, reactions, loops, compilations, karaoke, nightcore
+          if (/\b(cover|piano|guitar|bass|drum|violin|reaction|reacts|1\s*hour|loop|nightcore|karaoke|instrumental|8-?bit|fan\s*made|amv|mad|full\s*album|compilation|all\s*openings|all\s*endings|tier\s*list|歌ってみた|弾いてみた|叩いてみた|リアクション|ピアノ|ギター|ベース|カラオケ|耐久)\b/i.test(vTitle)) {
+            continue;
+          }
+
+          // Prevent cross-type pollution (e.g. ED appearing in OP search or vice versa)
+          const hasOpMarker = /\b(op\s*\d*|opening)\b|オープニング/i.test(vTitle);
+          const hasEdMarker = /\b(ed\s*\d*|ending)\b|エンディング/i.test(vTitle);
+          if (isOp && hasEdMarker && !hasOpMarker) continue;
+          if (!isOp && hasOpMarker && !hasEdMarker) continue;
+
+          // Require either theme marker, creditless marker, or song bracket notation
+          const isThemeLike = hasOpMarker || hasEdMarker || /ノンクレジット|ノンテロップ|creditless|non-credit|主題歌|music\s*video|\bmv\b|「.+?」/i.test(vTitle);
+          if (!isThemeLike) continue;
+
+          seenIds.add(v.videoId);
+          const seq = results.length + 1;
+          const songMatch = vTitle.match(/「([^」]+)」/);
+          const displayTitle = songMatch ? `${songMatch[1]} — ${vTitle}` : vTitle;
+          const thumbJpg = `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+          const thumbWebp = `https://i.ytimg.com/vi_webp/${v.videoId}/hqdefault.webp`;
+
+          results.push({
+            id: v.videoId,
+            site: 'youtube',
+            type: themeType,
+            sequence: seq,
+            tag: `${themeType} ${seq}`,
+            title: displayTitle,
+            artist: channel,
+            videoUrl: `https://www.youtube.com/watch?v=${v.videoId}`,
+            embedUrl: `https://www.youtube-nocookie.com/embed/${v.videoId}?autoplay=1&rel=0`,
+            thumbnail: thumbJpg,
+            thumbnails: {
+              jpg: thumbJpg,
+              webp: thumbWebp,
+              avif: `/api/proxy/image?url=${encodeURIComponent(thumbJpg)}&format=avif`
+            },
+            resolution: 1080
+          });
+
+          if (results.length >= 4) break;
+        }
+      } catch (err) {
+        // Ignore individual query error and continue
+      }
+    }
+    return results;
+  };
+
+  const [op, ed] = await Promise.all([
+    searchYouTubeTheme('OP'),
+    searchYouTubeTheme('ED')
+  ]);
+
+  return { op, ed };
 }
 
 // Scrape YouTube for multiple official anime PVs, teasers, and trailers
@@ -1614,12 +1756,15 @@ export async function fetchOfficialYouTubePVs(searchTitle) {
 // In-memory cache for media videos (PV, OP, ED) - Capped at 300 entries, 24h TTL
 const mediaVideosCache = new BoundedCache(300, 24 * 60 * 60 * 1000);
 
-export async function getAnimeMediaVideos(animeId, romajiTitle = '', englishTitle = '') {
+export async function getAnimeMediaVideos(animeId, romajiTitle = '', englishTitle = '', nativeTitle = '') {
   const id = parseInt(animeId);
   if (!id) return { trailers: [], themes: { op: [], ed: [] } };
 
   if (mediaVideosCache.has(id)) {
-    return mediaVideosCache.get(id);
+    const cached = mediaVideosCache.get(id);
+    if ((cached?.themes?.op?.length || 0) + (cached?.themes?.ed?.length || 0) > 0) {
+      return cached;
+    }
   }
 
   const result = {
@@ -1650,7 +1795,10 @@ export async function getAnimeMediaVideos(animeId, romajiTitle = '', englishTitl
       });
     }
 
-    const titleToSearch = romajiTitle || animeDetails?.title?.romaji || englishTitle || animeDetails?.title?.english || '';
+    const resolvedNative = nativeTitle || animeDetails?.title?.native || '';
+    const resolvedRomaji = romajiTitle || animeDetails?.title?.romaji || '';
+    const resolvedEnglish = englishTitle || animeDetails?.title?.english || '';
+    const titleToSearch = resolvedRomaji || resolvedEnglish || resolvedNative || '';
 
     // 2. Extract multiple official PVs & Trailers from YouTube
     if (titleToSearch) {
@@ -1668,18 +1816,27 @@ export async function getAnimeMediaVideos(animeId, romajiTitle = '', englishTitl
       }
     }
 
-    // 2. Fetch OP and ED from AnimeThemes API
+    // 3. Fetch OP and ED from AnimeThemes API (with fast timeout & JSON Content-Type validation)
     try {
+      const fetchJsonSafe = async (url) => {
+        const res = await fetch(url, {
+          headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(3500)
+        });
+        if (!res.ok) return null;
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('json')) return null;
+        return await res.json();
+      };
+
       let themeUrl = `https://api.animethemes.moe/anime?filter[has]=resources&filter[site]=AniList&filter[external_id]=${id}&include=animethemes.animethemeentries.videos,animethemes.song`;
-      let res = await fetch(themeUrl, { headers: { 'User-Agent': 'AniFlix/1.0' } });
-      let themeData = await res.json();
+      let themeData = await fetchJsonSafe(themeUrl);
       let themeAnime = themeData?.anime?.[0];
 
       // Fallback: search by title
       if (!themeAnime && titleToSearch) {
         themeUrl = `https://api.animethemes.moe/anime?filter[name]=${encodeURIComponent(titleToSearch)}&include=animethemes.animethemeentries.videos,animethemes.song`;
-        res = await fetch(themeUrl, { headers: { 'User-Agent': 'AniFlix/1.0' } });
-        themeData = await res.json();
+        themeData = await fetchJsonSafe(themeUrl);
         themeAnime = themeData?.anime?.[0];
       }
 
@@ -1690,6 +1847,7 @@ export async function getAnimeMediaVideos(animeId, romajiTitle = '', englishTitl
 
           const themeEntry = {
             id: t.id,
+            site: 'animethemes',
             type: t.type, // 'OP' or 'ED'
             sequence: t.sequence || 1,
             tag: `${t.type} ${t.sequence || 1}`,
@@ -1708,6 +1866,21 @@ export async function getAnimeMediaVideos(animeId, romajiTitle = '', englishTitl
       }
     } catch (themeErr) {
       console.warn(`[Metadata] AnimeThemes fetch error for ${id}:`, themeErr.message);
+    }
+
+    // 4. Resilient YouTube OP/ED Fallback if AnimeThemes returned empty or 503
+    if (result.themes.op.length === 0 && result.themes.ed.length === 0 && (resolvedNative || resolvedRomaji || resolvedEnglish)) {
+      try {
+        const ytThemes = await fetchOfficialYouTubeThemes({
+          native: resolvedNative,
+          romaji: resolvedRomaji,
+          english: resolvedEnglish
+        });
+        if (ytThemes.op.length > 0) result.themes.op.push(...ytThemes.op);
+        if (ytThemes.ed.length > 0) result.themes.ed.push(...ytThemes.ed);
+      } catch (ytThemeErr) {
+        console.warn(`[Metadata] YouTube OP/ED fallback error for ${id}:`, ytThemeErr.message);
+      }
     }
 
     mediaVideosCache.set(id, result);

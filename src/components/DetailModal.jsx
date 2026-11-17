@@ -164,7 +164,8 @@ export default function DetailModal({
     try {
       const romaji = anime.title?.romaji || '';
       const english = anime.title?.english || '';
-      const res = await fetch(`/api/anime/${anime.id}/media-videos?romaji=${encodeURIComponent(romaji)}&english=${encodeURIComponent(english)}`);
+      const native = anime.title?.native || '';
+      const res = await fetch(`/api/anime/${anime.id}/media-videos?romaji=${encodeURIComponent(romaji)}&english=${encodeURIComponent(english)}&native=${encodeURIComponent(native)}`);
       const data = await res.json();
       if (data.success) {
         setMediaVideos({
@@ -428,16 +429,26 @@ export default function DetailModal({
                 />
               )}
 
-              {/* 2. AnimeThemes OP / ED Video (WebM) */}
+              {/* 2. AnimeThemes / YouTube OP & ED Video */}
               {activeMedia.type === 'theme' && (
-                <video
-                  src={activeMedia.url}
-                  controls
-                  autoPlay
-                  playsInline
-                  disableRemotePlayback
-                  className="w-full h-full object-contain bg-black [transform:translateZ(0)]"
-                />
+                (activeMedia.site === 'youtube' || activeMedia.embedUrl || (activeMedia.url && activeMedia.url.includes('youtube.com'))) ? (
+                  <iframe
+                    src={activeMedia.embedUrl || `https://www.youtube-nocookie.com/embed/${activeMedia.id}?autoplay=1&rel=0&modestbranding=1`}
+                    title={activeMedia.title || activeMedia.tag || "Theme Video"}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    className="w-full h-full border-0"
+                  />
+                ) : (
+                  <video
+                    src={activeMedia.url}
+                    controls
+                    autoPlay
+                    playsInline
+                    disableRemotePlayback
+                    className="w-full h-full object-contain bg-black [transform:translateZ(0)]"
+                  />
+                )
               )}
 
               {/* Video Overlay Badges & Controls */}
@@ -1214,6 +1225,9 @@ export default function DetailModal({
                             key={op.id || op.tag}
                             onClick={() => setActiveMedia({
                               type: 'theme',
+                              id: op.id,
+                              site: op.site,
+                              embedUrl: op.embedUrl,
                               url: op.videoUrl,
                               title: op.title,
                               tag: op.tag
@@ -1255,6 +1269,9 @@ export default function DetailModal({
                             key={ed.id || ed.tag}
                             onClick={() => setActiveMedia({
                               type: 'theme',
+                              id: ed.id,
+                              site: ed.site,
+                              embedUrl: ed.embedUrl,
                               url: ed.videoUrl,
                               title: ed.title,
                               tag: ed.tag

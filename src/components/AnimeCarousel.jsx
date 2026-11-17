@@ -20,9 +20,70 @@ function AnimeCarousel({
   isRecommendation = false
 }) {
   const rowRef = useRef(null);
+  const autoScrollRafRef = useRef(null);
+  const autoScrollDirRef = useRef(null);
+  const loadMoreStateRef = useRef({ onLoadMore, isLoadingMore, hasMore });
+
+  React.useEffect(() => {
+    loadMoreStateRef.current = { onLoadMore, isLoadingMore, hasMore };
+  }, [onLoadMore, isLoadingMore, hasMore]);
+
+  const stopAutoScroll = React.useCallback(() => {
+    autoScrollDirRef.current = null;
+    if (autoScrollRafRef.current) {
+      cancelAnimationFrame(autoScrollRafRef.current);
+      autoScrollRafRef.current = null;
+    }
+    if (rowRef.current) {
+      rowRef.current.style.scrollBehavior = '';
+    }
+  }, []);
+
+  const startAutoScroll = React.useCallback((direction) => {
+    stopAutoScroll();
+    autoScrollDirRef.current = direction;
+    if (!rowRef.current) return;
+    // Disable CSS smooth scroll behavior during per-frame rAF scrolling to prevent jitter
+    rowRef.current.style.scrollBehavior = 'auto';
+
+    let lastTime = performance.now();
+    const SPEED_PX_PER_SEC = 560; // Smooth ~9.3px per frame @ 60fps
+
+    const step = (now) => {
+      if (!autoScrollDirRef.current || !rowRef.current) return;
+      const dt = Math.min((now - lastTime) / 1000, 0.05);
+      lastTime = now;
+
+      const el = rowRef.current;
+      const delta = ( autoScrollDirRef.current === 'left' ? -1 : 1 ) * SPEED_PX_PER_SEC * dt;
+      el.scrollLeft += delta;
+
+      if (autoScrollDirRef.current === 'right') {
+        const { onLoadMore: loadFn, isLoadingMore: loading, hasMore: more } = loadMoreStateRef.current;
+        if (loadFn && !loading && more && el.scrollLeft + el.clientWidth >= el.scrollWidth - 600) {
+          loadFn();
+        }
+      }
+
+      // Stop if reached extreme left boundary
+      if (autoScrollDirRef.current === 'left' && el.scrollLeft <= 0) {
+        stopAutoScroll();
+        return;
+      }
+
+      autoScrollRafRef.current = requestAnimationFrame(step);
+    };
+
+    autoScrollRafRef.current = requestAnimationFrame(step);
+  }, [stopAutoScroll]);
+
+  React.useEffect(() => {
+    return () => stopAutoScroll();
+  }, [stopAutoScroll]);
 
   const scroll = (direction) => {
     if (rowRef.current) {
+      rowRef.current.style.scrollBehavior = 'smooth';
       const { scrollLeft, clientWidth, scrollWidth } = rowRef.current;
       const scrollAmount = clientWidth * 0.75;
       const targetLeft = direction === 'left' ? scrollLeft - scrollAmount : scrollLeft + scrollAmount;
@@ -103,9 +164,12 @@ function AnimeCarousel({
 
       {/* Relative Carousel Container with Arrows */}
       <div className="relative">
-        {/* Left Arrow Button */}
+        {/* Left Arrow Button (supports Hover Auto-Scroll + Click Jump) */}
         <button
           onClick={() => scroll('left')}
+          onMouseEnter={() => startAutoScroll('left')}
+          onMouseLeave={stopAutoScroll}
+          onBlur={stopAutoScroll}
           className="absolute left-0 top-1/2 -translate-y-1/2 z-30 w-10 h-28 bg-black/70 hover:bg-black/90 text-white rounded-r-md flex items-center justify-center opacity-0 group-hover/row:opacity-100 transition-[opacity,background-color] duration-200 backdrop-blur-sm shadow-xl"
           aria-label="Scroll left"
         >
@@ -141,9 +205,12 @@ function AnimeCarousel({
           )}
         </div>
 
-        {/* Right Arrow Button */}
+        {/* Right Arrow Button (supports Hover Auto-Scroll + Click Jump) */}
         <button
           onClick={() => scroll('right')}
+          onMouseEnter={() => startAutoScroll('right')}
+          onMouseLeave={stopAutoScroll}
+          onBlur={stopAutoScroll}
           className="absolute right-0 top-1/2 -translate-y-1/2 z-30 w-10 h-28 bg-black/70 hover:bg-black/90 text-white rounded-l-md flex items-center justify-center opacity-0 group-hover/row:opacity-100 transition-[opacity,background-color] duration-200 backdrop-blur-sm shadow-xl"
           aria-label="Scroll right"
         >

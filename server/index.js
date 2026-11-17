@@ -431,8 +431,8 @@ app.get('/api/anime/:titleOrId/episodes', async (req, res) => {
 // Media Videos (PV Trailers, OP & ED Themes)
 app.get('/api/anime/:id/media-videos', async (req, res) => {
   try {
-    const { romaji = '', english = '' } = req.query;
-    const mediaVideos = await getAnimeMediaVideos(req.params.id, romaji, english);
+    const { romaji = '', english = '', native = '' } = req.query;
+    const mediaVideos = await getAnimeMediaVideos(req.params.id, romaji, english, native);
     res.json({ success: true, ...mediaVideos });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message, trailers: [], themes: { op: [], ed: [] } });

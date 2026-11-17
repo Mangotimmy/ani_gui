@@ -86,17 +86,23 @@ export function getAnimeBannerUrl(anime, format = '') {
  */
 export function getThumbnailSources(target) {
   if (!target) {
-    return { avif: '', webp: '', jpg: '', fallback: '' };
+    return { avif: '', webp: '', jpg: '', fallback: '', placeholder: '' };
   }
 
   // If already an object containing precomputed thumbnails (e.g. from YouTube PV scraper)
   if (typeof target === 'object' && target.thumbnails) {
     const t = target.thumbnails;
+    const baseThumb = t.jpg || target.thumbnail || '';
+    const ytMatchObj = baseThumb.match(/(?:i\.ytimg\.com\/(?:vi|vi_webp)\/|youtube\.com\/embed\/|youtu\.be\/|v=)([a-zA-Z0-9_-]{11})/);
+    const lqip = ytMatchObj
+      ? toCachedImageUrl(`https://i.ytimg.com/vi/${ytMatchObj[1]}/default.jpg`, 'webp')
+      : toCachedImageUrl(t.webp || baseThumb, 'webp');
     return {
       avif: toCachedImageUrl(t.avif || t.jpg || target.thumbnail, 'avif'),
       webp: toCachedImageUrl(t.webp || t.jpg || target.thumbnail, 'webp'),
       jpg: toCachedImageUrl(t.jpg || target.thumbnail, 'jpg'),
-      fallback: toCachedImageUrl(t.jpg || target.thumbnail)
+      fallback: toCachedImageUrl(t.jpg || target.thumbnail),
+      placeholder: lqip
     };
   }
 
@@ -106,12 +112,12 @@ export function getThumbnailSources(target) {
   }
 
   if (typeof target !== 'string') {
-    return { avif: '', webp: '', jpg: '', fallback: '' };
+    return { avif: '', webp: '', jpg: '', fallback: '', placeholder: '' };
   }
 
   const trimmed = target.trim();
   if (!trimmed) {
-    return { avif: '', webp: '', jpg: '', fallback: '' };
+    return { avif: '', webp: '', jpg: '', fallback: '', placeholder: '' };
   }
 
   // YouTube thumbnail URL pattern detection (extract 11-char video ID)
@@ -120,29 +126,42 @@ export function getThumbnailSources(target) {
     const videoId = ytMatch[1];
     const jpgUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
     const webpUrl = `https://i.ytimg.com/vi_webp/${videoId}/hqdefault.webp`;
+    const tinyUrl = `https://i.ytimg.com/vi/${videoId}/default.jpg`;
     return {
       avif: toCachedImageUrl(jpgUrl, 'avif'),
       webp: toCachedImageUrl(webpUrl, 'webp'),
       jpg: toCachedImageUrl(jpgUrl, 'jpg'),
-      fallback: toCachedImageUrl(jpgUrl)
+      fallback: toCachedImageUrl(jpgUrl),
+      placeholder: toCachedImageUrl(tinyUrl, 'webp')
     };
   }
 
   // General image URL: return multi-format candidate proxy URLs
+  // Derive a lower-res AniList medium cover URL if possible for Facebook LQIP blur-up
+  const anilistMedium = trimmed.includes('/cover/large/')
+    ? trimmed.replace('/cover/large/', '/cover/medium/')
+    : trimmed;
+
   return {
     avif: toCachedImageUrl(trimmed, 'avif'),
     webp: toCachedImageUrl(trimmed, 'webp'),
     jpg: toCachedImageUrl(trimmed, 'jpg'),
-    fallback: toCachedImageUrl(trimmed)
+    fallback: toCachedImageUrl(trimmed),
+    placeholder: toCachedImageUrl(anilistMedium, 'webp')
   };
 }
 
 /**
- * Returns AVIF, WebP, and JPG thumbnail sources for an anime's cover.
+ * Returns AVIF, WebP, JPG, and LQIP placeholder thumbnail sources for an anime's cover.
  */
 export function getAnimeCoverSources(anime, preferred = 'large') {
   const baseCover = getAnimeCoverUrl(anime, preferred);
-  return getThumbnailSources(baseCover);
+  const sources = getThumbnailSources(baseCover);
+  const mediumUrl = anime?.coverImage?.medium || anime?.coverImage?.large || '';
+  if (mediumUrl) {
+    sources.placeholder = toCachedImageUrl(mediumUrl, 'webp');
+  }
+  return sources;
 }
 
 /**

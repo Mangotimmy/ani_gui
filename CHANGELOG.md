@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.9.0 (2026-11-17)
+
+* Release v2.9.0
+
 ## 2.7.0 — desktop integration, catalog ranges, trending & Chinese-localization
 
 ### Windows / desktop

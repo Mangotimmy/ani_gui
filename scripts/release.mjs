@@ -60,24 +60,111 @@ function runGit(cmd, options = {}) {
   }
 }
 
-function bumpSemver(current, type) {
-  const parts = current.replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+function bumpSemver(current, type, preid = 'beta') {
+  const clean = current.replace(/^v/, '');
+  const [corePart, prePart] = clean.split('-');
+  const parts = corePart.split('.').map(n => parseInt(n, 10) || 0);
   while (parts.length < 3) parts.push(0);
 
   let [major, minor, patch] = parts;
-  if (type === 'major') {
+  const t = type.toLowerCase();
+  if (t === 'major') {
     major += 1;
     minor = 0;
     patch = 0;
-  } else if (type === 'minor') {
+    return `${major}.${minor}.${patch}`;
+  } else if (t === 'minor') {
     minor += 1;
     patch = 0;
-  } else if (type === 'patch') {
+    return `${major}.${minor}.${patch}`;
+  } else if (t === 'patch') {
     patch += 1;
+    return `${major}.${minor}.${patch}`;
+  } else if (t === 'prerelease' || t === 'prepatch' || t === 'preminor' || t === 'premajor') {
+    if (t === 'premajor') {
+      major += 1; minor = 0; patch = 0;
+      return `${major}.${minor}.${patch}-${preid}.1`;
+    }
+    if (t === 'preminor') {
+      minor += 1; patch = 0;
+      return `${major}.${minor}.${patch}-${preid}.1`;
+    }
+    if (t === 'prepatch') {
+      patch += 1;
+      return `${major}.${minor}.${patch}-${preid}.1`;
+    }
+    // prerelease
+    if (prePart) {
+      const m = prePart.match(/^([a-zA-Z0-9_-]+?)(?:\.(\d+))?$/);
+      if (m && m[1] === preid) {
+        const nextNum = (parseInt(m[2] || '0', 10) || 0) + 1;
+        return `${major}.${minor}.${patch}-${preid}.${nextNum}`;
+      }
+      return `${major}.${minor}.${patch}-${preid}.1`;
+    }
+    patch += 1;
+    return `${major}.${minor}.${patch}-${preid}.1`;
   } else {
     throw new Error(`Unknown bump type: ${type}`);
   }
-  return `${major}.${minor}.${patch}`;
+}
+
+export function updateVersionFiles(targetVersion, { isDryRun = false, updateChangelog = false, commitNotes = '' } = {}) {
+  const pkg = JSON.parse(fs.readFileSync(PKG_PATH, 'utf-8'));
+  const currentVersion = pkg.version || '1.0.0';
+
+  if (targetVersion !== currentVersion) {
+    if (!isDryRun) {
+      pkg.version = targetVersion;
+      fs.writeFileSync(PKG_PATH, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+      logSuccess(`Updated package.json: ${currentVersion} -> ${targetVersion}`);
+
+      if (fs.existsSync(PKG_LOCK_PATH)) {
+        try {
+          const pkgLock = JSON.parse(fs.readFileSync(PKG_LOCK_PATH, 'utf-8'));
+          pkgLock.version = targetVersion;
+          if (pkgLock.packages && pkgLock.packages['']) {
+            pkgLock.packages[''].version = targetVersion;
+          }
+          fs.writeFileSync(PKG_LOCK_PATH, JSON.stringify(pkgLock, null, 2) + '\n', 'utf-8');
+          logSuccess(`Updated package-lock.json to ${targetVersion}`);
+        } catch (e) {
+          logWarn(`Could not update package-lock.json: ${e.message}`);
+        }
+      }
+    } else {
+      log(`[Dry-Run] Would update package.json & package-lock.json: ${currentVersion} -> ${targetVersion}`);
+    }
+  }
+
+  if (updateChangelog) {
+    const changelogPath = path.join(ROOT_DIR, 'CHANGELOG.md');
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const notesBlock = commitNotes && commitNotes.trim()
+      ? commitNotes.trim()
+      : `- Release v${targetVersion}`;
+    const newSection = `## ${targetVersion} (${dateStr})\n\n${notesBlock}\n\n`;
+
+    if (!isDryRun) {
+      if (fs.existsSync(changelogPath)) {
+        const existing = fs.readFileSync(changelogPath, 'utf-8');
+        if (!existing.includes(`## ${targetVersion}`)) {
+          const updated = existing.startsWith('# Changelog')
+            ? existing.replace(/^# Changelog\r?\n+/, `# Changelog\n\n${newSection}`)
+            : `# Changelog\n\n${newSection}${existing}`;
+          fs.writeFileSync(changelogPath, updated, 'utf-8');
+          logSuccess(`Updated CHANGELOG.md with section ## ${targetVersion}`);
+        }
+      } else {
+        fs.writeFileSync(changelogPath, `# Changelog\n\n${newSection}`, 'utf-8');
+        logSuccess(`Created CHANGELOG.md with section ## ${targetVersion}`);
+      }
+    } else {
+      log(`[Dry-Run] Would prepend ## ${targetVersion} (${dateStr}) to CHANGELOG.md`);
+    }
+  }
+
+  return { previousVersion: currentVersion, targetVersion };
 }
 
 function printHelp() {
@@ -87,29 +174,32 @@ ${colors.bright}${colors.cyan}AniFlix Git Auto Push & Tag Script${colors.reset}
 ${colors.bright}USAGE:${colors.reset}
   npm run release [version|bump] [options]
   node scripts/release.mjs [version|bump] [options]
+  .\\scripts\\git-push-tag.ps1 [-Gui | -Tui | options]
 
 ${colors.bright}ARGUMENTS:${colors.reset}
-  patch               Increment patch version (e.g. 2.7.0 -> 2.7.1)
-  minor               Increment minor version (e.g. 2.7.0 -> 2.8.0)
-  major               Increment major version (e.g. 2.7.0 -> 3.0.0)
-  <version>           Explicit semver (e.g. 2.7.0 or v2.7.0)
+  patch               Increment patch version (e.g. 2.7.5 -> 2.7.6)
+  minor               Increment minor version (e.g. 2.7.5 -> 2.8.0)
+  major               Increment major version (e.g. 2.7.5 -> 3.0.0)
+  prerelease          Increment pre-release version (e.g. 2.7.6-beta.1)
+  prepatch|preminor|premajor  Bump and start pre-release tag
+  <version>           Explicit semver (e.g. 2.8.0 or v2.8.0-rc.1)
   (none)              Use the version currently defined in package.json
 
 ${colors.bright}OPTIONS:${colors.reset}
   -m, --message <msg> Custom commit message
   -r, --remote <name> Git remote name (default: origin)
+  --preid <id>        Pre-release identifier: alpha, beta, rc, next (default: beta)
+  --version-only      Only update version in package.json/package-lock.json/CHANGELOG.md
+  --changelog         Prepend release notes section to CHANGELOG.md
+  --force-tag         Overwrite existing git tag (-f) if it already exists
+  --force-push        Push with --force-with-lease
+  --pull-rebase       Run git pull --rebase before pushing
+  --build             Run frontend production build (vite build) before committing
   -d, --dry-run       Preview commands without modifying git or pushing
   --no-commit         Do not create a git commit; only tag and push
+  --no-tag            Do not create a git tag
   --no-push           Create commit and tag, but do not git push
   -h, --help          Show this help message
-
-${colors.bright}EXAMPLES:${colors.reset}
-  npm run release                      # Auto-stage, commit, tag current version, and push
-  npm run release patch                # Bump patch, commit, tag, and push
-  npm run release minor                # Bump minor, commit, tag, and push
-  npm run release 2.8.0                # Set version 2.8.0, commit, tag, and push
-  npm run release -- -m "feat: updates" # Custom commit message
-  npm run release -- --dry-run         # Dry run preview
 `);
 }
 
@@ -124,11 +214,24 @@ async function main() {
   const isDryRun = rawArgs.includes('-d') || rawArgs.includes('--dry-run');
   const noPush = rawArgs.includes('--no-push');
   const noCommit = rawArgs.includes('--no-commit');
+  const noTag = rawArgs.includes('--no-tag');
+  const versionOnly = rawArgs.includes('--version-only');
+  const updateChangelog = rawArgs.includes('--changelog');
+  const forceTag = rawArgs.includes('--force-tag');
+  const forcePush = rawArgs.includes('--force-push');
+  const pullRebase = rawArgs.includes('--pull-rebase');
+  const buildFirst = rawArgs.includes('--build');
 
   let remote = 'origin';
   const remoteIdx = rawArgs.findIndex(a => a === '-r' || a === '--remote');
   if (remoteIdx !== -1 && rawArgs[remoteIdx + 1]) {
     remote = rawArgs[remoteIdx + 1];
+  }
+
+  let preid = 'beta';
+  const preidIdx = rawArgs.findIndex(a => a === '--preid');
+  if (preidIdx !== -1 && rawArgs[preidIdx + 1]) {
+    preid = rawArgs[preidIdx + 1];
   }
 
   let customMessage = '';
@@ -137,7 +240,8 @@ async function main() {
     customMessage = rawArgs[msgIdx + 1];
   }
 
-  const positional = rawArgs.filter(a => !a.startsWith('-') && a !== remote && a !== customMessage);
+  const consumedValues = new Set([remote, customMessage, preid].filter(Boolean));
+  const positional = rawArgs.filter(a => !a.startsWith('-') && !consumedValues.has(a));
   const bumpArg = positional[0] ? positional[0].trim() : '';
 
   log(`\n${colors.bright}${colors.magenta}=== AniFlix Git Auto Push, Tag & Release Tool ===${colors.reset}\n`);
@@ -160,8 +264,8 @@ async function main() {
   logSuccess(`Current Git branch: ${colors.cyan}${currentBranch}${colors.reset}`);
 
   // Check remote
-  const remotes = runGit('git remote', { silent: true }).split(/\r?\n/).map(s => s.trim());
-  if (!remotes.includes(remote)) {
+  const remotes = runGit('git remote', { silent: true }).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (remotes.length > 0 && !remotes.includes(remote)) {
     logWarn(`Remote "${remote}" not found in remotes (${remotes.join(', ')}).`);
     remote = remotes[0] || 'origin';
     log(`Falling back to remote "${remote}".`);
@@ -178,10 +282,11 @@ async function main() {
   const currentVersion = pkg.version || '1.0.0';
   let targetVersion = currentVersion;
 
-  if (['patch', 'minor', 'major'].includes(bumpArg.toLowerCase())) {
-    targetVersion = bumpSemver(currentVersion, bumpArg.toLowerCase());
+  const bumpTypes = ['patch', 'minor', 'major', 'prerelease', 'prepatch', 'preminor', 'premajor'];
+  if (bumpTypes.includes(bumpArg.toLowerCase())) {
+    targetVersion = bumpSemver(currentVersion, bumpArg.toLowerCase(), preid);
     log(`Bumping version (${bumpArg}): ${colors.yellow}${currentVersion}${colors.reset} -> ${colors.green}${targetVersion}${colors.reset}`);
-  } else if (bumpArg) {
+  } else if (bumpArg && bumpArg.toLowerCase() !== 'keep') {
     targetVersion = bumpArg.replace(/^v/, '');
     if (!/^\d+\.\d+\.\d+.*$/.test(targetVersion)) {
       logError(`Invalid semver format: "${bumpArg}". Expected format: X.Y.Z (e.g. 2.7.0)`);
@@ -192,32 +297,40 @@ async function main() {
     log(`Using current version: ${colors.green}${targetVersion}${colors.reset}`);
   }
 
-  // Update package.json and package-lock.json if version changed
-  if (targetVersion !== currentVersion) {
-    if (!isDryRun) {
-      pkg.version = targetVersion;
-      fs.writeFileSync(PKG_PATH, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
-      logSuccess(`Updated package.json to ${targetVersion}`);
+  const tagName = `v${targetVersion}`;
 
-      if (fs.existsSync(PKG_LOCK_PATH)) {
-        try {
-          const pkgLock = JSON.parse(fs.readFileSync(PKG_LOCK_PATH, 'utf-8'));
-          pkgLock.version = targetVersion;
-          if (pkgLock.packages && pkgLock.packages['']) {
-            pkgLock.packages[''].version = targetVersion;
-          }
-          fs.writeFileSync(PKG_LOCK_PATH, JSON.stringify(pkgLock, null, 2) + '\n', 'utf-8');
-          logSuccess(`Updated package-lock.json to ${targetVersion}`);
-        } catch (e) {
-          logWarn(`Could not update package-lock.json: ${e.message}`);
-        }
-      }
+  // Extract commit notes from previous tag early so CHANGELOG.md and tag can both use them
+  let commitNotes = '';
+  try {
+    const allTags = runGit('git tag --sort=-creatordate', { silent: true, ignoreError: true })
+      .split(/\r?\n/)
+      .map(t => t.trim())
+      .filter(t => t && t !== tagName);
+    const prevTag = allTags[0];
+    if (prevTag) {
+      log(`Previous tag detected: ${colors.yellow}${prevTag}${colors.reset}`);
+      commitNotes = runGit(`git log --pretty=format:"* %s (%h)" "${prevTag}..HEAD"`, { silent: true, ignoreError: true });
     } else {
-      log(`[Dry-Run] Would update package.json version to ${targetVersion}`);
+      commitNotes = runGit('git log --pretty=format:"* %s (%h)" -n 30', { silent: true, ignoreError: true });
     }
+  } catch {}
+
+  updateVersionFiles(targetVersion, { isDryRun, updateChangelog, commitNotes });
+
+  if (versionOnly) {
+    logSuccess(`Version update complete (${currentVersion} -> ${targetVersion}). Exiting (--version-only).`);
+    return;
   }
 
-  const tagName = `v${targetVersion}`;
+  if (buildFirst) {
+    logStep('Build', 'Running production build (vite build)...');
+    if (!isDryRun) {
+      execSync('node ./node_modules/vite/bin/vite.js build', { cwd: ROOT_DIR, stdio: 'inherit' });
+      logSuccess('Production build succeeded.');
+    } else {
+      log('[Dry-Run] Would run: vite build');
+    }
+  }
 
   // 3. Stage & Commit Changes
   logStep('3/5', 'Checking working tree & committing...');
@@ -242,55 +355,41 @@ async function main() {
 
   // 4. Git Tag & Commit Notes
   logStep('4/5', `Checking and creating git tag "${tagName}"...`);
-
-  // Extract commit notes from previous tag
-  let commitNotes = '';
-  try {
-    const allTags = runGit('git tag --sort=-creatordate', { silent: true, ignoreError: true })
-      .split(/\r?\n/)
-      .map(t => t.trim())
-      .filter(t => t && t !== tagName);
-    const prevTag = allTags[0];
-    if (prevTag) {
-      log(`Previous tag detected: ${colors.yellow}${prevTag}${colors.reset}`);
-      commitNotes = runGit(`git log --pretty=format:"* %s (%h)" "${prevTag}..HEAD"`, { silent: true, ignoreError: true });
-    } else {
-      commitNotes = runGit('git log --pretty=format:"* %s (%h)" -n 30', { silent: true, ignoreError: true });
-    }
+  if (noTag) {
+    logWarn('--no-tag specified. Skipping tag creation.');
+  } else {
     if (commitNotes) {
       log(`\n${colors.cyan}Release Notes (Commits):${colors.reset}`);
       console.log(commitNotes.split('\n').map(l => `  ${l}`).join('\n') + '\n');
     }
-  } catch (err) {
-    // Non-fatal
-  }
 
-  const existingTags = runGit(`git tag -l "${tagName}"`, { silent: true });
-  const tagExists = existingTags.split(/\r?\n/).some(t => t.trim() === tagName);
+    const existingTags = runGit(`git tag -l "${tagName}"`, { silent: true });
+    const tagExists = existingTags.split(/\r?\n/).some(t => t.trim() === tagName);
 
-  if (tagExists) {
-    logWarn(`Git tag "${tagName}" already exists.`);
-    // Check if the tag points to current HEAD
-    const headHash = runGit('git rev-parse HEAD', { silent: true, ignoreError: true });
-    const tagHash = runGit(`git rev-parse "${tagName}^{commit}"`, { silent: true, ignoreError: true });
-    if (headHash === tagHash) {
-      logSuccess(`Tag "${tagName}" is already pointing to current HEAD.`);
-    } else {
-      logWarn(`Tag "${tagName}" points to commit ${tagHash?.slice(0, 7)}, HEAD is ${headHash?.slice(0, 7)}.`);
-    }
-  } else {
-    const fullTagMsg = `Release ${tagName}${commitNotes ? `\n\nCommits in this release:\n${commitNotes}` : ''}`;
-    if (!isDryRun) {
-      const tempMsgPath = path.join(ROOT_DIR, '.tmp_tag_msg.txt');
-      try {
-        fs.writeFileSync(tempMsgPath, fullTagMsg, 'utf-8');
-        runGit(`git tag -a "${tagName}" -F "${tempMsgPath}"`);
-      } finally {
-        if (fs.existsSync(tempMsgPath)) fs.unlinkSync(tempMsgPath);
+    if (tagExists && !forceTag) {
+      logWarn(`Git tag "${tagName}" already exists (use --force-tag to overwrite).`);
+      const headHash = runGit('git rev-parse HEAD', { silent: true, ignoreError: true });
+      const tagHash = runGit(`git rev-parse "${tagName}^{commit}"`, { silent: true, ignoreError: true });
+      if (headHash === tagHash) {
+        logSuccess(`Tag "${tagName}" is already pointing to current HEAD.`);
+      } else {
+        logWarn(`Tag "${tagName}" points to commit ${tagHash?.slice(0, 7)}, HEAD is ${headHash?.slice(0, 7)}.`);
       }
-      logSuccess(`Created annotated git tag: ${colors.green}${tagName}${colors.reset}`);
     } else {
-      log(`[Dry-Run] Would run: git tag -a "${tagName}" with commit notes`);
+      const fullTagMsg = `Release ${tagName}${commitNotes ? `\n\nCommits in this release:\n${commitNotes}` : ''}`;
+      const forceFlag = forceTag ? '-f ' : '';
+      if (!isDryRun) {
+        const tempMsgPath = path.join(ROOT_DIR, '.tmp_tag_msg.txt');
+        try {
+          fs.writeFileSync(tempMsgPath, fullTagMsg, 'utf-8');
+          runGit(`git tag -a ${forceFlag}"${tagName}" -F "${tempMsgPath}"`);
+        } finally {
+          if (fs.existsSync(tempMsgPath)) fs.unlinkSync(tempMsgPath);
+        }
+        logSuccess(`${tagExists ? 'Updated' : 'Created'} annotated git tag: ${colors.green}${tagName}${colors.reset}`);
+      } else {
+        log(`[Dry-Run] Would run: git tag -a ${forceFlag}"${tagName}" with commit notes`);
+      }
     }
   }
 
@@ -299,10 +398,23 @@ async function main() {
   if (noPush) {
     logWarn('--no-push specified. Skipping push to remote.');
   } else {
+    if (pullRebase) {
+      log(`Pulling latest changes with --rebase from ${remote}/${currentBranch}...`);
+      if (!isDryRun) {
+        runGit(`git pull --rebase ${remote} ${currentBranch}`);
+        logSuccess(`Rebased onto ${remote}/${currentBranch}.`);
+      } else {
+        log(`[Dry-Run] Would run: git pull --rebase ${remote} ${currentBranch}`);
+      }
+    }
+
+    const pushForceFlag = forcePush ? '--force-with-lease ' : '';
+    const tagForceFlag = (forceTag || forcePush) ? '--force ' : '';
+
     if (!isDryRun) {
       log(`Pushing branch ${colors.cyan}${currentBranch}${colors.reset} to ${remote}...`);
       try {
-        const pushBranchRes = runGit(`git push ${remote} ${currentBranch}`);
+        const pushBranchRes = runGit(`git push ${pushForceFlag}${remote} ${currentBranch}`);
         if (pushBranchRes) console.log(pushBranchRes);
         logSuccess(`Branch ${currentBranch} pushed to ${remote}.`);
       } catch (err) {
@@ -310,18 +422,20 @@ async function main() {
         process.exit(1);
       }
 
-      log(`Pushing tag ${colors.green}${tagName}${colors.reset} to ${remote}...`);
-      try {
-        const pushTagRes = runGit(`git push ${remote} "${tagName}"`);
-        if (pushTagRes) console.log(pushTagRes);
-        logSuccess(`Tag ${tagName} pushed to ${remote}.`);
-      } catch (err) {
-        logError(`Failed to push tag: ${err.message}`);
-        process.exit(1);
+      if (!noTag) {
+        log(`Pushing tag ${colors.green}${tagName}${colors.reset} to ${remote}...`);
+        try {
+          const pushTagRes = runGit(`git push ${tagForceFlag}${remote} "${tagName}"`);
+          if (pushTagRes) console.log(pushTagRes);
+          logSuccess(`Tag ${tagName} pushed to ${remote}.`);
+        } catch (err) {
+          logError(`Failed to push tag: ${err.message}`);
+          process.exit(1);
+        }
       }
     } else {
-      log(`[Dry-Run] Would run: git push ${remote} ${currentBranch}`);
-      log(`[Dry-Run] Would run: git push ${remote} "${tagName}"`);
+      log(`[Dry-Run] Would run: git push ${pushForceFlag}${remote} ${currentBranch}`);
+      if (!noTag) log(`[Dry-Run] Would run: git push ${tagForceFlag}${remote} "${tagName}"`);
     }
   }
 

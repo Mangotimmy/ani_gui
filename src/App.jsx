@@ -255,36 +255,70 @@ function hasHomeCache() {
     recommendations: true,
   });
 
+  // Prefetch cache for instant 0ms "Load More" pagination
+  const paginationPrefetchRef = useRef(new Map());
+  const loadMoreSentinelRef = useRef(null);
+
+  const getCarouselPageUrl = useCallback((category, pageNum, seasonYear = CURRENT_YEAR, seasonName = 'FALL') => {
+    if (category === 'trending') return `/api/popular-now?page=${pageNum}&perPage=50`;
+    if (category === 'topRated') return `/api/top-rated?page=${pageNum}&perPage=50`;
+    if (category === 'popular') return `/api/popular?page=${pageNum}&perPage=50`;
+    if (category === 'upcoming') return `/api/upcoming?page=${pageNum}&perPage=50`;
+    if (category === 'action') return `/api/genre/Action?page=${pageNum}&perPage=50`;
+    if (category === 'fantasy') return `/api/genre/Fantasy?page=${pageNum}&perPage=50`;
+    if (category === 'thisSeason') return `/api/catalog?year=${seasonYear}&season=${seasonName}&page=${pageNum}&perPage=50`;
+    if (category === 'recommendations') return `/api/trending?page=${pageNum}&perPage=50`;
+    return '';
+  }, []);
+
+  const prefetchUrlInBackground = useCallback((url) => {
+    if (!url || paginationPrefetchRef.current.has(url)) return;
+    const promise = fetch(url)
+      .then(r => r.json())
+      .catch(() => null);
+    paginationPrefetchRef.current.set(url, promise);
+  }, []);
+
+  const mergeUniqueAnimes = useCallback((prevList, newItems) => {
+    if (!Array.isArray(newItems) || newItems.length === 0) return prevList;
+    const seen = new Set(prevList.map(a => a?.id));
+    const filtered = newItems.filter(a => a && a.id && !seen.has(a.id));
+    return filtered.length > 0 ? [...prevList, ...filtered] : prevList;
+  }, []);
+
   const handleLoadMoreCarousel = async (category) => {
     if (carouselLoadingMore[category] || carouselHasMore[category] === false) return;
     setCarouselLoadingMore(prev => ({ ...prev, [category]: true }));
     const nextPage = (carouselPages[category] || 1) + 1;
 
     try {
-      let url = '';
-      if (category === 'trending') url = `/api/popular-now?page=${nextPage}&perPage=50`;
-      else if (category === 'topRated') url = `/api/top-rated?page=${nextPage}&perPage=50`;
-      else if (category === 'popular') url = `/api/popular?page=${nextPage}&perPage=50`;
-      else if (category === 'upcoming') url = `/api/upcoming?page=${nextPage}&perPage=50`;
-      else if (category === 'action') url = `/api/genre/Action?page=${nextPage}&perPage=50`;
-      else if (category === 'fantasy') url = `/api/genre/Fantasy?page=${nextPage}&perPage=50`;
-      else if (category === 'thisSeason') url = `/api/catalog?year=${currentSeasonInfo.year}&season=${currentSeasonInfo.season}&page=${nextPage}&perPage=50`;
-      else if (category === 'recommendations') url = `/api/trending?page=${nextPage}&perPage=50`;
+      const url = getCarouselPageUrl(category, nextPage, currentSeasonInfo.year, currentSeasonInfo.season);
 
       if (url) {
-        const res = await fetch(url).then(r => r.json());
-        const items = res.data || res.media || [];
+        let res = null;
+        if (paginationPrefetchRef.current.has(url)) {
+          res = await paginationPrefetchRef.current.get(url);
+          paginationPrefetchRef.current.delete(url);
+        }
+        if (!res) {
+          res = await fetch(url).then(r => r.json());
+        }
+        const items = res?.data || res?.media || [];
         if (items && items.length > 0) {
-          if (category === 'trending') setTrending(prev => [...prev, ...items]);
-          else if (category === 'topRated') setTopRated(prev => [...prev, ...items]);
-          else if (category === 'popular') setPopular(prev => [...prev, ...items]);
-          else if (category === 'upcoming') setUpcoming(prev => [...prev, ...items]);
-          else if (category === 'action') setActionAnimes(prev => [...prev, ...items]);
-          else if (category === 'fantasy') setFantasyAnimes(prev => [...prev, ...items]);
-          else if (category === 'thisSeason') setThisSeasonAnimes(prev => [...prev, ...items]);
-          else if (category === 'recommendations') setRecommendations(prev => [...prev, ...items]);
+          if (category === 'trending') setTrending(prev => mergeUniqueAnimes(prev, items));
+          else if (category === 'topRated') setTopRated(prev => mergeUniqueAnimes(prev, items));
+          else if (category === 'popular') setPopular(prev => mergeUniqueAnimes(prev, items));
+          else if (category === 'upcoming') setUpcoming(prev => mergeUniqueAnimes(prev, items));
+          else if (category === 'action') setActionAnimes(prev => mergeUniqueAnimes(prev, items));
+          else if (category === 'fantasy') setFantasyAnimes(prev => mergeUniqueAnimes(prev, items));
+          else if (category === 'thisSeason') setThisSeasonAnimes(prev => mergeUniqueAnimes(prev, items));
+          else if (category === 'recommendations') setRecommendations(prev => mergeUniqueAnimes(prev, items));
 
           setCarouselPages(prev => ({ ...prev, [category]: nextPage }));
+
+          // Prefetch N+1 page in the background for instant next click
+          const nextPrefetchUrl = getCarouselPageUrl(category, nextPage + 1, currentSeasonInfo.year, currentSeasonInfo.season);
+          prefetchUrlInBackground(nextPrefetchUrl);
         } else {
           setCarouselHasMore(prev => ({ ...prev, [category]: false }));
         }
@@ -753,24 +787,42 @@ function hasHomeCache() {
     loadRecs();
   }, [favorites, watchHistory]);
 
-  // 3. Catalog Fetching Handler
+  // 3. Catalog Fetching Handler (with background next-page prefetch)
+  const buildCatalogUrl = useCallback((year, season, sort, page, studio, range) => {
+    const sParam = season && season !== 'ALL' ? `&season=${season}` : '';
+    const adultParam = `&isAdult=${!hideR18}`;
+    const studioParam = studio && studio !== 'ALL' ? `&studio=${encodeURIComponent(studio)}` : '';
+    const rangeParam = range?.from && range?.to ? `&yearFrom=${range.from}&yearTo=${range.to}` : '';
+    return `/api/catalog?year=${year}${sParam}${rangeParam}&sort=${sort}&page=${page}&perPage=50${adultParam}${studioParam}`;
+  }, [hideR18]);
+
   const loadCatalogData = async (year, season, sort, page = 1, append = false, studio = catalogStudio, range = catalogRange) => {
     setCatalogLoading(true);
     try {
-      const sParam = season && season !== 'ALL' ? `&season=${season}` : '';
-      const adultParam = `&isAdult=${!hideR18}`;
-      const studioParam = studio && studio !== 'ALL' ? `&studio=${encodeURIComponent(studio)}` : '';
-      const rangeParam = range?.from && range?.to ? `&yearFrom=${range.from}&yearTo=${range.to}` : '';
-      const url = `/api/catalog?year=${year}${sParam}${rangeParam}&sort=${sort}&page=${page}&perPage=50${adultParam}${studioParam}`;
-      const res = await fetch(url).then(r => r.json());
-      if (res.success && Array.isArray(res.media)) {
+      const url = buildCatalogUrl(year, season, sort, page, studio, range);
+      let res = null;
+      if (paginationPrefetchRef.current.has(url)) {
+        res = await paginationPrefetchRef.current.get(url);
+        paginationPrefetchRef.current.delete(url);
+      }
+      if (!res) {
+        res = await fetch(url).then(r => r.json());
+      }
+      if (res?.success && Array.isArray(res.media)) {
         if (append) {
-          setCatalogAnimes(prev => [...prev, ...res.media]);
+          setCatalogAnimes(prev => mergeUniqueAnimes(prev, res.media));
         } else {
           setCatalogAnimes(res.media);
         }
-        setHasMoreCatalog(!!res.pageInfo?.hasNextPage);
+        const hasNext = !!res.pageInfo?.hasNextPage;
+        setHasMoreCatalog(hasNext);
         setCatalogPage(page);
+
+        // Immediately prefetch page + 1 in the background so "Load More" is instantaneous
+        if (hasNext) {
+          const nextUrl = buildCatalogUrl(year, season, sort, page + 1, studio, range);
+          prefetchUrlInBackground(nextUrl);
+        }
       }
     } catch (err) {
       console.error('Failed to load catalog anime:', err);
@@ -782,8 +834,54 @@ function hasHomeCache() {
   useEffect(() => {
     if (activeTab === 'catalog') {
       loadCatalogData(catalogYear, catalogSeason, catalogSort, 1, false, catalogStudio, catalogRange);
+    } else if (activeTab === 'upcoming') {
+      prefetchUrlInBackground(getCarouselPageUrl('upcoming', (carouselPages.upcoming || 1) + 1));
+    } else if (['trending', 'top-rated', 'Action', 'Fantasy'].includes(activeTab)) {
+      const keyMap = { trending: 'trending', 'top-rated': 'topRated', Action: 'action', Fantasy: 'fantasy' };
+      const k = keyMap[activeTab];
+      if (k) prefetchUrlInBackground(getCarouselPageUrl(k, (carouselPages[k] || 1) + 1));
     }
   }, [activeTab, catalogYear, catalogSeason, catalogSort, catalogStudio, hideR18, catalogRange]);
+
+  // IntersectionObserver early auto-trigger when scrolling within 600px of Load More button
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel || typeof IntersectionObserver === 'undefined') return undefined;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        if (activeTab === 'catalog' && hasMoreCatalog && !catalogLoading) {
+          loadCatalogData(catalogYear, catalogSeason, catalogSort, catalogPage + 1, true, catalogStudio, catalogRange);
+        } else if (activeTab === 'upcoming' && carouselHasMore.upcoming && !carouselLoadingMore.upcoming) {
+          handleLoadMoreCarousel('upcoming');
+        } else if (['trending', 'top-rated', 'Action', 'Fantasy'].includes(activeTab)) {
+          const keyMap = { trending: 'trending', 'top-rated': 'topRated', Action: 'action', Fantasy: 'fantasy' };
+          const k = keyMap[activeTab];
+          if (k && carouselHasMore[k] && !carouselLoadingMore[k]) {
+            handleLoadMoreCarousel(k);
+          }
+        }
+      },
+      { rootMargin: '600px 0px' }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [
+    activeTab,
+    hasMoreCatalog,
+    catalogLoading,
+    catalogYear,
+    catalogSeason,
+    catalogSort,
+    catalogPage,
+    catalogStudio,
+    catalogRange,
+    carouselHasMore,
+    carouselLoadingMore,
+    carouselPages
+  ]);
 
   // 3. Real-Time Downloader updates: SSE with an automatic polling fallback.
   // Reverse proxies that terminate HTTP/2 (Synology DSM nginx) intermittently reset
@@ -1672,9 +1770,9 @@ function hasHomeCache() {
                   ))}
                 </div>
 
-                {/* Load More Button */}
+                {/* Load More Button + Early Auto-Load Sentinel */}
                 {hasMoreCatalog && (
-                  <div className="mt-8 mb-12 flex justify-center">
+                  <div ref={loadMoreSentinelRef} className="mt-8 mb-12 flex justify-center">
                     <button
                       onClick={() => loadCatalogData(catalogYear, catalogSeason, catalogSort, catalogPage + 1, true, catalogStudio, catalogRange)}
                       disabled={catalogLoading}
@@ -1729,7 +1827,7 @@ function hasHomeCache() {
                 </div>
 
                 {carouselHasMore.upcoming && (
-                  <div className="mt-8 mb-12 flex justify-center">
+                  <div ref={loadMoreSentinelRef} className="mt-8 mb-12 flex justify-center">
                     <button
                       onClick={() => handleLoadMoreCarousel('upcoming')}
                       disabled={carouselLoadingMore.upcoming}
@@ -1780,7 +1878,7 @@ function hasHomeCache() {
                   </div>
 
                   {carouselHasMore[config.key] && (
-                    <div className="mt-8 mb-12 flex justify-center">
+                    <div ref={loadMoreSentinelRef} className="mt-8 mb-12 flex justify-center">
                       <button
                         onClick={() => handleLoadMoreCarousel(config.key)}
                         disabled={carouselLoadingMore[config.key]}

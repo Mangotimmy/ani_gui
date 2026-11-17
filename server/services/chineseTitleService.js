@@ -727,7 +727,7 @@ export async function enrichWithChineseTitlesAsync(animeList, { budgetMs = 2500 
   const pending = animeList
     .filter((a) => a && !titleCache.has(String(a.id || '')) && !resolveSync(a))
     .map((a) => resolveTitleZh(a).catch(() => null));
-  if (pending.length > 0) {
+  if (pending.length > 0 && budgetMs > 0) {
     let timer;
     await Promise.race([
       Promise.allSettled(pending),
