@@ -12,7 +12,15 @@ const DEOBFUSCATE_KEY = Buffer.from('otaku-embed-v1', 'utf-8');
 
 // In-memory bounded cache for fast episode switching without heap leaks
 const searchCache = new BoundedCache(200, 30 * 60 * 1000); // 30m TTL
+const searchMissCache = new BoundedCache(200, 2 * 60 * 1000); // 2m negative TTL
 const episodesCache = new BoundedCache(200, 60 * 60 * 1000); // 1h TTL
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
+  return fetch(url, {
+    ...options,
+    signal: options.signal || AbortSignal.timeout(timeoutMs)
+  });
+}
 
 const DEFAULT_REFERER = 'https://zokoanime.video/';
 
@@ -54,19 +62,34 @@ function calculateMatchScore(query, item) {
   return (2 * common) / (qTokens.size + tTokens.size);
 }
 
-async function searchSingleQuery(query) {
+async function searchSingleQuery(query, timeoutMs = 5000) {
   const cleanQuery = query.toLowerCase().trim();
   if (!cleanQuery) return null;
   if (searchCache.has(cleanQuery)) {
     return searchCache.get(cleanQuery);
   }
+  if (searchMissCache.has(cleanQuery)) {
+    return null;
+  }
 
   const url = `https://hianime.at/search?keyword=${encodeURIComponent(query)}`;
-  const res = await fetch(url, {
-    headers: { 'User-Agent': USER_AGENT }
-  });
+  let res;
+  try {
+    res = await fetchWithTimeout(url, {
+      headers: { 'User-Agent': USER_AGENT }
+    }, timeoutMs);
+  } catch (err) {
+    // Do not poison negative cache on transient timeout, but allow caller to bail on deadline
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+      throw err;
+    }
+    return null;
+  }
 
   if (!res.ok) {
+    if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+      searchMissCache.set(cleanQuery, true);
+    }
     return null;
   }
 
@@ -86,6 +109,7 @@ async function searchSingleQuery(query) {
   });
 
   if (items.length === 0) {
+    searchMissCache.set(cleanQuery, true);
     return null;
   }
 
@@ -101,10 +125,11 @@ async function searchSingleQuery(query) {
     return best;
   }
 
+  searchMissCache.set(cleanQuery, true);
   return null;
 }
 
-async function searchAnime(queryOrCandidates) {
+async function searchAnime(queryOrCandidates, { totalTimeoutMs = 9000 } = {}) {
   let queries = [];
   if (Array.isArray(queryOrCandidates)) {
     queries = queryOrCandidates;
@@ -117,22 +142,39 @@ async function searchAnime(queryOrCandidates) {
     throw new Error('No valid anime title query provided');
   }
 
+  const deadline = Date.now() + totalTimeoutMs;
   for (const q of queries) {
-    const result = await searchSingleQuery(q);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    let result = null;
+    try {
+      result = await searchSingleQuery(q, Math.min(4500, remaining));
+    } catch {
+      // Upstream timed out: stop burning sequential candidate loops
+      break;
+    }
     if (result) {
       return result;
     }
     // Also try stripped version if title contains subtitles/colons
     const stripped = q.replace(/[:\-–—].*$/, '').trim();
-    if (stripped && stripped.toLowerCase() !== q.toLowerCase()) {
-      const strippedRes = await searchSingleQuery(stripped);
-      if (strippedRes) return strippedRes;
+    if (stripped && stripped.toLowerCase() !== q.toLowerCase() && Date.now() < deadline) {
+      try {
+        const strippedRes = await searchSingleQuery(stripped, Math.min(4000, deadline - Date.now()));
+        if (strippedRes) return strippedRes;
+      } catch {
+        break;
+      }
     }
     // Try stripping season suffix e.g. "Season 3", "3rd Season", "Part 2", "第三季", "第3期"
     const noSeason = q.replace(/(season\s*\d+|part\s*\d+|\d+(st|nd|rd|th)\s*season|第[一二三四五六七八九十\d]+[季期])/gi, '').trim();
-    if (noSeason && noSeason.length > 2 && noSeason.toLowerCase() !== q.toLowerCase()) {
-      const noSeasonRes = await searchSingleQuery(noSeason);
-      if (noSeasonRes) return noSeasonRes;
+    if (noSeason && noSeason.length > 2 && noSeason.toLowerCase() !== q.toLowerCase() && Date.now() < deadline) {
+      try {
+        const noSeasonRes = await searchSingleQuery(noSeason, Math.min(4000, deadline - Date.now()));
+        if (noSeasonRes) return noSeasonRes;
+      } catch {
+        break;
+      }
     }
   }
 
@@ -146,9 +188,9 @@ async function getEpisodeMap(animeId) {
   }
 
   const url = `https://hianime.at/api/theme/episode/list/${animeId}`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     headers: { 'User-Agent': USER_AGENT }
-  });
+  }, 5000);
 
   if (!res.ok) {
     throw new Error(`Episode list fetch failed with status ${res.status}`);
@@ -176,9 +218,9 @@ async function getEpisodeMap(animeId) {
 // 3. Fetch Server Embed URL
 async function getServerEmbed(episodeId, mode = 'sub') {
   const url = `https://hianime.at/api/theme/episode/servers?episodeId=${episodeId}`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     headers: { 'User-Agent': USER_AGENT }
-  });
+  }, 5000);
 
   if (!res.ok) {
     throw new Error(`Servers fetch failed with status ${res.status}`);
@@ -209,12 +251,12 @@ async function getServerEmbed(episodeId, mode = 'sub') {
 
 // 4. Deobfuscate Stream URL and Subtitles
 async function extractStream(embedUrl) {
-  const res = await fetch(embedUrl, {
+  const res = await fetchWithTimeout(embedUrl, {
     headers: {
       'User-Agent': USER_AGENT,
       'Referer': 'https://hianime.at/'
     }
-  });
+  }, 8000);
 
   if (!res.ok) {
     throw new Error(`Failed to fetch embed page (${res.status})`);
@@ -600,13 +642,16 @@ export async function getAvailableEpisodes(queryOrCandidates, forceRefresh = fal
     return { success: false, error: 'Anime title is required', uploadedEpisodes: [] };
   }
 
-  const cacheKey = queries.join(';').toLowerCase();
   if (forceRefresh) {
-    searchCache.delete(cacheKey);
+    for (const q of queries) {
+      const key = q.toLowerCase();
+      searchCache.delete(key);
+      searchMissCache.delete(key);
+    }
   }
 
   try {
-    const anime = await searchAnime(queries);
+    const anime = await searchAnime(queries, { totalTimeoutMs: 6500 });
     if (forceRefresh) {
       episodesCache.delete(anime.id);
     }

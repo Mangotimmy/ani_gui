@@ -61,6 +61,75 @@ const DECADES = [
   { label: '1970s', from: 1970, to: 1979 }
 ];
 
+const ROUTE_ANIME_CACHE_PREFIX = 'aniflix_route_anime_';
+
+function parseAnimeRoutePath(pathname) {
+  if (!pathname) return null;
+  const match = String(pathname).match(/^\/anime\/([0-9a-zA-Z_-]+)(?:\/(\d+))?\/?$/);
+  if (!match) return null;
+  return {
+    animeId: match[1],
+    episode: match[2] ? Math.max(1, parseInt(match[2], 10)) : 1,
+    hasEpisode: Boolean(match[2])
+  };
+}
+
+function saveRouteAnimeCache(anime) {
+  if (typeof window === 'undefined' || !anime || !anime.id) return;
+  try {
+    sessionStorage.setItem(`${ROUTE_ANIME_CACHE_PREFIX}${anime.id}`, JSON.stringify(anime));
+  } catch {}
+}
+
+function findCachedAnimeById(animeId) {
+  if (typeof window === 'undefined' || !animeId) return null;
+  const target = String(animeId);
+  try {
+    const rawSession = sessionStorage.getItem(`${ROUTE_ANIME_CACHE_PREFIX}${target}`);
+    if (rawSession) {
+      const parsed = JSON.parse(rawSession);
+      if (parsed && String(parsed.id) === target) return parsed;
+    }
+  } catch {}
+
+  try {
+    const rawFavs = localStorage.getItem('aniflix_favorites');
+    if (rawFavs) {
+      const favs = JSON.parse(rawFavs);
+      if (Array.isArray(favs)) {
+        const hit = favs.find(item => item && String(item.id) === target);
+        if (hit) return hit;
+      }
+    }
+  } catch {}
+
+  try {
+    const rawHist = localStorage.getItem('aniflix_watch_history');
+    if (rawHist) {
+      const hist = JSON.parse(rawHist);
+      if (Array.isArray(hist)) {
+        const hit = hist.find(item => item?.anime && String(item.anime.id) === target);
+        if (hit?.anime) return hit.anime;
+      }
+    }
+  } catch {}
+
+  try {
+    const rawHome = localStorage.getItem('aniflix_home_cache_v2');
+    if (rawHome) {
+      const parsed = JSON.parse(rawHome);
+      for (const key of Object.keys(parsed || {})) {
+        const list = parsed[key];
+        if (!Array.isArray(list)) continue;
+        const hit = list.find(item => item && String(item.id) === target);
+        if (hit) return hit;
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
 export default function App() {
   // Navigation & Search State
   const [activeTab, setActiveTab] = useState('home');
@@ -612,9 +681,25 @@ function hasHomeCache() {
     return () => clearTimeout(timer);
   }, [favorites, watchHistory, currentUser]);
 
-  // Modals & Overlays
-  const [selectedAnime, setSelectedAnime] = useState(null);
-  const [activePlayer, setActivePlayer] = useState(null); // { anime, episode, audioMode }
+  // Modals & Overlays (synchronously hydrate /anime/:id routes on F5 reload)
+  const initialRoute = useMemo(() => (
+    typeof window !== 'undefined' ? parseAnimeRoutePath(window.location.pathname) : null
+  ), []);
+  const initialRouteAnime = useMemo(() => (
+    initialRoute ? findCachedAnimeById(initialRoute.animeId) : null
+  ), [initialRoute]);
+
+  const [selectedAnime, setSelectedAnime] = useState(() => (
+    initialRoute && !initialRoute.hasEpisode ? initialRouteAnime : null
+  ));
+  const [activePlayer, setActivePlayer] = useState(() => (
+    initialRoute && initialRoute.hasEpisode && initialRouteAnime
+      ? { anime: initialRouteAnime, episode: initialRoute.episode, audioMode: 'sub' }
+      : null
+  )); // { anime, episode, audioMode }
+  const [pendingRoute, setPendingRoute] = useState(() => (
+    initialRoute && !initialRouteAnime ? initialRoute : null
+  ));
   const [batchDownloadData, setBatchDownloadData] = useState(null); // { anime, audioMode, initialRange }
   const [isDownloadsOpen, setIsDownloadsOpen] = useState(false);
   const isDownloadsOpenRef = useRef(false);
@@ -1094,59 +1179,108 @@ function hasHomeCache() {
   };
 
   // --- URL Routing & Deep-Linking Engine ---
+  const activePlayerRef = useRef(activePlayer);
+  activePlayerRef.current = activePlayer;
+  const selectedAnimeRef = useRef(selectedAnime);
+  selectedAnimeRef.current = selectedAnime;
+
+  useEffect(() => {
+    if (activePlayer?.anime) saveRouteAnimeCache(activePlayer.anime);
+    else if (selectedAnime) saveRouteAnimeCache(selectedAnime);
+  }, [activePlayer, selectedAnime]);
+
+  const fetchAnimeByIdWithRetry = useCallback(async (animeId, signal, retries = 2) => {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const res = await fetch(`/api/anime/${encodeURIComponent(animeId)}`, { signal });
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data?.success && data.data) return data.data;
+        if (attempt === retries) return null;
+      } catch (err) {
+        if (err?.name === 'AbortError') throw err;
+        if (attempt === retries) return null;
+      }
+      await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+    }
+    return null;
+  }, []);
+
   // 1. Initial Route Deep-Linking: e.g. /anime/30203/1 or /anime/30203
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.location.pathname) return;
-    const pathname = window.location.pathname;
-    const match = pathname.match(/^\/anime\/([0-9a-zA-Z_-]+)(?:\/(\d+))?\/?$/);
-    if (!match) return;
+    if (typeof window === 'undefined' || !window.location.pathname) return undefined;
+    const route = parseAnimeRoutePath(window.location.pathname);
+    if (!route) return undefined;
 
-    const animeId = match[1];
-    const episode = match[2] ? Math.max(1, parseInt(match[2], 10)) : 1;
-    const hasEpisode = Boolean(match[2]);
-
-    fetch(`/api/anime/${animeId}`)
-      .then(r => r.json())
-      .then(res => {
-        if (res.success && res.data) {
-          const anime = res.data;
-          if (hasEpisode) {
-            handlePlay(anime, episode);
+    const hadInitialAnime = Boolean(initialRouteAnime);
+    const controller = new AbortController();
+    fetchAnimeByIdWithRetry(route.animeId, controller.signal)
+      .then(anime => {
+        if (controller.signal.aborted) return;
+        if (hadInitialAnime) {
+          const curId = route.hasEpisode ? activePlayerRef.current?.anime?.id : selectedAnimeRef.current?.id;
+          if (String(curId) !== String(route.animeId)) return;
+        }
+        if (anime) {
+          saveRouteAnimeCache(anime);
+          if (route.hasEpisode) {
+            setActivePlayer(prev => ({
+              anime,
+              episode: prev?.episode || route.episode,
+              audioMode: prev?.audioMode || 'sub',
+              directStreamUrl: prev?.directStreamUrl
+            }));
           } else {
-            handleMoreInfo(anime);
+            setSelectedAnime(anime);
           }
         }
       })
-      .catch(err => console.warn('[Router] Failed to restore anime from URL:', err));
-  }, []);
+      .catch(err => {
+        if (err?.name !== 'AbortError') {
+          console.warn('[Router] Failed to restore anime from URL:', err);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setPendingRoute(null);
+        }
+      });
+
+    return () => controller.abort();
+  }, [fetchAnimeByIdWithRetry]);
 
   // 2. Handle Browser Back & Forward Navigation (popstate)
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined') return undefined;
 
     const onPopState = () => {
-      const pathname = window.location.pathname;
-      const match = pathname.match(/^\/anime\/([0-9a-zA-Z_-]+)(?:\/(\d+))?\/?$/);
-      if (!match) {
+      const route = parseAnimeRoutePath(window.location.pathname);
+      if (!route) {
+        setPendingRoute(null);
         setActivePlayer(null);
         setSelectedAnime(null);
         document.title = 'AniFlix - Anime Streaming & Downloader';
         return;
       }
 
-      const animeId = match[1];
-      const episode = match[2] ? Math.max(1, parseInt(match[2], 10)) : 1;
-      const hasEpisode = Boolean(match[2]);
+      const { animeId, episode, hasEpisode } = route;
+      const curPlayer = activePlayerRef.current;
+      const curSelected = selectedAnimeRef.current;
 
       if (hasEpisode) {
-        if (activePlayer?.anime?.id === Number(animeId) || String(activePlayer?.anime?.id) === animeId) {
+        if (curPlayer?.anime?.id === Number(animeId) || String(curPlayer?.anime?.id) === animeId) {
           setActivePlayer(prev => prev ? { ...prev, episode } : null);
         } else {
-          fetch(`/api/anime/${animeId}`)
-            .then(r => r.json())
-            .then(res => {
-              if (res.success && res.data) {
-                setActivePlayer({ anime: res.data, episode, audioMode: 'sub' });
+          const cached = findCachedAnimeById(animeId);
+          if (cached) {
+            setActivePlayer({ anime: cached, episode, audioMode: 'sub' });
+            setSelectedAnime(null);
+          }
+          fetchAnimeByIdWithRetry(animeId)
+            .then(anime => {
+              if (anime) {
+                setActivePlayer({ anime, episode, audioMode: 'sub' });
                 setSelectedAnime(null);
               }
             })
@@ -1154,15 +1288,16 @@ function hasHomeCache() {
         }
       } else {
         setActivePlayer(null);
-        if (selectedAnime?.id === Number(animeId) || String(selectedAnime?.id) === animeId) {
+        if (curSelected?.id === Number(animeId) || String(curSelected?.id) === animeId) {
           // Already on this modal
         } else {
-          fetch(`/api/anime/${animeId}`)
-            .then(r => r.json())
-            .then(res => {
-              if (res.success && res.data) {
-                setSelectedAnime(res.data);
-              }
+          const cached = findCachedAnimeById(animeId);
+          if (cached) {
+            setSelectedAnime(cached);
+          }
+          fetchAnimeByIdWithRetry(animeId)
+            .then(anime => {
+              if (anime) setSelectedAnime(anime);
             })
             .catch(() => {});
         }
@@ -1171,12 +1306,13 @@ function hasHomeCache() {
 
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [activePlayer, selectedAnime]);
+  }, [fetchAnimeByIdWithRetry]);
 
   // 3. Keep URL bar synchronized with active anime & episode in real time
-  const initialMountRef = useRef(true);
   useEffect(() => {
     if (typeof window === 'undefined' || !window.location.protocol.startsWith('http')) return;
+    // Never overwrite the deep-link URL while initial F5 route restoration is still pending.
+    if (pendingRoute) return;
 
     let targetPath = '/';
     let targetTitle = 'AniFlix - Anime Streaming & Downloader';
@@ -1194,26 +1330,19 @@ function hasHomeCache() {
       targetTitle = `${title} | AniFlix`;
     }
 
-    if (initialMountRef.current) {
-      initialMountRef.current = false;
-      if (window.location.pathname.startsWith('/anime/')) {
-        return;
-      }
-    }
-
     if (window.location.pathname !== targetPath) {
       window.history.pushState(
-        { 
-          animeId: activePlayer?.anime?.id || selectedAnime?.id, 
-          episode: activePlayer?.episode, 
-          type: activePlayer ? 'play' : selectedAnime ? 'detail' : 'home' 
-        }, 
-        '', 
+        {
+          animeId: activePlayer?.anime?.id || selectedAnime?.id,
+          episode: activePlayer?.episode,
+          type: activePlayer ? 'play' : selectedAnime ? 'detail' : 'home'
+        },
+        '',
         targetPath
       );
     }
     document.title = targetTitle;
-  }, [activePlayer, selectedAnime, currentLang]);
+  }, [activePlayer, selectedAnime, currentLang, pendingRoute]);
 
   const handleClearWatchHistory = () => {
     setWatchHistory([]);
@@ -2229,9 +2358,23 @@ function hasHomeCache() {
       </footer>
 
       {/* Modals & Overlays */}
+      {pendingRoute && (
+        <div className="fixed inset-0 z-50 bg-[#0d0d11]/95 flex flex-col items-center justify-center gap-3 text-zinc-300">
+          <Loader2 className="w-9 h-9 text-[#E50914] animate-spin" />
+          <p className="text-sm font-medium">
+            {currentLang.startsWith('zh') ? '正在載入動漫頁面...' : currentLang === 'ja' ? 'アニメページを読み込み中...' : 'Loading anime page...'}
+          </p>
+        </div>
+      )}
 
       {/* Lazy-Loaded Modals & Overlays wrapped in Suspense for zero main-thread blocking */}
-      <Suspense fallback={null}>
+      <Suspense fallback={
+        (selectedAnime || activePlayer) ? (
+          <div className="fixed inset-0 z-50 bg-[#0d0d11]/95 flex items-center justify-center">
+            <Loader2 className="w-9 h-9 text-[#E50914] animate-spin" />
+          </div>
+        ) : null
+      }>
         {/* Anime Detail & Episode Picker Modal */}
         {selectedAnime && (
           <DetailModal

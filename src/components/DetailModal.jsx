@@ -51,6 +51,7 @@ export default function DetailModal({
   const [audioMode, setAudioMode] = useState('sub');
   const [uploadedEpisodes, setUploadedEpisodes] = useState([]);
   const [isSyncingEpisodes, setIsSyncingEpisodes] = useState(false);
+  const [episodesSyncAttempted, setEpisodesSyncAttempted] = useState(false);
   const [similarAnime, setSimilarAnime] = useState([]);
   const [relations, setRelations] = useState(() => anime?.relations || []);
   const [lastRefreshed, setLastRefreshed] = useState(null);
@@ -82,50 +83,65 @@ export default function DetailModal({
 
   // Complete Media Metadata from /api/anime/:id (studios, format, externalLinks, idMal, duration)
   const [detailedAnime, setDetailedAnime] = useState(null);
+  const latestAnimeIdRef = useRef(anime?.id);
+  latestAnimeIdRef.current = anime?.id;
+
   const activeAnime = useMemo(() => ({
-    ...anime,
+    ...(anime || {}),
     ...(detailedAnime || {}),
     titleZh: chineseInfo?.titleZh || anime?.titleZh || detailedAnime?.titleZh
   }), [anime, detailedAnime, chineseInfo]);
 
-  useEffect(() => {
-    setDetailedAnime(null);
-  }, [anime?.id]);
+  const title = activeAnime.title?.english || activeAnime.title?.romaji || activeAnime.title?.native || 'Anime Details';
+  const nativeTitle = activeAnime.title?.native;
+  const backdrop = getAnimeBannerUrl(activeAnime);
+  const poster = getAnimeCoverUrl(activeAnime);
+  const synopsis = activeAnime.description?.replace(/<[^>]*>/g, '') || 'No synopsis provided.';
 
-  if (!anime) return null;
+  const totalScheduled = activeAnime.episodes || 12;
+  const nextAiring = activeAnime.nextAiringEpisode;
+  const isUnreleased = activeAnime.status === 'NOT_YET_RELEASED';
+  const isFinished = activeAnime.status === 'FINISHED' || activeAnime.status === 'CANCELLED';
+  const maxAiredCap = (nextAiring?.episode && nextAiring.episode > 1)
+    ? (nextAiring.episode - 1)
+    : undefined;
 
-  const title = anime.title?.english || anime.title?.romaji || anime.title?.native || 'Anime Details';
-  const nativeTitle = anime.title?.native;
-  const backdrop = getAnimeBannerUrl(anime);
-  const poster = getAnimeCoverUrl(anime);
-  const synopsis = anime.description?.replace(/<[^>]*>/g, '') || 'No synopsis provided.';
-  
-  const totalScheduled = anime.episodes || 12;
-  const nextAiring = anime.nextAiringEpisode;
-  const isUnreleased = anime.status === 'NOT_YET_RELEASED';
+  const fallbackAiredEpisodes = useMemo(() => {
+    if (isUnreleased) return [];
+    if (isFinished) {
+      return Array.from({ length: totalScheduled }, (_, i) => i + 1);
+    }
+    if (maxAiredCap && maxAiredCap >= 1) {
+      return Array.from({ length: maxAiredCap }, (_, i) => i + 1);
+    }
+    if (episodesSyncAttempted && uploadedEpisodes.length === 0) {
+      return Array.from({ length: totalScheduled }, (_, i) => i + 1);
+    }
+    return [];
+  }, [isUnreleased, isFinished, totalScheduled, maxAiredCap, episodesSyncAttempted, uploadedEpisodes.length]);
+
+  const effectiveEpisodes = uploadedEpisodes.length > 0 ? uploadedEpisodes : fallbackAiredEpisodes;
 
   // 1. Fetch live uploaded episodes
-  const loadEpisodes = async (forceRefresh = false) => {
+  const loadEpisodes = async (forceRefresh = false, { signal, targetId = anime?.id } = {}) => {
+    if (!targetId) return;
     setIsSyncingEpisodes(true);
     try {
       if (isUnreleased) {
-        // Unreleased anime has not aired
-        setUploadedEpisodes([]);
+        if (latestAnimeIdRef.current === targetId) {
+          setUploadedEpisodes([]);
+          setEpisodesSyncAttempted(true);
+        }
         return;
       }
 
-      // If next airing episode is known (e.g. Episode 2 airing soon), max aired episode is episode - 1 (e.g. 1)
-      const maxAiredCap = (nextAiring?.episode && nextAiring.episode > 1) 
-        ? (nextAiring.episode - 1) 
-        : undefined;
-
       const candidates = [
-        anime.title?.romaji,
-        anime.title?.english,
-        anime.title?.native,
+        activeAnime.title?.romaji,
+        activeAnime.title?.english,
+        activeAnime.title?.native,
         chineseInfo?.titleZh,
-        anime.titleZhTW,
-        anime.titleZhCN
+        activeAnime.titleZhTW,
+        activeAnime.titleZhCN
       ].filter(Boolean);
 
       const params = new URLSearchParams();
@@ -134,8 +150,9 @@ export default function DetailModal({
       if (maxAiredCap) params.set('maxAiredCap', String(maxAiredCap));
 
       const url = `/api/anime/${encodeURIComponent(title)}/episodes?${params.toString()}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
       const data = await res.json();
+      if (latestAnimeIdRef.current !== targetId) return;
       if (data.success && Array.isArray(data.uploadedEpisodes) && data.uploadedEpisodes.length > 0) {
         const validatedEpisodes = maxAiredCap 
           ? data.uploadedEpisodes.filter(ep => ep <= maxAiredCap)
@@ -143,30 +160,36 @@ export default function DetailModal({
         setUploadedEpisodes(validatedEpisodes);
         setLastRefreshed(new Date());
       } else {
-        // Fallback for airing titles: calculate based on next airing episode if known
         if (maxAiredCap && maxAiredCap >= 1) {
           setUploadedEpisodes(Array.from({ length: maxAiredCap }, (_, i) => i + 1));
         } else {
           setUploadedEpisodes([]);
         }
       }
+      setEpisodesSyncAttempted(true);
     } catch (err) {
+      if (err?.name === 'AbortError' || latestAnimeIdRef.current !== targetId) return;
       console.warn('Episode sync error:', err);
       setUploadedEpisodes([]);
+      setEpisodesSyncAttempted(true);
     } finally {
-      setIsSyncingEpisodes(false);
+      if (latestAnimeIdRef.current === targetId) {
+        setIsSyncingEpisodes(false);
+      }
     }
   };
 
   // 2. Fetch Media Videos (PV, OP, ED)
-  const loadMediaVideos = async () => {
+  const loadMediaVideos = async ({ signal, targetId = anime?.id } = {}) => {
+    if (!targetId) return;
     setIsLoadingMedia(true);
     try {
-      const romaji = anime.title?.romaji || '';
-      const english = anime.title?.english || '';
-      const native = anime.title?.native || '';
-      const res = await fetch(`/api/anime/${anime.id}/media-videos?romaji=${encodeURIComponent(romaji)}&english=${encodeURIComponent(english)}&native=${encodeURIComponent(native)}`);
+      const romaji = activeAnime.title?.romaji || '';
+      const english = activeAnime.title?.english || '';
+      const native = activeAnime.title?.native || '';
+      const res = await fetch(`/api/anime/${targetId}/media-videos?romaji=${encodeURIComponent(romaji)}&english=${encodeURIComponent(english)}&native=${encodeURIComponent(native)}`, { signal });
       const data = await res.json();
+      if (latestAnimeIdRef.current !== targetId) return;
       if (data.success) {
         setMediaVideos({
           trailers: data.trailers || [],
@@ -174,25 +197,49 @@ export default function DetailModal({
         });
       }
     } catch (err) {
-      console.warn('Failed to load media videos:', err);
+      if (err?.name !== 'AbortError') {
+        console.warn('Failed to load media videos:', err);
+      }
     } finally {
-      setIsLoadingMedia(false);
+      if (latestAnimeIdRef.current === targetId) {
+        setIsLoadingMedia(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadEpisodes(false);
-    loadMediaVideos();
-    setActiveMedia(null); // Reset player when changing anime
+    const targetId = anime?.id;
+    if (!targetId) return undefined;
 
-    // Load franchise relations (prequels / sequels / other seasons) for this title
+    const controller = new AbortController();
+    setDetailedAnime(null);
+    setUploadedEpisodes([]);
+    setEpisodesSyncAttempted(false);
+    setMediaVideos({ trailers: [], themes: { op: [], ed: [] } });
+    setChineseInfo(null);
+    setAllTorrents([]);
+    setSimilarAnime([]);
+    setEpisodeChunk(0);
+    setLastRefreshed(null);
+    setActiveMedia(null);
+    setCustomTorrentQuery('');
+    setIsSynopsisExpanded(false);
+
+    loadEpisodes(false, { signal: controller.signal, targetId });
+    loadMediaVideos({ signal: controller.signal, targetId });
+
+    // Load franchise relations and full metadata when opening from search or relation cards
     if (Array.isArray(anime.relations) && anime.relations.length > 0) {
       setRelations(anime.relations);
     } else {
       setRelations([]);
-      fetch(`/api/anime/${anime.id}`)
+    }
+
+    if (!Array.isArray(anime.relations) || !anime.description || !anime.externalLinks) {
+      fetch(`/api/anime/${targetId}`, { signal: controller.signal })
         .then(r => r.json())
         .then(d => {
+          if (latestAnimeIdRef.current !== targetId) return;
           if (d?.success && d?.data) {
             setDetailedAnime(d.data);
             if (Array.isArray(d.data.relations)) {
@@ -204,80 +251,87 @@ export default function DetailModal({
     }
 
     // 3. Load "More Like This" recommendations
-    async function loadSimilar() {
-      try {
-        const res = await fetch('/api/recommendations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ favoriteIds: [anime.id], limit: 6 })
-        });
-        const data = await res.json();
+    fetch('/api/recommendations', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ favoriteIds: [targetId], limit: 6 })
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (latestAnimeIdRef.current !== targetId) return;
         if (data.success && Array.isArray(data.data)) {
-          const filtered = data.data.filter(a => a.id !== anime.id && (!hideR18 || (!a.isAdult && !a.genres?.includes('Hentai'))));
+          const filtered = data.data.filter(a => a.id !== targetId && (!hideR18 || (!a.isAdult && !a.genres?.includes('Hentai'))));
           setSimilarAnime(filtered.slice(0, 6));
         }
-      } catch {}
-    }
+      })
+      .catch(() => {});
 
-    loadSimilar();
-  }, [anime, hideR18]);
+    return () => controller.abort();
+  }, [anime?.id, hideR18]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 3. Fetch Chinese metadata & translation
   useEffect(() => {
-    let isCancelled = false;
-    if (!anime?.id) return;
+    const targetId = anime?.id;
+    if (!targetId) return undefined;
+    const controller = new AbortController();
 
     setIsLoadingChinese(true);
-    const romaji = anime.title?.romaji || '';
-    const native = anime.title?.native || '';
-    const english = anime.title?.english || '';
-    const desc = synopsis || '';
+    const romaji = activeAnime.title?.romaji || '';
+    const native = activeAnime.title?.native || '';
+    const english = activeAnime.title?.english || '';
+    const desc = activeAnime.description?.replace(/<[^>]*>/g, '') || '';
     const targetLang = currentLang === 'zh-CN' ? 'zh-CN' : 'zh-TW';
 
     const refreshParam = chineseRefresh > 0 ? `&refresh=${chineseRefresh}` : '';
-    fetch(`/api/anime/${anime.id}/chinese-info?romaji=${encodeURIComponent(romaji)}&native=${encodeURIComponent(native)}&english=${encodeURIComponent(english)}&description=${encodeURIComponent(desc)}&lang=${targetLang}${refreshParam}`)
+    fetch(`/api/anime/${targetId}/chinese-info?romaji=${encodeURIComponent(romaji)}&native=${encodeURIComponent(native)}&english=${encodeURIComponent(english)}&description=${encodeURIComponent(desc)}&lang=${targetLang}${refreshParam}`, { signal: controller.signal })
       .then(r => r.json())
       .then(d => {
-        if (!isCancelled && d.success) {
+        if (latestAnimeIdRef.current === targetId && d.success) {
           setChineseInfo(d);
         }
       })
-      .catch(e => console.warn('Chinese info fetch error:', e))
+      .catch(e => {
+        if (e?.name !== 'AbortError') console.warn('Chinese info fetch error:', e);
+      })
       .finally(() => {
-        if (!isCancelled) setIsLoadingChinese(false);
+        if (latestAnimeIdRef.current === targetId) setIsLoadingChinese(false);
       });
 
-    return () => { isCancelled = true; };
-  }, [anime, currentLang, synopsis, chineseRefresh]);
+    return () => controller.abort();
+  }, [anime?.id, Boolean(activeAnime?.description), currentLang, chineseRefresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 4. Fetch BitTorrent / Magnet releases across all alias candidates
-  const loadTorrents = async (force = false, explicitQuery = null) => {
-    if (!anime) return;
+  const loadTorrents = async (force = false, explicitQuery = null, { signal, targetId = anime?.id } = {}) => {
+    if (!targetId) return;
     setIsLoadingTorrents(true);
     try {
       let q = explicitQuery;
       if (!q) {
         const candidates = [
           chineseInfo?.titleZh,
-          anime.titleZhTW,
-          anime.titleZhCN,
-          anime.titleZh,
-          anime.title?.native,
-          anime.title?.romaji,
-          anime.title?.english,
+          activeAnime.titleZhTW,
+          activeAnime.titleZhCN,
+          activeAnime.titleZh,
+          activeAnime.title?.native,
+          activeAnime.title?.romaji,
+          activeAnime.title?.english,
           title
         ].filter(Boolean);
         q = Array.from(new Set(candidates)).join('||');
       }
-      const res = await fetch(`/api/torrents?q=${encodeURIComponent(q)}&lang=all&hideR18=${hideR18}`);
+      const res = await fetch(`/api/torrents?q=${encodeURIComponent(q)}&lang=all&hideR18=${hideR18}`, { signal });
       const data = await res.json();
+      if (latestAnimeIdRef.current !== targetId) return;
       if (data.success && Array.isArray(data.items)) {
         setAllTorrents(data.items);
       }
     } catch (err) {
-      console.warn('Torrents fetch error:', err);
+      if (err?.name !== 'AbortError') console.warn('Torrents fetch error:', err);
     } finally {
-      setIsLoadingTorrents(false);
+      if (latestAnimeIdRef.current === targetId) {
+        setIsLoadingTorrents(false);
+      }
     }
   };
 
@@ -291,8 +345,11 @@ export default function DetailModal({
   };
 
   useEffect(() => {
-    loadTorrents();
-  }, [chineseInfo, anime]);
+    if (!anime?.id) return undefined;
+    const controller = new AbortController();
+    loadTorrents(false, null, { signal: controller.signal, targetId: anime.id });
+    return () => controller.abort();
+  }, [anime?.id, chineseInfo?.titleZh, hideR18]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredTorrents = useMemo(() => {
     if (torrentFilter === 'cantonese') {
@@ -348,10 +405,10 @@ export default function DetailModal({
   const [episodeChunk, setEpisodeChunk] = useState(0);
   const CHUNK_SIZE = 50;
 
-  const releasedSet = new Set(uploadedEpisodes);
+  const releasedSet = useMemo(() => new Set(effectiveEpisodes), [effectiveEpisodes]);
   const maxEpisodeToShow = Math.max(
-    totalScheduled, 
-    uploadedEpisodes.length > 0 ? Math.max(...uploadedEpisodes) : 1
+    totalScheduled,
+    effectiveEpisodes.length > 0 ? Math.max(...effectiveEpisodes) : 1
   );
   
   const episodesList = useMemo(() => {
@@ -388,6 +445,8 @@ export default function DetailModal({
 
   const primaryTrailer = mediaVideos.trailers[0] || null;
   const totalThemesCount = (mediaVideos.themes.op?.length || 0) + (mediaVideos.themes.ed?.length || 0);
+
+  if (!anime) return null;
 
   return (
     <div 
@@ -499,12 +558,13 @@ export default function DetailModal({
             /* Idle Backdrop Image Banner */
             <>
               <ThumbnailImage
-                src={anime.bannerImage || anime}
+                src={backdrop}
                 alt={title}
+                priority
                 width="1280"
                 height="720"
-                loading="lazy"
-                decoding="async"
+                loading="eager"
+                decoding="auto"
                 style={{ aspectRatio: '16/9' }}
                 className="w-full h-auto aspect-[16/9]"
                 imgClassName="w-full h-auto aspect-[16/9] object-cover object-center"
@@ -517,8 +577,8 @@ export default function DetailModal({
                 <div className="max-w-xl">
                   {(() => {
                     if (currentLang === 'ja') {
-                      const jaTitle = anime.title?.native || anime.title?.romaji || anime.title?.english || 'Anime';
-                      const romajiOrEn = anime.title?.romaji && anime.title?.romaji !== jaTitle ? anime.title.romaji : (anime.title?.english && anime.title.english !== jaTitle ? anime.title.english : null);
+                      const jaTitle = activeAnime.title?.native || activeAnime.title?.romaji || activeAnime.title?.english || 'Anime';
+                      const romajiOrEn = activeAnime.title?.romaji && activeAnime.title?.romaji !== jaTitle ? activeAnime.title.romaji : (activeAnime.title?.english && activeAnime.title?.english !== jaTitle ? activeAnime.title.english : null);
                       return (
                         <>
                           <h2 className="text-2xl sm:text-4xl font-black text-white drop-shadow-md leading-tight">
@@ -534,8 +594,8 @@ export default function DetailModal({
                     }
 
                     const precomputedZh = currentLang === 'zh-CN'
-                      ? (anime.titleZhCN || anime.titleZh)
-                      : (anime.titleZhTW || anime.titleZh);
+                      ? (activeAnime.titleZhCN || activeAnime.titleZh)
+                      : (activeAnime.titleZhTW || activeAnime.titleZh);
                     const activeZhTitle = (currentLang === 'zh-TW' || currentLang === 'zh-CN')
                       ? (chineseInfo?.titleZh || precomputedZh)
                       : null;
@@ -574,19 +634,17 @@ export default function DetailModal({
                 {/* Primary Action Buttons */}
                 <div className="flex flex-wrap items-center gap-2.5">
                   {/* Play Button or Trailer Button for Unreleased */}
-                  {uploadedEpisodes.length > 0 ? (
+                  {effectiveEpisodes.length > 0 ? (
                     <button
                       onClick={() => onPlay(
-                        chineseInfo?.titleZh 
-                          ? { ...anime, titleZh: chineseInfo.titleZh, titleZhTW: chineseInfo.titleZh, titleZhCN: chineseInfo.titleZh } 
-                          : anime, 
-                        uploadedEpisodes[0] || 1, 
+                        activeAnime,
+                        effectiveEpisodes[0] || 1,
                         audioMode
                       )}
                       className="flex items-center gap-2 bg-white hover:bg-zinc-200 text-black font-bold px-5 py-2.5 rounded-lg shadow-lg transition-transform hover:scale-105"
                     >
                       <Play className="w-4 h-4 fill-black" />
-                      <span>{t('play')} {currentLang === 'en' ? `Ep ${uploadedEpisodes[0] || 1}` : currentLang === 'ja' ? `第 ${uploadedEpisodes[0] || 1} 話` : `第 ${uploadedEpisodes[0] || 1} 集`}</span>
+                      <span>{t('play')} {currentLang === 'en' ? `Ep ${effectiveEpisodes[0] || 1}` : currentLang === 'ja' ? `第 ${effectiveEpisodes[0] || 1} 話` : `第 ${effectiveEpisodes[0] || 1} 集`}</span>
                     </button>
                   ) : primaryTrailer ? (
                     <button
@@ -614,7 +672,7 @@ export default function DetailModal({
 
                   {/* Favorite Button */}
                   <button
-                    onClick={() => onToggleFavorite && onToggleFavorite(anime)}
+                    onClick={() => onToggleFavorite && onToggleFavorite(activeAnime)}
                     className={`p-2.5 rounded-lg border transition-all ${
                       isFavorite 
                         ? 'bg-red-600/20 text-red-500 border-red-500/50 hover:bg-red-600/30' 
@@ -626,9 +684,9 @@ export default function DetailModal({
                   </button>
 
                   {/* Batch Download */}
-                  {uploadedEpisodes.length > 0 && (
+                  {effectiveEpisodes.length > 0 && (
                     <button
-                      onClick={() => onOpenBatchDownload(anime, audioMode)}
+                      onClick={() => onOpenBatchDownload(activeAnime, audioMode)}
                       className="flex items-center gap-2 font-bold px-4 py-2.5 rounded-lg shadow-lg transition-transform text-xs sm:text-sm bg-[#E50914] hover:bg-[#B81D24] text-white shadow-red-600/30 hover:scale-105"
                     >
                       <Download className="w-4 h-4" />
@@ -637,9 +695,9 @@ export default function DetailModal({
                   )}
 
                   {/* Launch MPV */}
-                  {uploadedEpisodes.length > 0 && (
+                  {effectiveEpisodes.length > 0 && (
                     <button
-                      onClick={() => onPlayMpv(anime, uploadedEpisodes[0] || 1, audioMode)}
+                      onClick={() => onPlayMpv(activeAnime, effectiveEpisodes[0] || 1, audioMode)}
                       className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium px-3.5 py-2.5 rounded-lg border border-zinc-700 transition-transform hover:scale-105 text-xs sm:text-sm"
                       title={t('playExternalMpv')}
                     >
@@ -659,51 +717,51 @@ export default function DetailModal({
             {/* Left 2 Cols: Details & Synopsis */}
             <div className="md:col-span-2 space-y-4">
               <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
-                {anime.matchPercent ? (
+                {activeAnime.matchPercent ? (
                   <span className="text-emerald-400 flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
                     <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                    {anime.matchPercent}% {currentLang.startsWith('zh') ? '推薦契合度' : currentLang === 'ja' ? 'おすすめ一致度' : 'Match'}
+                    {activeAnime.matchPercent}% {currentLang.startsWith('zh') ? '推薦契合度' : currentLang === 'ja' ? 'おすすめ一致度' : 'Match'}
                   </span>
-                ) : anime.averageScore ? (
+                ) : activeAnime.averageScore ? (
                   <span className="text-amber-400 flex items-center gap-1 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30">
                     <Star className="w-3.5 h-3.5 fill-amber-400" />
-                    {anime.averageScore}% {currentLang.startsWith('zh') ? '社群好評' : currentLang === 'ja' ? '高評価' : 'Rating'}
+                    {activeAnime.averageScore}% {currentLang.startsWith('zh') ? '社群好評' : currentLang === 'ja' ? '高評価' : 'Rating'}
                   </span>
                 ) : null}
-                {anime.seasonYear && <span className="text-zinc-400">{anime.seasonYear}</span>}
-                {anime.startDate?.year && (
+                {activeAnime.seasonYear && <span className="text-zinc-400">{activeAnime.seasonYear}</span>}
+                {activeAnime.startDate?.year && (
                   <span className="text-indigo-400 flex items-center gap-1 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-500/30">
                     <Calendar className="w-3.5 h-3.5" />
-                    {currentLang.startsWith('zh') ? '首播於' : currentLang === 'ja' ? '放送開始' : 'Premieres'} {anime.startDate.year}{anime.startDate.month ? `-${String(anime.startDate.month).padStart(2, '0')}` : ''}
+                    {currentLang.startsWith('zh') ? '首播於' : currentLang === 'ja' ? '放送開始' : 'Premieres'} {activeAnime.startDate.year}{activeAnime.startDate.month ? `-${String(activeAnime.startDate.month).padStart(2, '0')}` : ''}
                   </span>
                 )}
                 <span className="text-zinc-500">•</span>
                 <span className="text-zinc-300 font-medium">
-                  {uploadedEpisodes.length > 0 
-                    ? (currentLang.startsWith('zh') ? `已發布 ${uploadedEpisodes.length} 集 / 全 ${totalScheduled} 集` : currentLang === 'ja' ? `${uploadedEpisodes.length} 話配信中 / 全 ${totalScheduled} 話` : `${uploadedEpisodes.length} Released / ${totalScheduled} Planned`)
+                  {effectiveEpisodes.length > 0 
+                    ? (currentLang.startsWith('zh') ? `已發布 ${effectiveEpisodes.length} 集 / 全 ${totalScheduled} 集` : currentLang === 'ja' ? `${effectiveEpisodes.length} 話配信中 / 全 ${totalScheduled} 話` : `${effectiveEpisodes.length} Released / ${totalScheduled} Planned`)
                     : isUnreleased 
                     ? (currentLang.startsWith('zh') ? `即將開播 / 預計全 ${totalScheduled} 集` : currentLang === 'ja' ? `近日公開 / 全 ${totalScheduled} 話予定` : `0 Released / ${totalScheduled} Planned`)
                     : (currentLang.startsWith('zh') ? `全 ${totalScheduled} 集` : currentLang === 'ja' ? `全 ${totalScheduled} 話` : `${totalScheduled} Episodes`)}
                 </span>
-                {anime.status && (
+                {activeAnime.status && (
                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                    anime.status === 'RELEASING' 
+                    activeAnime.status === 'RELEASING' 
                       ? 'bg-amber-950/80 text-amber-400 border border-amber-600/30' 
-                      : anime.status === 'NOT_YET_RELEASED'
+                      : activeAnime.status === 'NOT_YET_RELEASED'
                       ? 'bg-indigo-950/80 text-indigo-400 border border-indigo-600/30'
                       : 'bg-zinc-800 text-zinc-300'
                   }`}>
                     {(() => {
-                      if (anime.status === 'NOT_YET_RELEASED') {
+                      if (activeAnime.status === 'NOT_YET_RELEASED') {
                         return currentLang.startsWith('zh') ? '即將上線' : currentLang === 'ja' ? '近日公開' : 'COMING SOON';
                       }
-                      if (anime.status === 'RELEASING') {
+                      if (activeAnime.status === 'RELEASING') {
                         return currentLang.startsWith('zh') ? '連載中' : currentLang === 'ja' ? '放送中' : 'RELEASING';
                       }
-                      if (anime.status === 'FINISHED') {
+                      if (activeAnime.status === 'FINISHED') {
                         return currentLang.startsWith('zh') ? '已完結' : currentLang === 'ja' ? '完結' : 'FINISHED';
                       }
-                      return anime.status;
+                      return activeAnime.status;
                     })()}
                   </span>
                 )}
@@ -897,11 +955,11 @@ export default function DetailModal({
                 }`}
               >
                 <Tv className="w-3.5 h-3.5" />
-                <span>{t('episodesTab')} ({uploadedEpisodes.length})</span>
+                <span>{t('episodesTab')} ({effectiveEpisodes.length})</span>
               </button>
 
               {/* TAB 2: TRAILERS & PV VIEW - Show only if trailers/YouTube available */}
-              {(mediaVideos.trailers.length > 0 || anime?.trailer?.id) && (
+              {(mediaVideos.trailers.length > 0 || activeAnime?.trailer?.id) && (
                 <button
                   onClick={() => setActiveTab('trailers')}
                   className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
@@ -911,7 +969,7 @@ export default function DetailModal({
                   }`}
                 >
                   <Film className="w-3.5 h-3.5" />
-                  <span>{t('trailersTab')} ({mediaVideos.trailers.length || (anime?.trailer?.id ? 1 : 0)})</span>
+                  <span>{t('trailersTab')} ({mediaVideos.trailers.length || (activeAnime?.trailer?.id ? 1 : 0)})</span>
                 </button>
               )}
 
@@ -985,13 +1043,13 @@ export default function DetailModal({
                   <span>{isSyncingEpisodes ? 'Checking...' : 'Refresh'}</span>
                 </button>
 
-                {uploadedEpisodes.length > 0 && (
+                {effectiveEpisodes.length > 0 && (
                   <button
-                    onClick={() => onOpenBatchDownload(anime, audioMode)}
+                    onClick={() => onOpenBatchDownload(activeAnime, audioMode)}
                     className="text-xs text-[#E50914] hover:underline font-semibold flex items-center gap-1 ml-2"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Download All ({uploadedEpisodes.length})</span>
+                    <span>Download All ({effectiveEpisodes.length})</span>
                   </button>
                 )}
               </div>
@@ -1001,7 +1059,7 @@ export default function DetailModal({
           {/* TAB 1: EPISODES VIEW */}
           {activeTab === 'episodes' && (
             <div className="mt-4">
-              {isUnreleased && uploadedEpisodes.length === 0 ? (
+              {isUnreleased && effectiveEpisodes.length === 0 ? (
                 <div className="py-8 px-4 flex flex-col items-center justify-center text-center bg-zinc-900/40 rounded-xl border border-zinc-800/80">
                   <Calendar className="w-10 h-10 text-indigo-400 mb-2" />
                   <p className="text-sm font-bold text-zinc-200">Broadcast Not Started Yet</p>
@@ -1061,6 +1119,7 @@ export default function DetailModal({
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 max-h-72 overflow-y-auto custom-scrollbar pr-2">
                     {displayedEpisodes.map((ep) => {
                     const isReleased = releasedSet.has(ep);
+                    const isCheckingPending = !isReleased && !isUnreleased && isSyncingEpisodes && (!maxAiredCap || ep <= maxAiredCap);
                     return (
                       <div
                         key={ep}
@@ -1071,13 +1130,7 @@ export default function DetailModal({
                         }`}
                         onClick={() => {
                           if (isReleased) {
-                            onPlay(
-                              chineseInfo?.titleZh 
-                                ? { ...anime, titleZh: chineseInfo.titleZh, titleZhTW: chineseInfo.titleZh, titleZhCN: chineseInfo.titleZh } 
-                                : anime, 
-                              ep, 
-                              audioMode
-                            );
+                            onPlay(activeAnime, ep, audioMode);
                           }
                         }}
                       >
@@ -1096,8 +1149,10 @@ export default function DetailModal({
                               {currentLang === 'en' ? `Ep ${ep}` : currentLang === 'ja' ? `第 ${ep} 話` : `第 ${ep} 集`}
                             </span>
                             {!isReleased && (
-                              <span className="text-[10px] text-amber-500 font-medium block">
-                                {currentLang === 'en' ? 'Airing Soon' : currentLang === 'ja' ? '近日公開' : '即將開播'}
+                              <span className={`text-[10px] font-medium block ${isCheckingPending ? 'text-emerald-400' : 'text-amber-500'}`}>
+                                {isCheckingPending
+                                  ? (currentLang === 'en' ? 'Checking...' : currentLang === 'ja' ? '確認中...' : '檢查中...')
+                                  : (currentLang === 'en' ? 'Airing Soon' : currentLang === 'ja' ? '近日公開' : '即將開播')}
                               </span>
                             )}
                           </div>
@@ -1108,7 +1163,7 @@ export default function DetailModal({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onOpenBatchDownload(anime, audioMode, `${ep}`);
+                                onOpenBatchDownload(activeAnime, audioMode, `${ep}`);
                               }}
                               className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-700"
                               title={`Download Episode ${ep}`}
