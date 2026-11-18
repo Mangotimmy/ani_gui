@@ -1,7 +1,9 @@
 // src/components/AnimeCarousel.jsx - Infinite Horizontal Scrolling Carousel with Auto-Load
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect, startTransition } from 'react';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import AnimeCard from './AnimeCard';
+
+const INITIAL_VISIBLE_CARDS = 12;
 
 function AnimeCarousel({ 
   title, 
@@ -23,6 +25,27 @@ function AnimeCarousel({
   const autoScrollRafRef = useRef(null);
   const autoScrollDirRef = useRef(null);
   const loadMoreStateRef = useRef({ onLoadMore, isLoadingMore, hasMore });
+  const [showAll, setShowAll] = useState(() => animes.length <= INITIAL_VISIBLE_CARDS);
+
+  useEffect(() => {
+    if (showAll || animes.length <= INITIAL_VISIBLE_CARDS) return undefined;
+    let cancelled = false;
+    const expand = () => {
+      if (!cancelled) startTransition(() => setShowAll(true));
+    };
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(expand, { timeout: 1200 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback(id);
+      };
+    }
+    const timer = setTimeout(expand, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [showAll, animes.length]);
 
   React.useEffect(() => {
     loadMoreStateRef.current = { onLoadMore, isLoadingMore, hasMore };
@@ -41,6 +64,7 @@ function AnimeCarousel({
 
   const startAutoScroll = React.useCallback((direction) => {
     stopAutoScroll();
+    if (direction === 'right') setShowAll(true);
     autoScrollDirRef.current = direction;
     if (!rowRef.current) return;
     // Disable CSS smooth scroll behavior during per-frame rAF scrolling to prevent jitter
@@ -82,6 +106,7 @@ function AnimeCarousel({
   }, [stopAutoScroll]);
 
   const scroll = (direction) => {
+    if (direction === 'right') setShowAll(true);
     if (rowRef.current) {
       rowRef.current.style.scrollBehavior = 'smooth';
       const { scrollLeft, clientWidth, scrollWidth } = rowRef.current;
@@ -103,6 +128,7 @@ function AnimeCarousel({
   };
 
   const handleScroll = () => {
+    if (!showAll) setShowAll(true);
     if (!rowRef.current || !onLoadMore || isLoadingMore || !hasMore) return;
     const { scrollLeft, clientWidth, scrollWidth } = rowRef.current;
     if (scrollLeft + clientWidth >= scrollWidth - 500) {
@@ -131,6 +157,10 @@ function AnimeCarousel({
   }, [animes.length]);
 
   if (!animes || animes.length === 0) return null;
+
+  const visibleAnimes = showAll || animes.length <= INITIAL_VISIBLE_CARDS
+    ? animes
+    : animes.slice(0, INITIAL_VISIBLE_CARDS);
 
   return (
     <div 
@@ -182,7 +212,7 @@ function AnimeCarousel({
           onScroll={handleScroll}
           className="flex items-center gap-3.5 overflow-x-auto hide-scrollbar scroll-smooth py-2"
         >
-          {animes.map((anime) => (
+          {visibleAnimes.map((anime) => (
             <AnimeCard
               key={anime.id}
               anime={anime}

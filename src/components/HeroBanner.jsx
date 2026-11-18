@@ -103,11 +103,12 @@ export default function HeroBanner({
       {/* Background Image with Dark Vignette */}
       <div className="absolute inset-0">
         <ThumbnailImage
-          src={anime.bannerImage || anime}
+          src={backdrop}
           alt={title}
+          priority
           fetchPriority="high"
           loading="eager"
-          decoding="async"
+          decoding="auto"
           width="1920"
           height="800"
           style={{ aspectRatio: '16/7' }}

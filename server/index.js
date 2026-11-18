@@ -1249,6 +1249,131 @@ app.get('/api/app/check-update', async (req, res) => {
 });
 
 const distPath = path.join(__dirname, '..', 'dist');
+const resolvedDistPath = path.resolve(distPath);
+
+const STATIC_MIME_TYPES = {
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8'
+};
+const compressedStaticCache = new Map();
+const MAX_COMPRESSED_STATIC_CACHE = 64;
+
+function pickStaticEncoding(acceptEncoding = '') {
+  if (/\bbr\b/i.test(acceptEncoding)) return 'br';
+  if (/\bgzip\b/i.test(acceptEncoding)) return 'gzip';
+  return null;
+}
+
+function getCompressedStaticBuffer(filePath, stat, encoding) {
+  const cacheKey = `${filePath}:${stat.mtimeMs}:${stat.size}:${encoding}`;
+  const cached = compressedStaticCache.get(cacheKey);
+  if (cached) {
+    // Refresh insertion order for simple LRU eviction.
+    compressedStaticCache.delete(cacheKey);
+    compressedStaticCache.set(cacheKey, cached);
+    return cached;
+  }
+
+  const raw = fs.readFileSync(filePath);
+  const compressed = encoding === 'br'
+    ? zlib.brotliCompressSync(raw, {
+        params: {
+          [zlib.constants.BROTLI_PARAM_MODE]: zlib.constants.BROTLI_MODE_TEXT,
+          [zlib.constants.BROTLI_PARAM_QUALITY]: 6
+        }
+      })
+    : zlib.gzipSync(raw, { level: 6 });
+
+  if (compressedStaticCache.size >= MAX_COMPRESSED_STATIC_CACHE) {
+    const oldestKey = compressedStaticCache.keys().next().value;
+    if (oldestKey !== undefined) compressedStaticCache.delete(oldestKey);
+  }
+  compressedStaticCache.set(cacheKey, compressed);
+  return compressed;
+}
+
+function trySendCompressedStatic(req, res, filePath, { isAsset = false } = {}) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  if (req.headers.range) return false;
+
+  const encoding = pickStaticEncoding(req.headers['accept-encoding']);
+  if (!encoding) return false;
+
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeType = STATIC_MIME_TYPES[ext];
+  if (!mimeType) return false;
+
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    return false;
+  }
+  if (!stat.isFile() || stat.size < 512) return false;
+
+  const compressed = getCompressedStaticBuffer(filePath, stat, encoding);
+  const baseName = path.basename(filePath);
+  const isNoStoreShell = baseName === 'index.html' || baseName === 'sw.js';
+  const cacheControl = isAsset
+    ? 'public, max-age=31536000, immutable'
+    : isNoStoreShell
+      ? 'no-cache, no-store, must-revalidate'
+      : ext === '.svg'
+        ? 'public, max-age=604800'
+        : 'public, max-age=0';
+
+  const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}-${encoding}"`;
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Cache-Control', cacheControl);
+  res.setHeader('Vary', 'Accept-Encoding');
+  res.setHeader('ETag', etag);
+
+  if (!isNoStoreShell && req.headers['if-none-match'] === etag) {
+    res.status(304).end();
+    return true;
+  }
+
+  res.setHeader('Content-Encoding', encoding);
+  res.setHeader('Content-Length', compressed.length);
+  if (req.method === 'HEAD') {
+    res.status(200).end();
+  } else {
+    res.status(200).end(compressed);
+  }
+  return true;
+}
+
+// Serve pre-compressed (Brotli / Gzip) static bundles & SPA shell so cold loads do not
+// transfer raw 500+ kB JS/CSS payloads even when accessed directly or behind a plain proxy.
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(req.path);
+  } catch {
+    return next();
+  }
+
+  const relativePath = decodedPath === '/' ? 'index.html' : decodedPath.replace(/^\/+/, '');
+  const candidate = path.resolve(resolvedDistPath, relativePath);
+  if (candidate !== resolvedDistPath && !candidate.startsWith(resolvedDistPath + path.sep)) {
+    return next();
+  }
+
+  if (trySendCompressedStatic(req, res, candidate, { isAsset: req.path.startsWith('/assets/') })) {
+    return;
+  }
+  next();
+});
 
 // Serve the built SPA. Vite emits content-hashed filenames under /assets, so they are
 // immutable and can be cached for a year (repeat visits skip the network entirely and the
@@ -1272,8 +1397,10 @@ app.use(express.static(distPath, {
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) return next();
+  const indexPath = path.join(distPath, 'index.html');
+  if (trySendCompressedStatic(req, res, indexPath)) return;
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.sendFile(path.join(distPath, 'index.html'));
+  res.sendFile(indexPath);
 });
 
 // --- Central error handler -------------------------------------------------

@@ -32,6 +32,7 @@ import {
   checkFavoritesForNewAiring 
 } from './utils/notifications';
 import { getAnimeCoverUrl } from './utils/image';
+import { pickAnimeTitle } from './utils/titles';
 
 // Trim the profiles we push to the server: descriptions and external links are not needed
 // for cross-device favourites/history and made every sync payload needlessly large.
@@ -77,19 +78,16 @@ export default function App() {
   });
 
   useEffect(() => {
+    const syncThemeClass = (el, addClass, removeClass) => {
+      if (!el) return;
+      if (el.classList.contains(removeClass)) el.classList.remove(removeClass);
+      if (!el.classList.contains(addClass)) el.classList.add(addClass);
+    };
     const applyTheme = (tMode) => {
       const isLight = tMode === 'light' || (tMode === 'system' && typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
-      if (isLight) {
-        document.documentElement.classList.add('theme-light');
-        document.documentElement.classList.remove('theme-dark');
-        document.body.classList.add('theme-light');
-        document.body.classList.remove('theme-dark');
-      } else {
-        document.documentElement.classList.remove('theme-light');
-        document.documentElement.classList.add('theme-dark');
-        document.body.classList.remove('theme-light');
-        document.body.classList.add('theme-dark');
-      }
+      const addClass = isLight ? 'theme-light' : 'theme-dark';
+      const removeClass = isLight ? 'theme-dark' : 'theme-light';
+      syncThemeClass(document.documentElement, addClass, removeClass);
     };
     applyTheme(theme);
     try {
@@ -1095,6 +1093,128 @@ function hasHomeCache() {
     });
   };
 
+  // --- URL Routing & Deep-Linking Engine ---
+  // 1. Initial Route Deep-Linking: e.g. /anime/30203/1 or /anime/30203
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.location.pathname) return;
+    const pathname = window.location.pathname;
+    const match = pathname.match(/^\/anime\/([0-9a-zA-Z_-]+)(?:\/(\d+))?\/?$/);
+    if (!match) return;
+
+    const animeId = match[1];
+    const episode = match[2] ? Math.max(1, parseInt(match[2], 10)) : 1;
+    const hasEpisode = Boolean(match[2]);
+
+    fetch(`/api/anime/${animeId}`)
+      .then(r => r.json())
+      .then(res => {
+        if (res.success && res.data) {
+          const anime = res.data;
+          if (hasEpisode) {
+            handlePlay(anime, episode);
+          } else {
+            handleMoreInfo(anime);
+          }
+        }
+      })
+      .catch(err => console.warn('[Router] Failed to restore anime from URL:', err));
+  }, []);
+
+  // 2. Handle Browser Back & Forward Navigation (popstate)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const onPopState = () => {
+      const pathname = window.location.pathname;
+      const match = pathname.match(/^\/anime\/([0-9a-zA-Z_-]+)(?:\/(\d+))?\/?$/);
+      if (!match) {
+        setActivePlayer(null);
+        setSelectedAnime(null);
+        document.title = 'AniFlix - Anime Streaming & Downloader';
+        return;
+      }
+
+      const animeId = match[1];
+      const episode = match[2] ? Math.max(1, parseInt(match[2], 10)) : 1;
+      const hasEpisode = Boolean(match[2]);
+
+      if (hasEpisode) {
+        if (activePlayer?.anime?.id === Number(animeId) || String(activePlayer?.anime?.id) === animeId) {
+          setActivePlayer(prev => prev ? { ...prev, episode } : null);
+        } else {
+          fetch(`/api/anime/${animeId}`)
+            .then(r => r.json())
+            .then(res => {
+              if (res.success && res.data) {
+                setActivePlayer({ anime: res.data, episode, audioMode: 'sub' });
+                setSelectedAnime(null);
+              }
+            })
+            .catch(() => {});
+        }
+      } else {
+        setActivePlayer(null);
+        if (selectedAnime?.id === Number(animeId) || String(selectedAnime?.id) === animeId) {
+          // Already on this modal
+        } else {
+          fetch(`/api/anime/${animeId}`)
+            .then(r => r.json())
+            .then(res => {
+              if (res.success && res.data) {
+                setSelectedAnime(res.data);
+              }
+            })
+            .catch(() => {});
+        }
+      }
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [activePlayer, selectedAnime]);
+
+  // 3. Keep URL bar synchronized with active anime & episode in real time
+  const initialMountRef = useRef(true);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.location.protocol.startsWith('http')) return;
+
+    let targetPath = '/';
+    let targetTitle = 'AniFlix - Anime Streaming & Downloader';
+
+    if (activePlayer && activePlayer.anime) {
+      const animeId = activePlayer.anime.id;
+      const ep = activePlayer.episode || 1;
+      targetPath = `/anime/${animeId}/${ep}`;
+      const title = pickAnimeTitle(activePlayer.anime, currentLang) || 'Anime';
+      targetTitle = `${title} - 第 ${ep} 集 | AniFlix`;
+    } else if (selectedAnime) {
+      const animeId = selectedAnime.id;
+      targetPath = `/anime/${animeId}`;
+      const title = pickAnimeTitle(selectedAnime, currentLang) || 'Anime';
+      targetTitle = `${title} | AniFlix`;
+    }
+
+    if (initialMountRef.current) {
+      initialMountRef.current = false;
+      if (window.location.pathname.startsWith('/anime/')) {
+        return;
+      }
+    }
+
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState(
+        { 
+          animeId: activePlayer?.anime?.id || selectedAnime?.id, 
+          episode: activePlayer?.episode, 
+          type: activePlayer ? 'play' : selectedAnime ? 'detail' : 'home' 
+        }, 
+        '', 
+        targetPath
+      );
+    }
+    document.title = targetTitle;
+  }, [activePlayer, selectedAnime, currentLang]);
+
   const handleClearWatchHistory = () => {
     setWatchHistory([]);
     try {
@@ -1286,6 +1406,13 @@ function hasHomeCache() {
   };
 
   // UI Zoom & Scale Handler
+  const applyWebZoom = (scale) => {
+    const nextZoom = scale === 1 ? '' : String(scale);
+    if (document.documentElement.style.zoom !== nextZoom) {
+      document.documentElement.style.zoom = nextZoom;
+    }
+  };
+
   const handleUpdateUiScale = useCallback((nextScale) => {
     const s = Math.max(0.6, Math.min(2.0, Math.round((Number(nextScale) || 1.0) * 100) / 100));
     setUiScale(s);
@@ -1295,7 +1422,7 @@ function hasHomeCache() {
     if (window.aniflixDesktop?.setZoomFactor) {
       window.aniflixDesktop.setZoomFactor(s);
     } else {
-      document.documentElement.style.zoom = String(s);
+      applyWebZoom(s);
     }
   }, []);
 
@@ -1303,7 +1430,7 @@ function hasHomeCache() {
     if (window.aniflixDesktop?.setZoomFactor) {
       window.aniflixDesktop.setZoomFactor(uiScale);
     } else {
-      document.documentElement.style.zoom = String(uiScale);
+      applyWebZoom(uiScale);
     }
     if (window.aniflixDesktop?.onZoomChange) {
       return window.aniflixDesktop.onZoomChange((factor) => {

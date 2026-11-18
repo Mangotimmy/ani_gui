@@ -288,7 +288,7 @@ h1, h2, h3, p, .line-clamp-1, .line-clamp-2 {
    Light Mode (White Mode) Theme Styles
    ========================================================================== */
 html.theme-light,
-body.theme-light {
+html.theme-light body {
   background-color: #f8fafc !important;
   color: #0f172a !important;
 }

@@ -1056,6 +1056,9 @@ export default function VideoPlayer({
     let targetPct = 0;
     if (video.readyState >= 3) {
       targetPct = 100;
+      if (!video.seeking) {
+        setIsBuffering(false);
+      }
     } else {
       targetPct = Math.min(99, Math.round((aheadSec / targetSec) * 100));
     }
@@ -1077,9 +1080,20 @@ export default function VideoPlayer({
     const interval = setInterval(() => {
       updateBufferProgress();
 
+      const video = videoRef.current;
+      if (video && video.readyState >= 3 && !video.seeking) {
+        setDisplayBufferPercent(100);
+        setIsBuffering(false);
+        return;
+      }
+
       setDisplayBufferPercent((prev) => {
         const target = targetBufferPercentRef.current;
         if (prev >= target) {
+          if (target >= 100) {
+            setIsBuffering(false);
+            return 100;
+          }
           // Gently creep forward while buffering before playback is ready so UI feels active
           if (prev < 97 && target < 97) {
             return prev + 1;
@@ -1088,7 +1102,11 @@ export default function VideoPlayer({
         }
         const diff = target - prev;
         const step = Math.max(1, Math.ceil(diff * 0.25));
-        return Math.min(100, prev + step);
+        const next = Math.min(100, prev + step);
+        if (next >= 100) {
+          setIsBuffering(false);
+        }
+        return next;
       });
     }, 70);
 
@@ -1101,6 +1119,10 @@ export default function VideoPlayer({
     if (!video) return;
     const cur = video.currentTime;
     setCurrentTime(cur);
+
+    if (isBuffering && video.readyState >= 3) {
+      setIsBuffering(false);
+    }
 
     // Buffer percentage & buffered range calculation
     updateBufferProgress();
@@ -1583,6 +1605,20 @@ export default function VideoPlayer({
     video.currentTime = target;
     setCurrentTime(target);
     handleMouseMove();
+
+    // Check if target is already within buffered range to prevent freeze
+    let isAlreadyBuffered = false;
+    if (video.buffered && video.buffered.length > 0) {
+      for (let i = 0; i < video.buffered.length; i++) {
+        if (video.buffered.start(i) <= target && video.buffered.end(i) >= target + 1) {
+          isAlreadyBuffered = true;
+          break;
+        }
+      }
+    }
+    if (isAlreadyBuffered && video.readyState >= 3) {
+      setIsBuffering(false);
+    }
 
     const sign = seconds > 0 ? `+${seconds}s` : `${seconds}s`;
     setSeekRipple({
@@ -2168,7 +2204,9 @@ export default function VideoPlayer({
             updateBufferProgress();
           }}
           onSeeking={() => {
-            setIsBuffering(true);
+            if (videoRef.current && videoRef.current.readyState < 3) {
+              setIsBuffering(true);
+            }
             updateBufferProgress();
           }}
           onProgress={updateBufferProgress}

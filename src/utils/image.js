@@ -136,30 +136,34 @@ export function getThumbnailSources(target) {
     };
   }
 
-  // General image URL: return multi-format candidate proxy URLs
-  // Derive a lower-res AniList medium cover URL if possible for Facebook LQIP blur-up
+  // General image URL: keep one canonical proxy URL so <link rel="preload"> and
+  // disk/SW caches share the exact same key (the proxy only transcodes YouTube URLs).
+  const canonical = toCachedImageUrl(trimmed);
   const anilistMedium = trimmed.includes('/cover/large/')
-    ? trimmed.replace('/cover/large/', '/cover/medium/')
-    : trimmed;
+    ? toCachedImageUrl(trimmed.replace('/cover/large/', '/cover/medium/'))
+    : '';
 
   return {
-    avif: toCachedImageUrl(trimmed, 'avif'),
-    webp: toCachedImageUrl(trimmed, 'webp'),
-    jpg: toCachedImageUrl(trimmed, 'jpg'),
-    fallback: toCachedImageUrl(trimmed),
-    placeholder: toCachedImageUrl(anilistMedium, 'webp')
+    avif: '',
+    webp: '',
+    jpg: '',
+    fallback: canonical,
+    placeholder: anilistMedium
   };
 }
 
 /**
- * Returns AVIF, WebP, JPG, and LQIP placeholder thumbnail sources for an anime's cover.
+ * Returns AVIF, WebP, JPG, and placeholder thumbnail sources for an anime's cover.
  */
 export function getAnimeCoverSources(anime, preferred = 'large') {
   const baseCover = getAnimeCoverUrl(anime, preferred);
   const sources = getThumbnailSources(baseCover);
-  const mediumUrl = anime?.coverImage?.medium || anime?.coverImage?.large || '';
+  const mediumUrl = anime?.coverImage?.medium || '';
   if (mediumUrl) {
-    sources.placeholder = toCachedImageUrl(mediumUrl, 'webp');
+    const cachedMedium = toCachedImageUrl(mediumUrl);
+    if (cachedMedium && cachedMedium !== sources.fallback) {
+      sources.placeholder = cachedMedium;
+    }
   }
   return sources;
 }

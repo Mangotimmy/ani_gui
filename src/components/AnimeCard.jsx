@@ -58,10 +58,10 @@ function AnimeCard({
             e.stopPropagation();
             if (onToggleFavorite) onToggleFavorite(anime);
           }}
-          className={`absolute top-2 left-2 z-20 p-1.5 rounded-full backdrop-blur-md transition-all ${
+          className={`absolute top-2 left-2 z-20 p-1.5 rounded-full transition-colors ${
             isFavorite
-              ? 'bg-red-600/80 text-white shadow-lg shadow-red-600/30'
-              : 'bg-black/60 text-zinc-300 opacity-0 group-hover:opacity-100 hover:text-white hover:bg-black/80'
+              ? 'bg-red-600/90 text-white shadow-lg shadow-red-600/30'
+              : 'bg-black/75 text-zinc-300 opacity-0 group-hover:opacity-100 hover:text-white hover:bg-black/90'
           }`}
           aria-label={isFavorite 
             ? (currentLang === 'ja' ? 'お気に入りから削除' : currentLang.startsWith('zh') ? '從收藏移除' : 'Remove from Favorites') 
@@ -76,11 +76,11 @@ function AnimeCard({
 
         {/* Match Percentage or Rating or Upcoming Badge Top Right */}
         {isRecommendation && anime.matchPercent ? (
-          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-emerald-950/85 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold text-emerald-400 border border-emerald-500/30 shadow-md">
+          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-emerald-950/90 px-1.5 py-0.5 rounded text-[10px] font-bold text-emerald-400 border border-emerald-500/30 shadow-md">
             <span>{anime.matchPercent}% {currentLang === 'ja' ? '一致' : currentLang.startsWith('zh') ? '契合度' : 'Match'}</span>
           </div>
         ) : anime.status === 'NOT_YET_RELEASED' ? (
-          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-indigo-600/90 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow-md">
+          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-indigo-600/95 px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow-md">
             <span>
               {anime.startDate?.year 
                 ? `${anime.startDate.year}${anime.startDate.month ? '/' + anime.startDate.month : ''}`
@@ -88,7 +88,7 @@ function AnimeCard({
             </span>
           </div>
         ) : score ? (
-          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-black/75 backdrop-blur-md px-1.5 py-0.5 rounded text-[11px] font-bold text-amber-400 border border-amber-500/20">
+          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-black/85 px-1.5 py-0.5 rounded text-[11px] font-bold text-amber-400 border border-amber-500/20">
             <Star className="w-3 h-3 fill-amber-400" />
             <span>{score}</span>
           </div>
@@ -97,7 +97,7 @@ function AnimeCard({
         {/* Bottom Title Gradient Overlay on Card */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-2.5 pt-6 flex flex-col justify-end">
           {isRecommendation && anime.recommendationReason && (
-            <div className="text-[10px] text-amber-300 font-semibold line-clamp-1 mb-1 flex items-center gap-1 bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-500/30 shadow-sm backdrop-blur-sm">
+            <div className="text-[10px] text-amber-300 font-semibold line-clamp-1 mb-1 flex items-center gap-1 bg-amber-950/85 px-1.5 py-0.5 rounded border border-amber-500/30 shadow-sm">
               <Sparkles className="w-2.5 h-2.5 text-amber-400 shrink-0" />
               <span className="truncate">{anime.recommendationReason}</span>
             </div>
@@ -133,73 +133,75 @@ function AnimeCard({
           </div>
         </div>
 
-        {/* Quick Action Overlay on Hover (mouse convenience; the poster button is the keyboard path) */}
-        <div
-          role="presentation"
-          onClick={() => { if (onMoreInfo) startTransition(() => onMoreInfo(anime)); }}
-          className="absolute inset-0 z-20 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2 pointer-events-none group-hover:pointer-events-auto"
-        >
-          {anime.status === 'NOT_YET_RELEASED' ? (
-            <>
-              {anime.trailer?.id ? (
+        {/* Quick Action Overlay on Hover (mounted lazily on hover to save ~7 DOM nodes + 3 SVGs per card) */}
+        {isHovered && (
+          <div
+            role="presentation"
+            onClick={() => { if (onMoreInfo) startTransition(() => onMoreInfo(anime)); }}
+            className="absolute inset-0 z-20 bg-black/60 flex items-center justify-center gap-2 p-2"
+          >
+            {anime.status === 'NOT_YET_RELEASED' ? (
+              <>
+                {anime.trailer?.id ? (
+                  <button
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      if (onMoreInfo) startTransition(() => onMoreInfo(anime)); 
+                    }}
+                    className="px-3.5 py-1.5 rounded-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white flex items-center gap-1.5 shadow-lg shadow-red-600/30 transition-transform hover:scale-105 motion-safe:active:scale-[0.96] text-xs font-bold"
+                    title={currentLang === 'ja' ? '予告編 / PV を再生' : currentLang.startsWith('zh') ? '觀看官方預告 / PV' : 'Watch Official PV / Trailer'}
+                  >
+                    <Play className="w-3.5 h-3.5 fill-white" />
+                    <span>{currentLang === 'ja' ? 'PV 視聴' : currentLang.startsWith('zh') ? '觀看 PV' : 'Watch PV'}</span>
+                  </button>
+                ) : null}
                 <button
                   onClick={(e) => { 
                     e.stopPropagation(); 
                     if (onMoreInfo) startTransition(() => onMoreInfo(anime)); 
                   }}
-                  className="px-3.5 py-1.5 rounded-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white flex items-center gap-1.5 shadow-lg shadow-red-600/30 transition-transform hover:scale-105 motion-safe:active:scale-[0.96] text-xs font-bold"
-                  title={currentLang === 'ja' ? '予告編 / PV を再生' : currentLang.startsWith('zh') ? '觀看官方預告 / PV' : 'Watch Official PV / Trailer'}
+                  className="w-9 h-9 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-white flex items-center justify-center shadow-lg transition-transform hover:scale-105 motion-safe:active:scale-[0.96]"
+                  title={currentLang === 'ja' ? '詳細・放送スケジュール' : currentLang.startsWith('zh') ? '詳細資訊與排期' : 'Details & Schedule'}
                 >
-                  <Play className="w-3.5 h-3.5 fill-white" />
-                  <span>{currentLang === 'ja' ? 'PV 視聴' : currentLang.startsWith('zh') ? '觀看 PV' : 'Watch PV'}</span>
+                  <Info className="w-4 h-4" />
                 </button>
-              ) : null}
-              <button
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  if (onMoreInfo) startTransition(() => onMoreInfo(anime)); 
-                }}
-                className="w-9 h-9 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-white flex items-center justify-center shadow-lg transition-transform hover:scale-105 motion-safe:active:scale-[0.96]"
-                title={currentLang === 'ja' ? '詳細・放送スケジュール' : currentLang.startsWith('zh') ? '詳細資訊與排期' : 'Details & Schedule'}
-              >
-                <Info className="w-4 h-4" />
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  if (onPlay) startTransition(() => onPlay(anime, 1)); 
-                }}
-                className="w-10 h-10 rounded-full bg-white hover:bg-zinc-200 text-black flex items-center justify-center shadow-lg transition-transform hover:scale-110 motion-safe:active:scale-[0.96]"
-                title={currentLang === 'ja' ? '第 1 話を再生' : currentLang.startsWith('zh') ? '播放第 1 集' : 'Play Episode 1'}
-              >
-                <Play className="w-5 h-5 fill-black ml-0.5" />
-              </button>
-              <button
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  if (onDownload) startTransition(() => onDownload(anime)); 
-                }}
-                className="w-9 h-9 rounded-full bg-[#E50914] hover:bg-[#B81D24] text-white flex items-center justify-center shadow-lg transition-transform hover:scale-110 motion-safe:active:scale-[0.96]"
-                title={currentLang === 'ja' ? 'ダウンロード' : currentLang.startsWith('zh') ? '下載此動漫' : 'Download Series'}
-              >
-                <Download className="w-4 h-4" />
-              </button>
-              <button
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  if (onMoreInfo) startTransition(() => onMoreInfo(anime)); 
-                }}
-                className="w-9 h-9 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-white flex items-center justify-center shadow-lg transition-transform hover:scale-110 motion-safe:active:scale-[0.96]"
-                title={currentLang === 'ja' ? '詳細・エピソード一覧' : currentLang.startsWith('zh') ? '詳細資訊與集數' : 'Details & Episodes'}
-              >
-                <Info className="w-4 h-4" />
-              </button>
-            </>
-          )}
-        </div>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    if (onPlay) startTransition(() => onPlay(anime, 1)); 
+                  }}
+                  className="w-10 h-10 rounded-full bg-white hover:bg-zinc-200 text-black flex items-center justify-center shadow-lg transition-transform hover:scale-110 motion-safe:active:scale-[0.96]"
+                  title={currentLang === 'ja' ? '第 1 話を再生' : currentLang.startsWith('zh') ? '播放第 1 集' : 'Play Episode 1'}
+                >
+                  <Play className="w-5 h-5 fill-black ml-0.5" />
+                </button>
+                <button
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    if (onDownload) startTransition(() => onDownload(anime)); 
+                  }}
+                  className="w-9 h-9 rounded-full bg-[#E50914] hover:bg-[#B81D24] text-white flex items-center justify-center shadow-lg transition-transform hover:scale-110 motion-safe:active:scale-[0.96]"
+                  title={currentLang === 'ja' ? 'ダウンロード' : currentLang.startsWith('zh') ? '下載此動漫' : 'Download Series'}
+                >
+                  <Download className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    if (onMoreInfo) startTransition(() => onMoreInfo(anime)); 
+                  }}
+                  className="w-9 h-9 rounded-full bg-zinc-800/90 hover:bg-zinc-700 text-white flex items-center justify-center shadow-lg transition-transform hover:scale-110 motion-safe:active:scale-[0.96]"
+                  title={currentLang === 'ja' ? '詳細・エピソード一覧' : currentLang.startsWith('zh') ? '詳細資訊與集數' : 'Details & Episodes'}
+                >
+                  <Info className="w-4 h-4" />
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

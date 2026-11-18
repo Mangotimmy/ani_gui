@@ -17,6 +17,59 @@
     <link rel="preconnect" href="https://s4.anilist.co" crossorigin />
     <link rel="dns-prefetch" href="https://s4.anilist.co" />
     <link rel="preconnect" href="https://img.youtube.com" crossorigin />
+    <script>
+      // Apply saved theme/zoom and preload the cached hero banner before JS bundles evaluate,
+      // eliminating post-hydration root style recalculation and the 860ms+ LCP discovery delay.
+      (function () {
+        try {
+          var root = document.documentElement;
+          var theme = localStorage.getItem('aniflix_theme') || 'dark';
+          var isLight = theme === 'light' || (theme === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+          root.classList.add(isLight ? 'theme-light' : 'theme-dark');
+          var rawScale = localStorage.getItem('aniflix_ui_scale');
+          if (rawScale && !window.aniflixDesktop) {
+            var s = Math.max(0.6, Math.min(2.0, Math.round((Number(rawScale) || 1.0) * 100) / 100));
+            if (s !== 1) root.style.zoom = String(s);
+          }
+          var rawCache = localStorage.getItem('aniflix_home_cache_v2');
+          if (!rawCache) return;
+          var parsed = JSON.parse(rawCache);
+          var list = (Array.isArray(parsed.trending) && parsed.trending.length > 0) ? parsed.trending : parsed.popular;
+          if (!Array.isArray(list) || !list.length) return;
+          var r18Raw = localStorage.getItem('aniflix_hide_r18');
+          var hideR18 = r18Raw !== null ? r18Raw === 'true' : true;
+          var hero = null;
+          for (var i = 0; i < list.length; i++) {
+            var a = list[i];
+            if (!a) continue;
+            if (hideR18 && (a.isAdult || (a.genres && a.genres.indexOf('Hentai') !== -1))) continue;
+            hero = a;
+            break;
+          }
+          if (!hero) return;
+          var rawUrl = '';
+          if (typeof hero.bannerImage === 'string' && hero.bannerImage) rawUrl = hero.bannerImage;
+          else if (typeof hero.image === 'string' && hero.image) rawUrl = hero.image;
+          else if (typeof hero.coverImage === 'string' && hero.coverImage) rawUrl = hero.coverImage;
+          else if (hero.coverImage && typeof hero.coverImage === 'object') {
+            rawUrl = hero.coverImage.extraLarge || hero.coverImage.large || hero.coverImage.medium || '';
+          }
+          rawUrl = rawUrl ? rawUrl.trim() : '';
+          if (!rawUrl || rawUrl.indexOf('data:') === 0 || rawUrl.indexOf('blob:') === 0) return;
+          var href = (rawUrl.indexOf('/api/') === 0 || rawUrl.indexOf('/assets/') === 0 || rawUrl.indexOf('/build/') === 0 || rawUrl.indexOf('http://localhost:3001/api/') === 0)
+            ? rawUrl
+            : (rawUrl.indexOf('http://') === 0 || rawUrl.indexOf('https://') === 0)
+              ? '/api/proxy/image?url=' + encodeURIComponent(rawUrl)
+              : rawUrl;
+          var link = document.createElement('link');
+          link.rel = 'preload';
+          link.as = 'image';
+          link.setAttribute('fetchpriority', 'high');
+          link.href = href;
+          document.head.appendChild(link);
+        } catch (e) {}
+      })();
+    </script>
     <style>
       /* Critical inline CSS: paints the app shell immediately instead of a white flash
          while the JS bundle downloads and evaluates. */
