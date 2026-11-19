@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { getPlatformInfo, getExternalPlayerLinks } from '../utils/platform.js';
 import { toCachedImageUrl } from '../utils/image.js';
+import { getActiveNextAiring, getMaxAiredCap } from '../utils/schedule.js';
 import { ThumbnailImage } from './ThumbnailImage.jsx';
 
 
@@ -729,9 +730,7 @@ export default function VideoPlayer({
           chineseInfo?.titleZh
         ].filter(Boolean);
 
-        const maxAiredCap = (anime?.nextAiringEpisode?.episode && anime.nextAiringEpisode.episode > 1)
-          ? (anime.nextAiringEpisode.episode - 1)
-          : undefined;
+        const maxAiredCap = getMaxAiredCap(anime);
 
         const streamPromise = fetch('/api/stream', {
           method: 'POST',
@@ -890,9 +889,7 @@ export default function VideoPlayer({
           chineseInfo?.titleZh
         ].filter(Boolean);
 
-        const maxAiredCap = (anime?.nextAiringEpisode?.episode && anime.nextAiringEpisode.episode > 1)
-          ? (anime.nextAiringEpisode.episode - 1)
-          : undefined;
+        const maxAiredCap = getMaxAiredCap(anime);
 
         const params = new URLSearchParams();
         if (candidateTitles.length > 0) params.set('candidates', JSON.stringify(candidateTitles));
@@ -2026,10 +2023,11 @@ export default function VideoPlayer({
 
   const hasTrailer = Boolean(anime?.trailer?.id && (anime.trailer?.site === 'youtube' || !anime.trailer?.site));
   const hasYouTubeSeries = Boolean(availableSources && availableSources.some(s => s.id === 'youtube'));
+  const activeNextAiring = getActiveNextAiring(anime);
   const isUnreleased = Boolean(
     anime?.status === 'NOT_YET_RELEASED' || 
     anime?.episodes === 0 || 
-    (anime?.nextAiringEpisode?.episode && Number(episode) >= anime.nextAiringEpisode.episode) ||
+    (activeNextAiring?.episode && Number(episode) >= activeNextAiring.episode) ||
     errorMessage?.toLowerCase().includes('not officially aired') ||
     errorMessage?.includes('尚未正式開播')
   );

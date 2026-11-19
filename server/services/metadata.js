@@ -6,7 +6,7 @@ import * as OpenCC from 'opencc-js';
 import { enrichWithChineseTitles, enrichWithChineseTitlesAsync, resolveTitleZh, setMachineTranslator, getCachedTitleEntry } from './chineseTitleService.js';
 import { BoundedCache } from './cache.js';
 import { DATA_DIR } from './paths.js';
-import { lookupAlias, getCachedSearch, setCachedSearch, getCachedAnimeDetails, setCachedAnimeDetails } from './db.js';
+import { lookupAlias, getCachedSearch, setCachedSearch, getCachedAnimeDetails, getCachedAnimeDetailsEntry, setCachedAnimeDetails } from './db.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -183,6 +183,45 @@ const MEDIA_FIELDS = `
 const metadataListCache = new BoundedCache(300, 45 * 60 * 1000); // 45 min TTL
 const detailsCache = new BoundedCache(500, 30 * 60 * 1000); // 30 min TTL
 const searchCache = new BoundedCache(300, 15 * 60 * 1000); // 15 min TTL
+const ONGOING_DETAILS_TTL_MS = 30 * 60 * 1000; // 30 min max SQLite TTL for RELEASING / NOT_YET_RELEASED anime
+
+// Recompute timeUntilAiring dynamically from airingAt and drop expired nextAiringEpisode entries
+// so cached metadata never claims an already-aired episode is still upcoming.
+export function refreshNextAiring(anime, nowSec = Math.floor(Date.now() / 1000)) {
+  if (!anime || typeof anime !== 'object' || !anime.nextAiringEpisode) return anime;
+  const next = anime.nextAiringEpisode;
+  if (typeof next.airingAt === 'number') {
+    const remaining = next.airingAt - nowSec;
+    if (remaining <= 0) {
+      return { ...anime, nextAiringEpisode: null };
+    }
+    return {
+      ...anime,
+      nextAiringEpisode: {
+        ...next,
+        timeUntilAiring: remaining
+      }
+    };
+  }
+  return anime;
+}
+
+export function isAnimeDetailsFresh(anime, updatedAtMs = null, nowMs = Date.now()) {
+  if (!anime || typeof anime !== 'object') return false;
+  const nowSec = Math.floor(nowMs / 1000);
+  // Immediately stale once the cached nextAiringEpisode has actually aired
+  if (typeof anime.nextAiringEpisode?.airingAt === 'number' && anime.nextAiringEpisode.airingAt <= nowSec) {
+    return false;
+  }
+  // Ongoing and upcoming shows change episode counts / airing schedules frequently;
+  // do not reuse multi-day SQLite snapshots for them.
+  if (anime.status === 'RELEASING' || anime.status === 'NOT_YET_RELEASED') {
+    if (typeof updatedAtMs === 'number' && (nowMs - updatedAtMs) > ONGOING_DETAILS_TTL_MS) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // Helper for fast pagination enrichment: waits briefly on page 1, non-blocking on page > 1
 // while updating metadataListCache once background title resolutions finish.
@@ -288,7 +327,13 @@ export async function getUpcoming(page = 1, perPage = 50) {
 export async function getAiringSchedule(startUnix, endUnix) {
   const cacheKey = `schedule_${startUnix}_${endUnix}`;
   const cached = metadataListCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    return cached.map(item => ({
+      ...item,
+      media: refreshNextAiring(item.media, nowSec)
+    }));
+  }
 
   const query = `
     query ($page: Int, $start: Int, $end: Int) {
@@ -306,7 +351,7 @@ export async function getAiringSchedule(startUnix, endUnix) {
   `;
   const items = [];
   for (let page = 1; page <= 6; page++) {
-    const data = await anilistQuery(query, { page, start: startUnix, end: endUnix });
+    const data = await anilistQuery(query, { page, start: startUnix - 1, end: endUnix });
     const rows = data?.Page?.airingSchedules || [];
     items.push(...rows);
     if (!data?.Page?.pageInfo?.hasNextPage) break;
@@ -314,10 +359,11 @@ export async function getAiringSchedule(startUnix, endUnix) {
 
   const visible = items.filter(r => r.media && !r.media.isAdult);
   const enriched = await enrichWithChineseTitlesAsync(visible.map(r => r.media), { budgetMs: 4000 });
+  const nowSec = Math.floor(Date.now() / 1000);
   const result = visible.map((r, i) => ({
     episode: r.episode,
     airingAt: r.airingAt,
-    media: enriched[i] || r.media
+    media: refreshNextAiring(enriched[i] || r.media, nowSec)
   }));
   if (result.length > 0) metadataListCache.set(cacheKey, result);
   return result;
@@ -1032,15 +1078,22 @@ export async function getAnimeDetails(id) {
   const numId = parseInt(id, 10);
   if (!numId || isNaN(numId)) return null;
 
-  // 1. In-memory cache hit
+  // 1. In-memory cache hit (invalidate if ongoing/upcoming airing time has passed)
   const cached = detailsCache.get(numId);
-  if (cached && Array.isArray(cached.relations)) return cached;
+  if (cached && Array.isArray(cached.relations)) {
+    if (isAnimeDetailsFresh(cached)) {
+      return refreshNextAiring(cached);
+    }
+    detailsCache.delete(numId);
+  }
 
-  // 2. Persistent SQLite disk cache hit
-  const dbCached = getCachedAnimeDetails(numId);
-  if (dbCached && Array.isArray(dbCached.relations)) {
-    detailsCache.set(numId, dbCached);
-    return dbCached;
+  // 2. Persistent SQLite disk cache hit (enforce short TTL for RELEASING / NOT_YET_RELEASED anime
+  //    and invalidate immediately once cached nextAiringEpisode.airingAt has passed)
+  const dbEntry = getCachedAnimeDetailsEntry(numId);
+  if (dbEntry?.data && Array.isArray(dbEntry.data.relations) && isAnimeDetailsFresh(dbEntry.data, dbEntry.updatedAt)) {
+    const fresh = refreshNextAiring(dbEntry.data);
+    detailsCache.set(numId, fresh);
+    return fresh;
   }
 
   const query = `
@@ -1083,11 +1136,12 @@ export async function getAnimeDetails(id) {
 
   // 3. Fallback when AniList is rate-limited (HTTP 429), down, or timed out
   if (!media) {
-    // Check stale SQLite cache (ignore expiration)
+    // Check stale SQLite cache (ignore expiration, but strip expired nextAiringEpisode)
     const staleDb = getCachedAnimeDetails(numId, 0);
     if (staleDb) {
-      detailsCache.set(numId, staleDb);
-      return staleDb;
+      const sanitized = refreshNextAiring(staleDb);
+      detailsCache.set(numId, sanitized, 2 * 60 * 1000);
+      return sanitized;
     }
 
     // Check in-memory local candidate pool (from trending / search / genres)
@@ -1095,11 +1149,11 @@ export async function getAnimeDetails(id) {
     const foundInPool = pool.find(item => item && Number(item.id) === numId);
     if (foundInPool) {
       const enriched = await enrichWithChineseTitlesAsync([foundInPool], { budgetMs: 1500 });
-      const fallbackResult = {
+      const fallbackResult = refreshNextAiring({
         ...(enriched[0] || foundInPool),
         relations: []
-      };
-      detailsCache.set(numId, fallbackResult);
+      });
+      detailsCache.set(numId, fallbackResult, 2 * 60 * 1000);
       setCachedAnimeDetails(numId, fallbackResult);
       return fallbackResult;
     }

@@ -52,3 +52,44 @@ export function formatAirTime(unixSeconds, lang) {
     hour: '2-digit', minute: '2-digit', hour12: false
   }).format(new Date(unixSeconds * 1000));
 }
+
+/**
+ * Return a live nextAiringEpisode object only if the episode has NOT aired yet,
+ * recomputing `timeUntilAiring` dynamically from `airingAt` instead of trusting
+ * stale snapshot values cached earlier.
+ */
+export function getActiveNextAiring(anime, nowSec = Math.floor(Date.now() / 1000)) {
+  const next = anime?.nextAiringEpisode;
+  if (!next || !next.episode) return null;
+  if (typeof next.airingAt === 'number') {
+    const remaining = next.airingAt - nowSec;
+    if (remaining <= 0) return null;
+    return { ...next, timeUntilAiring: remaining };
+  }
+  if (typeof next.timeUntilAiring === 'number' && next.timeUntilAiring > 0) {
+    return next;
+  }
+  return null;
+}
+
+/**
+ * Maximum episode number known to have aired, ignoring expired nextAiringEpisode snapshots.
+ */
+export function getMaxAiredCap(anime, nowSec = Math.floor(Date.now() / 1000)) {
+  const active = getActiveNextAiring(anime, nowSec);
+  return (active?.episode && active.episode > 1) ? (active.episode - 1) : undefined;
+}
+
+/**
+ * Format remaining seconds until airing (e.g. "2d 3h", "5h 20m", "15m", "< 1m").
+ */
+export function formatTimeUntilAiring(secs) {
+  if (typeof secs !== 'number' || !Number.isFinite(secs) || secs <= 0) return 'Soon';
+  const days = Math.floor(secs / 86400);
+  const hours = Math.floor((secs % 86400) / 3600);
+  const mins = Math.floor((secs % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  if (mins > 0) return `${mins}m`;
+  return '< 1m';
+}

@@ -14,7 +14,7 @@ function ScheduleItem({ item, lang, nowSec, onOpen, t }) {
     <button
       type="button"
       onClick={() => onOpen(item.media)}
-      className="schedule-item group w-full flex items-center gap-3 p-2 rounded-xl bg-zinc-900/70 border border-white/[0.06] text-left transition-[background-color,scale] duration-150 enabled:active:scale-[0.96] hover:bg-zinc-800/80"
+      className="schedule-item group w-full flex items-center gap-2.5 p-2 rounded-xl bg-zinc-900/70 border border-white/[0.06] text-left transition-[background-color,scale] duration-150 enabled:active:scale-[0.96] hover:bg-zinc-800/80"
     >
       <img
         src={pickCover(item.media)}
@@ -26,13 +26,15 @@ function ScheduleItem({ item, lang, nowSec, onOpen, t }) {
         className="w-11 h-[62px] rounded-md object-cover shrink-0 bg-zinc-800 outline outline-1 -outline-offset-1 outline-white/10"
       />
       <span className="min-w-0 flex-1">
-        <span className="block text-xs font-bold text-white line-clamp-2 text-pretty">{title}</span>
-        <span className="mt-1 flex items-center gap-2 text-[11px] text-zinc-400">
-          <span className="font-semibold text-cyan-300 tabular-nums">{formatAirTime(item.airingAt, lang)}</span>
-          <span aria-hidden="true">·</span>
-          <span>{formatEpisode(lang, item.episode)}</span>
+        <span className="block text-xs font-bold text-white line-clamp-2 text-pretty leading-snug">{title}</span>
+        <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-zinc-400">
+          <span className="inline-flex items-center gap-1 whitespace-nowrap">
+            <span className="font-semibold text-cyan-300 tabular-nums">{formatAirTime(item.airingAt, lang)}</span>
+            <span aria-hidden="true">·</span>
+            <span>{formatEpisode(lang, item.episode)}</span>
+          </span>
           {aired && (
-            <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400">{t('aired')}</span>
+            <span className="ml-auto lg:ml-0 whitespace-nowrap shrink-0 text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400">{t('aired')}</span>
           )}
         </span>
       </span>
@@ -47,7 +49,12 @@ export default function ScheduleView({ currentLang = 'zh-TW', t, onOpenAnime }) 
   const [status, setStatus] = useState('loading'); // loading | ready | error
   const [selectedDay, setSelectedDay] = useState(todayIdx);
   const tabRefs = useRef([]);
-  const nowSec = Math.floor(Date.now() / 1000);
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const dayNames = useMemo(() => {
     const fmt = new Intl.DateTimeFormat(currentLang, { weekday: 'long' });

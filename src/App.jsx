@@ -6,7 +6,7 @@ import AnimeCarousel from './components/AnimeCarousel';
 import DownloadManager from './components/DownloadManager';
 import AnimeCard from './components/AnimeCard';
 import MarqueeTicker from './components/animata/MarqueeTicker';
-import { getDayRange, fetchSchedule } from './utils/schedule';
+import { getDayRange, fetchSchedule, getMaxAiredCap } from './utils/schedule';
 import { getPlatformInfo } from './utils/platform';
 
 // Code-split heavy modals to eliminate main-thread evaluation on boot and minimize INP latency
@@ -1388,9 +1388,7 @@ function hasHomeCache() {
           anime.titleZhCN,
           anime.titleZh
         ].filter(Boolean);
-        const maxAiredCap = (anime.nextAiringEpisode?.episode && anime.nextAiringEpisode.episode > 1) 
-          ? anime.nextAiringEpisode.episode - 1 
-          : undefined;
+        const maxAiredCap = getMaxAiredCap(anime);
 
         const res = await fetch('/api/stream', {
           method: 'POST',

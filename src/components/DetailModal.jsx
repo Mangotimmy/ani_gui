@@ -9,6 +9,7 @@ import {
 import { getAnimeCoverUrl, getAnimeBannerUrl, toCachedImageUrl } from '../utils/image.js';
 import { ThumbnailImage } from './ThumbnailImage.jsx';
 import { pickAnimeTitle } from '../utils/titles.js';
+import { getActiveNextAiring, getMaxAiredCap, formatTimeUntilAiring } from '../utils/schedule.js';
 import AnimeComments from './AnimeComments';
 import AnimeInfoLinks from './AnimeInfoLinks';
 
@@ -83,14 +84,34 @@ export default function DetailModal({
 
   // Complete Media Metadata from /api/anime/:id (studios, format, externalLinks, idMal, duration)
   const [detailedAnime, setDetailedAnime] = useState(null);
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
   const latestAnimeIdRef = useRef(anime?.id);
   latestAnimeIdRef.current = anime?.id;
 
-  const activeAnime = useMemo(() => ({
-    ...(anime || {}),
-    ...(detailedAnime || {}),
-    titleZh: chineseInfo?.titleZh || anime?.titleZh || detailedAnime?.titleZh
-  }), [anime, detailedAnime, chineseInfo]);
+  useEffect(() => {
+    const timer = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const activeAnime = useMemo(() => {
+    const merged = {
+      ...(anime || {}),
+      ...(detailedAnime || {}),
+      titleZh: chineseInfo?.titleZh || anime?.titleZh || detailedAnime?.titleZh
+    };
+    // If detailedAnime came from a stale fallback without an upcoming episode,
+    // keep the caller's (e.g. fresh schedule) future nextAiringEpisode while still ongoing.
+    if (
+      detailedAnime &&
+      detailedAnime.status !== 'FINISHED' &&
+      detailedAnime.status !== 'CANCELLED' &&
+      !getActiveNextAiring(detailedAnime, nowSec)
+    ) {
+      const callerNext = getActiveNextAiring(anime, nowSec);
+      if (callerNext) merged.nextAiringEpisode = callerNext;
+    }
+    return merged;
+  }, [anime, detailedAnime, chineseInfo, nowSec]);
 
   const title = activeAnime.title?.english || activeAnime.title?.romaji || activeAnime.title?.native || 'Anime Details';
   const nativeTitle = activeAnime.title?.native;
@@ -99,12 +120,10 @@ export default function DetailModal({
   const synopsis = activeAnime.description?.replace(/<[^>]*>/g, '') || 'No synopsis provided.';
 
   const totalScheduled = activeAnime.episodes || 12;
-  const nextAiring = activeAnime.nextAiringEpisode;
+  const nextAiring = getActiveNextAiring(activeAnime, nowSec);
   const isUnreleased = activeAnime.status === 'NOT_YET_RELEASED';
   const isFinished = activeAnime.status === 'FINISHED' || activeAnime.status === 'CANCELLED';
-  const maxAiredCap = (nextAiring?.episode && nextAiring.episode > 1)
-    ? (nextAiring.episode - 1)
-    : undefined;
+  const maxAiredCap = getMaxAiredCap(activeAnime, nowSec);
 
   const fallbackAiredEpisodes = useMemo(() => {
     if (isUnreleased) return [];
@@ -120,7 +139,10 @@ export default function DetailModal({
     return [];
   }, [isUnreleased, isFinished, totalScheduled, maxAiredCap, episodesSyncAttempted, uploadedEpisodes.length]);
 
-  const effectiveEpisodes = uploadedEpisodes.length > 0 ? uploadedEpisodes : fallbackAiredEpisodes;
+  const effectiveEpisodes = useMemo(() => {
+    const base = uploadedEpisodes.length > 0 ? uploadedEpisodes : fallbackAiredEpisodes;
+    return maxAiredCap ? base.filter(ep => ep <= maxAiredCap) : base;
+  }, [uploadedEpisodes, fallbackAiredEpisodes, maxAiredCap]);
 
   // 1. Fetch live uploaded episodes
   const loadEpisodes = async (forceRefresh = false, { signal, targetId = anime?.id } = {}) => {
@@ -235,7 +257,12 @@ export default function DetailModal({
       setRelations([]);
     }
 
-    if (!Array.isArray(anime.relations) || !anime.description || !anime.externalLinks) {
+    const needsFreshAiring =
+      anime.status === 'RELEASING' ||
+      anime.status === 'NOT_YET_RELEASED' ||
+      Boolean(anime.nextAiringEpisode);
+
+    if (!Array.isArray(anime.relations) || !anime.description || !anime.externalLinks || needsFreshAiring) {
       fetch(`/api/anime/${targetId}`, { signal: controller.signal })
         .then(r => r.json())
         .then(d => {
@@ -424,14 +451,6 @@ export default function DetailModal({
     const start = episodeChunk * CHUNK_SIZE;
     return episodesList.slice(start, start + CHUNK_SIZE);
   }, [episodesList, totalChunks, episodeChunk]);
-
-  const formatTimeUntilAiring = (secs) => {
-    if (!secs) return 'Soon';
-    const days = Math.floor(secs / 86400);
-    const hours = Math.floor((secs % 86400) / 3600);
-    if (days > 0) return `${days}d ${hours}h`;
-    return `${hours}h`;
-  };
 
   const handleTogglePlayerFullscreen = () => {
     if (playerContainerRef.current) {

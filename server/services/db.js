@@ -371,7 +371,7 @@ export function cleanExpiredCache() {
 
 const DETAILS_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-export function getCachedAnimeDetails(id, maxAgeMs = DETAILS_TTL_MS) {
+export function getCachedAnimeDetailsEntry(id, maxAgeMs = DETAILS_TTL_MS) {
   if (!id) return null;
   const numId = Number(id);
   if (!numId || isNaN(numId)) return null;
@@ -380,10 +380,11 @@ export function getCachedAnimeDetails(id, maxAgeMs = DETAILS_TTL_MS) {
     try {
       const row = getAnimeDetailsStmt.get(numId);
       if (!row) return null;
-      if (maxAgeMs && maxAgeMs > 0 && Date.now() - Number(row.updated_at) > maxAgeMs) {
+      const updatedAt = Number(row.updated_at) || 0;
+      if (maxAgeMs && maxAgeMs > 0 && Date.now() - updatedAt > maxAgeMs) {
         return null;
       }
-      return JSON.parse(row.data_json);
+      return { data: JSON.parse(row.data_json), updatedAt };
     } catch {
       return null;
     }
@@ -391,11 +392,17 @@ export function getCachedAnimeDetails(id, maxAgeMs = DETAILS_TTL_MS) {
 
   const item = fallbackDetailsCache.get(numId);
   if (!item) return null;
-  if (maxAgeMs && maxAgeMs > 0 && Date.now() - Number(item.updatedAt || item.updated_at || 0) > maxAgeMs) {
+  const updatedAt = Number(item.updatedAt || item.updated_at || 0);
+  if (maxAgeMs && maxAgeMs > 0 && Date.now() - updatedAt > maxAgeMs) {
     fallbackDetailsCache.delete(numId);
     return null;
   }
-  return item.data || item;
+  return { data: item.data || item, updatedAt };
+}
+
+export function getCachedAnimeDetails(id, maxAgeMs = DETAILS_TTL_MS) {
+  const entry = getCachedAnimeDetailsEntry(id, maxAgeMs);
+  return entry ? entry.data : null;
 }
 
 export function setCachedAnimeDetails(id, data) {
@@ -422,6 +429,7 @@ export default {
   getAllAliases,
   getCachedSearch,
   setCachedSearch,
+  getCachedAnimeDetailsEntry,
   getCachedAnimeDetails,
   setCachedAnimeDetails,
   cleanExpiredCache
